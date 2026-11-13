@@ -101,6 +101,45 @@ def test_public_url_must_be_https() -> None:
         Config.from_env({**GOOD_ENV, "HALLPASS_PUBLIC_URL": "http://hallpass.invalid"})
 
 
+SERVICE_FIELDS = {"AUTHENTIK_URL": "authentik_url", "OIDC_METADATA_URL": "oidc_metadata_url"}
+LOOPBACK_URLS = ["http://127.0.0.1:9000", "http://[::1]:9000", "http://localhost:9000"]
+
+
+@pytest.mark.parametrize("name", list(SERVICE_FIELDS))
+@pytest.mark.parametrize("url", LOOPBACK_URLS)
+def test_http_is_accepted_for_a_loopback_service(name: str, url: str) -> None:
+    config = Config.from_env({**GOOD_ENV, name: url})
+    assert getattr(config, SERVICE_FIELDS[name]) == url
+
+
+@pytest.mark.parametrize("name", list(SERVICE_FIELDS))
+@pytest.mark.parametrize("url", [
+    "http://authentik.invalid/",
+    "http://192.0.2.10:9000/",
+    "http://127.0.0.2:9000/",
+    "http://localhost.invalid:9000/",
+    "ftp://authentik.invalid/",
+])
+def test_plain_http_to_another_host_is_refused_and_named(name: str, url: str) -> None:
+    with pytest.raises(ConfigError, match=name) as info:
+        Config.from_env({**GOOD_ENV, name: url})
+    assert url not in str(info.value)
+
+
+@pytest.mark.parametrize("name", list(SERVICE_FIELDS))
+def test_https_is_accepted_for_a_service(name: str) -> None:
+    config = Config.from_env({**GOOD_ENV, name: "https://authentik.invalid/x"})
+    assert getattr(config, SERVICE_FIELDS[name]) == "https://authentik.invalid/x"
+
+
+@pytest.mark.parametrize("name", list(SERVICE_FIELDS))
+def test_an_unparseable_service_url_is_refused_without_its_value(name: str) -> None:
+    bad = "https://[::1"
+    with pytest.raises(ConfigError, match=name) as info:
+        Config.from_env({**GOOD_ENV, name: bad})
+    assert bad not in str(info.value)
+
+
 def test_bad_bind_and_bad_cookie_domain_are_refused() -> None:
     with pytest.raises(ConfigError, match="HALLPASS_BIND"):
         Config.from_env({**GOOD_ENV, "HALLPASS_BIND": "no-port-here"})

@@ -48,6 +48,26 @@ def _url(env: Mapping[str, str], name: str, schemes: tuple[str, ...]) -> str:
     return value
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _service_url(env: Mapping[str, str], name: str) -> str:
+    """A URL for a service that receives the bearer token or client secret: https only, or http on a loopback host
+    for local development. Plain http to any other host would send those secrets in the clear."""
+    value = _required(env, name)
+    message = f"{name} must be an https:// URL, or http:// on 127.0.0.1, ::1 or localhost"
+    try:
+        parts = urlsplit(value)
+        host = parts.hostname
+    except ValueError:           # e.g. "https://[::1" — never let the raw value surface
+        raise ConfigError(message) from None
+    if not parts.netloc or any(c.isspace() for c in value):
+        raise ConfigError(message)
+    if parts.scheme == "https" or (parts.scheme == "http" and host in LOOPBACK_HOSTS):
+        return value
+    raise ConfigError(message)
+
+
 def _positive_int(env: Mapping[str, str], name: str, default: str) -> int:
     raw = _opt(env, name) or default
     if not _POSITIVE_INT.fullmatch(raw):
@@ -120,10 +140,10 @@ class Config:
         return cls(
             public_url=public_url,
             session_secret=session_secret,
-            authentik_url=_url(env, "AUTHENTIK_URL", ("http", "https")),
+            authentik_url=_service_url(env, "AUTHENTIK_URL"),
             authentik_token=_required(env, "AUTHENTIK_TOKEN"),
             authentik_invite_flow=flow,
-            oidc_metadata_url=_url(env, "OIDC_METADATA_URL", ("http", "https")),
+            oidc_metadata_url=_service_url(env, "OIDC_METADATA_URL"),
             oidc_client_id=_required(env, "OIDC_CLIENT_ID"),
             oidc_client_secret=_required(env, "OIDC_CLIENT_SECRET"),
             cookie_domain=cookie_domain,
