@@ -49,6 +49,31 @@ def session_user_pk(session: dict[str, Any]) -> Any:
     return user.get("pk") if isinstance(user, dict) else user
 
 
+def describe(console: Console, exc: BaseException) -> str:
+    """The redacted text for an error line. An httpx error message can carry the request URL, which holds a user pk,
+    so only its type name is printed."""
+    if isinstance(exc, httpx.HTTPError):
+        return type(exc).__name__
+    return console.error(exc)
+
+
+def compare_others(before: dict[Any, int], after: dict[Any, int], exclude_pk: Any) -> tuple[int, int]:
+    """Returns (dropped, rose): how many other users lost sessions and how many gained them. Each user is compared
+    on its own, so one user's lost session cannot be cancelled out by another user's new login."""
+    dropped = 0
+    rose = 0
+    for key in set(before) | set(after):
+        if key == exclude_pk:
+            continue
+        old = before.get(key, 0)
+        new = after.get(key, 0)
+        if new < old:
+            dropped += 1
+        elif new > old:
+            rose += 1
+    return dropped, rose
+
+
 def new_password() -> str:
     """A random password with no run of 15 or more digits, so the console redactor never rewrites it."""
     while True:
@@ -64,7 +89,7 @@ class SessionCheck:
         self.username = f"hallpass-live-{secrets.token_hex(4)}"
         self.user_pk: int | None = None
         self.test_before = 0
-        self.others_before = 0
+        self.before_counts: dict[Any, int] = {}
         self.delete_status: int | None = None
         self.deleted: Any = None
 
@@ -86,7 +111,7 @@ class SessionCheck:
                 self.console.step(name, f"skipped: {exc}")
             except (StepFailed, httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 failures += 1
-                self.console.step(name, f"error {self.console.error(exc)}")
+                self.console.step(name, f"error {describe(self.console, exc)}")
         return failures
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -113,8 +138,8 @@ class SessionCheck:
     def baseline(self) -> None:
         counts = self.counts(self.list_sessions())
         total = sum(counts.values())
-        per_pk = {str(pk): n for pk, n in sorted(counts.items(), key=lambda kv: str(kv[0]))}
-        self.console.step("baseline", f"total={total} per_user_pk={per_pk}")
+        # Totals only: a user pk is never printed, because the output is transcribed into the published notes.
+        self.console.step("baseline", f"total={total} users_with_sessions={len(counts)}")
 
     def create_user(self) -> None:
         resp = self.client.post(USERS, json={"username": self.username, "name": "Live Check"})
@@ -147,9 +172,12 @@ class SessionCheck:
     def before(self) -> None:
         pk = self.test_pk()
         counts = self.counts(self.list_sessions())
+        self.before_counts = counts
         self.test_before = counts.get(pk, 0)
-        self.others_before = sum(n for key, n in counts.items() if key != pk)
-        self.console.step("before", f"test_user_sessions={self.test_before} others_sessions={self.others_before}")
+        others_with_sessions = sum(1 for key in counts if key != pk)
+        self.console.step(
+            "before", f"test_user_sessions={self.test_before} other_users_with_sessions={others_with_sessions}"
+        )
 
     def bulk_delete(self) -> None:
         pk = self.test_pk()
@@ -172,17 +200,19 @@ class SessionCheck:
             raise Skip("bulk_delete did not run")
         pk = self.test_pk()
         counts = self.counts(self.list_sessions())
-        test_after = counts.get(pk, 0)
-        others_after = sum(n for key, n in counts.items() if key != pk)
-        others_survived = others_after == self.others_before
+        test_remaining = counts.get(pk, 0)
+        others_dropped, others_rose = compare_others(self.before_counts, counts, pk)
+        others_survived = others_dropped == 0
         deleted_matches = self.deleted == self.test_before
-        self.console.step("after", f"test_user_sessions={test_after} others_sessions={others_after}")
+        self.console.step(
+            "after", f"test_user_remaining={test_remaining} others_dropped={others_dropped} others_rose={others_rose}"
+        )
         self.console.line(f"others_survived={others_survived}")
         self.console.line(f"deleted_matches={deleted_matches}")
         problems = [
             name for name, ok in (
-                ("test user still has sessions", test_after == 0),
-                ("other users' sessions changed", others_survived),
+                ("test user still has sessions", test_remaining == 0),
+                ("other users lost sessions", others_survived),
                 ("deleted count differs from the test user's sessions", deleted_matches),
             ) if not ok
         ]
@@ -197,7 +227,7 @@ class SessionCheck:
             resp = self.client.delete(f"{USERS}{self.user_pk}/")
             self.console.step("cleanup test user", f"status={resp.status_code}")
         except httpx.HTTPError as exc:
-            self.console.step("cleanup test user", f"error {self.console.error(exc)}")
+            self.console.step("cleanup test user", f"error {describe(self.console, exc)}")
 
 
 def main() -> int:
@@ -220,7 +250,7 @@ def main() -> int:
         console.line("interrupted")
         return 130
     except Exception as exc:  # noqa: BLE001 - any unexpected error leaves only as its redacted type and message
-        console.line(console.error(exc))
+        console.line(describe(console, exc))
         return 1
     finally:
         if client is not None:

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -109,3 +110,120 @@ def test_missing_token_is_a_config_error_exit_2(monkeypatch, capsys):
     monkeypatch.delenv("AUTHENTIK_TOKEN")
     assert authentik_sessions_check.main() == 2
     assert capsys.readouterr().out.strip() == "config error: AUTHENTIK_TOKEN is not set"
+
+
+# Session check: per-user comparison, and no user pk in any printed line. The pks below are short and distinctive
+# so that the output check cannot pass by accident; they are not 15+ digit runs.
+TEST_PK = 424242
+OTHER_PK = 5550123
+NEW_LOGIN_PK = 6660234
+compare_others = authentik_sessions_check.compare_others
+
+
+def test_compare_others_compares_each_user_not_the_total():
+    # User 1 lost a session and user 2 gained one: the total is unchanged, but the per-user check sees both.
+    assert compare_others({1: 2, 2: 1}, {1: 1, 2: 2}, exclude_pk=9) == (1, 1)
+
+
+def test_compare_others_ignores_the_test_user():
+    assert compare_others({9: 1, 2: 1}, {2: 1}, exclude_pk=9) == (0, 0)
+
+
+def test_compare_others_counts_a_user_who_lost_all_sessions_as_dropped():
+    assert compare_others({2: 1}, {}, exclude_pk=9) == (1, 0)
+
+
+def test_compare_others_counts_a_new_login_as_rose_only():
+    assert compare_others({}, {2: 1}, exclude_pk=9) == (0, 1)
+
+
+def test_compare_others_unchanged_users_count_nothing():
+    assert compare_others({2: 3}, {2: 3}, exclude_pk=9) == (0, 0)
+
+
+@dataclass
+class SessionServerState:
+    """The in-process Authentik session API: a list of session rows, one per session, with a user pk each."""
+
+    sessions: list[dict] = field(default_factory=list)
+    drop_another_user_on_delete: bool = False
+    login_during_delete_pk: int | None = NEW_LOGIN_PK
+
+
+class FakeSessionServer:
+    def __init__(self) -> None:
+        self.state = SessionServerState(sessions=[{"user": {"pk": OTHER_PK}}, {"user": {"pk": OTHER_PK}}])
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "GET" and path == authentik_sessions_check.SESSIONS:
+            return httpx.Response(200, json={"results": self.state.sessions, "pagination": {"next": 0}})
+        if request.method == "POST" and path == authentik_sessions_check.USERS:
+            return httpx.Response(201, json={"pk": TEST_PK, "uuid": "fake-uuid"})
+        if request.method == "POST" and path == f"{authentik_sessions_check.USERS}{TEST_PK}/set_password/":
+            return httpx.Response(204)
+        if request.method == "DELETE" and path == authentik_sessions_check.BULK_DELETE:
+            pk = int(request.url.params["user_pks"])
+            before = len(self.state.sessions)
+            self.state.sessions = [s for s in self.state.sessions if s["user"]["pk"] != pk]
+            deleted = before - len(self.state.sessions)
+            if self.state.drop_another_user_on_delete:
+                # The wrong-user delete the check exists to catch: one of another user's sessions goes too.
+                self.state.sessions = self.state.sessions[1:]
+            if self.state.login_during_delete_pk is not None:
+                self.state.sessions.append({"user": {"pk": self.state.login_during_delete_pk}})
+            return httpx.Response(200, json={"deleted": deleted})
+        if request.method == "DELETE" and path == f"{authentik_sessions_check.USERS}{TEST_PK}/":
+            return httpx.Response(204)
+        return httpx.Response(404, json={"detail": "not found"})
+
+
+def _run_session_check(monkeypatch, capsys, fake: FakeSessionServer) -> tuple[int, str]:
+    def sign_in(self, question):  # the human signs the test user in; the fake records that session
+        fake.state.sessions.append({"user": {"pk": TEST_PK}})
+        return ""
+
+    monkeypatch.setattr(Console, "ask", sign_in)
+    console = Console([TOKEN])
+    client = authentik_sessions_check.make_client(
+        "https://hallpass.invalid:8443", TOKEN, transport=httpx.MockTransport(fake.handle)
+    )
+    check = authentik_sessions_check.SessionCheck(client, console)
+    try:
+        failures = check.run_steps()
+    finally:
+        check.cleanup_all()
+        client.close()
+    return failures, capsys.readouterr().out
+
+
+def test_session_check_passes_when_others_only_log_in(monkeypatch, capsys):
+    failures, out = _run_session_check(monkeypatch, capsys, FakeSessionServer())
+    assert failures == 0
+    assert "others_dropped=0" in out
+    assert "others_rose=1" in out
+    assert "others_survived=True" in out
+    assert "test_user_remaining=0" in out
+    assert "deleted_matches=True" in out
+
+
+def test_session_check_fails_when_another_users_session_is_deleted_and_a_login_offsets_it(monkeypatch, capsys):
+    fake = FakeSessionServer()
+    fake.state.drop_another_user_on_delete = True
+    failures, out = _run_session_check(monkeypatch, capsys, fake)
+    # The total is unchanged (one drop, one login), so only the per-user comparison can catch this.
+    assert failures == 1
+    assert "others_dropped=1" in out
+    assert "others_rose=1" in out
+    assert "others_survived=False" in out
+
+
+def test_session_check_prints_no_user_pk(monkeypatch, capsys):
+    fake = FakeSessionServer()
+    fake.state.drop_another_user_on_delete = True
+    _, out = _run_session_check(monkeypatch, capsys, fake)
+    assert "per_user_pk" not in out
+    for pk in (TEST_PK, OTHER_PK, NEW_LOGIN_PK):
+        assert str(pk) not in out
+    assert "total=" in out
+    assert "users_with_sessions=" in out
