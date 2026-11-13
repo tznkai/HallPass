@@ -41,6 +41,7 @@ TOPICS = [
     "Sessions and CSRF",
     "Admin check",
     "Fluxer address",
+    "Authentik calls",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.

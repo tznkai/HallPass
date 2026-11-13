@@ -33,3 +33,7 @@ as the code they cite.
 ## Fluxer address
 
 - `src/hallpass/registry.py:336` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+
+## Authentik calls
+
+- `src/hallpass/authentik.py:129` `isinstance(pk, bool) or not isinstance(pk, int) or pk <= 0` — the end_sessions guard: a missing, zero, negative or boolean pk is refused before any request, so it can never reach Authentik as a bulk delete that could end every user's sessions
