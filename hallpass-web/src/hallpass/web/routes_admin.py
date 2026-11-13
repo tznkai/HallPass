@@ -1,0 +1,423 @@
+# SPDX-FileCopyrightText: 2026 K. Chen
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""The admin pages: people, invitations, locking, parent links, external identities and groups.
+
+Every route needs an admin (require_admin), and every POST also needs a CSRF token (require_csrf). Each POST writes
+a decision_log row and ends in a 303, so a refresh never repeats it.
+"""
+
+from __future__ import annotations
+
+import logging
+import secrets
+import sqlite3
+from datetime import datetime, timedelta
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import RedirectResponse, Response
+
+from hallpass import registry, text
+from hallpass.auth import require_admin, require_csrf
+from hallpass.authentik import AuthentikError
+from hallpass.logs import log_event
+from hallpass.registry import LinkRefused, NoSuchGroup, Person
+from hallpass.web.pages import page
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/admin")
+Admin = Annotated[Person, Depends(require_admin)]
+WRITE = [Depends(require_csrf)]
+WarningParam = Annotated[str | None, Query(alias="warning")]
+WARNINGS = {"authentik": text.AUTHENTIK_NOT_UPDATED}
+
+
+def _deps(request: Request):
+    return request.app.state.deps
+
+
+def _to(path: str) -> RedirectResponse:
+    return RedirectResponse(path, status_code=303)
+
+
+def _log(conn, *, now: datetime, admin: Person, action: str, target: int | None,
+         detail: dict | None = None) -> None:
+    registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin.id, target_person_id=target,
+                          action=action, detail=detail)
+
+
+# People ----------------------------------------------------------------------------------------------
+
+async def _people_page(request: Request, admin: Person, *, status: int = 200, error: str | None = None) -> Response:
+    people, missing = await _deps(request).db.run(
+        lambda c: (registry.list_people(c), registry.people_missing_fluxer_address(c)))
+    return page(request, "admin/people.html", viewer=admin, status_code=status, error=error, people=people,
+                missing=missing, account_types=registry.ACCOUNT_TYPES, no_address_flag=text.NO_FLUXER_ADDRESS_FLAG)
+
+
+@router.get("/people")
+async def people_page(request: Request, admin: Admin) -> Response:
+    return await _people_page(request, admin)
+
+
+def _create(conn, *, admin: Person, now: datetime, name: str, account_type: str, email: str,
+            phone: str) -> Person:
+    person = registry.create_person(conn, display_name=name, account_type=account_type, email=email, phone=phone,
+                                    now=now)
+    _log(conn, now=now, admin=admin, action="person_created", target=person.id)
+    return person
+
+
+@router.post("/people", dependencies=WRITE)
+async def create_person(request: Request, admin: Admin,
+                        display_name: Annotated[str, Form()] = "",
+                        account_type: Annotated[str, Form()] = "adult",
+                        email: Annotated[str, Form()] = "",
+                        phone: Annotated[str, Form()] = "") -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+    try:
+        person = await deps.db.run(lambda c: _create(c, admin=admin, now=now, name=display_name,
+                                                     account_type=account_type, email=email, phone=phone))
+    except ValueError:
+        return await _people_page(request, admin, status=400, error=text.INVALID_INPUT)
+    await _issue_invitation(deps, person=person, enrollment_ref=person.enrollment_ref, admin=admin, now=now)
+    return _to(f"/admin/people/{person.id}")
+
+
+# Invitations -----------------------------------------------------------------------------------------
+
+async def _issue_invitation(deps, *, person: Person, enrollment_ref: str, admin: Person, now: datetime) -> bool:
+    """Creates an Authentik invitation for an unbound person and stores it. False when Authentik refuses; the person
+    is kept either way, and the page then offers a retry."""
+    try:
+        invitation = await deps.authentik.create_invitation(
+            name=f"hallpass-{person.ref}", flow_slug=deps.config.authentik_invite_flow,
+            enrollment_ref=enrollment_ref, expires=now + timedelta(hours=deps.config.invite_expiry_hours))
+    except AuthentikError as error:
+        log_event(logger, "invitation_created", outcome="authentik_failed", reason=error.reason, person_id=person.id)
+        return False
+
+    def store(conn) -> None:
+        registry.set_invitation(conn, person.id, invitation_pk=invitation.pk, invite_url=invitation.url,
+                                enrollment_ref=enrollment_ref)
+        _log(conn, now=now, admin=admin, action="invitation_created", target=person.id)
+
+    await deps.db.run(store)
+    return True
+
+
+async def _retire_invitation(deps, invitation_pk: str | None) -> None:
+    """Best effort: a live old link carries a ref that no longer matches any person, so it cannot bind."""
+    if invitation_pk is None:
+        return
+    try:
+        await deps.authentik.delete_invitation(invitation_pk)
+    except AuthentikError as error:
+        log_event(logger, "invitation_retired", outcome="authentik_failed", reason=error.reason)
+
+
+@router.post("/people/{person_id}/invite", dependencies=WRITE)
+async def regenerate_invitation(request: Request, person_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+    person = await deps.db.run(lambda c: _unbound_person(c, person_id))
+    if person is None:
+        return _to(f"/admin/people/{person_id}")
+    new_ref = secrets.token_urlsafe(24)
+    if await _issue_invitation(deps, person=person, enrollment_ref=new_ref, admin=admin, now=now):
+        await _retire_invitation(deps, person.invitation_pk)
+    return _to(f"/admin/people/{person_id}")
+
+
+def _unbound_person(conn, person_id: int) -> Person | None:
+    person = registry.get_person(conn, person_id)
+    if person is None:
+        raise registry.NoSuchPerson()
+    return None if person.authentik_uuid is not None else person
+
+
+# Person page -----------------------------------------------------------------------------------------
+
+def _person_context(conn, person: Person) -> dict:
+    parents = registry.parents_of(conn, person.id)
+    children = registry.children_of(conn, person.id)
+    linked = {p.id for p in parents + children}
+    others = [p for p in registry.list_people(conn) if p.id != person.id and p.id not in linked]
+    is_child = person.account_type == "child"
+    return {
+        "person": person,
+        "fluxer_address": registry.fluxer_address(conn, person),
+        "parents": parents,
+        "children": children,
+        "parent_choices": [p for p in others if p.account_type != "child"] if is_child else [],
+        "child_choices": [] if is_child else [p for p in others if p.account_type == "child"],
+        "identities": registry.identities_of(conn, person.id),
+        "identity_kinds": registry.IDENTITY_KINDS,
+        "groups": registry.groups_of(conn, person.id),
+        "account_types": registry.ACCOUNT_TYPES,
+        "no_address_flag": text.NO_FLUXER_ADDRESS_FLAG,
+        "invitation_not_created": text.INVITATION_NOT_CREATED,
+        "invite_hint": text.INVITE_SHOWN_ONCE_HINT,
+    }
+
+
+def _load_person(conn, person_id: int) -> dict:
+    person = registry.get_person(conn, person_id)
+    if person is None:
+        raise registry.NoSuchPerson()
+    return _person_context(conn, person)
+
+
+async def _person_page(request: Request, admin: Person, person_id: int, *, status: int = 200,
+                       error: str | None = None, warning: str | None = None) -> Response:
+    context = await _deps(request).db.run(lambda c: _load_person(c, person_id))
+    return page(request, "admin/person.html", viewer=admin, status_code=status, error=error,
+                warning=WARNINGS.get(warning or ""), **context)
+
+
+@router.get("/people/{person_id}")
+async def person_page(request: Request, person_id: int, admin: Admin, warning: WarningParam = None) -> Response:
+    return await _person_page(request, admin, person_id, warning=warning)
+
+
+@router.post("/people/{person_id}", dependencies=WRITE)
+async def update_person(request: Request, person_id: int, admin: Admin,
+                        display_name: Annotated[str, Form()] = "",
+                        account_type: Annotated[str, Form()] = "adult",
+                        email: Annotated[str, Form()] = "",
+                        phone: Annotated[str, Form()] = "",
+                        fluxer_email_override: Annotated[str, Form()] = "") -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        registry.update_person(conn, person_id, display_name=display_name, account_type=account_type, email=email,
+                               phone=phone, fluxer_email_override=fluxer_email_override)
+        _log(conn, now=now, admin=admin, action="person_updated", target=person_id)
+
+    try:
+        await deps.db.run(change)
+    except LinkRefused as error:
+        return await _person_page(request, admin, person_id, status=400, error=str(error))
+    except ValueError:
+        return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+    return _to(f"/admin/people/{person_id}")
+
+
+# Locking ---------------------------------------------------------------------------------------------
+
+async def _set_locked(request: Request, admin: Person, person_id: int, *, locked: bool) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> Person:
+        person = registry.set_locked(conn, person_id, locked)
+        _log(conn, now=now, admin=admin, action="locked" if locked else "unlocked", target=person_id)
+        return person
+
+    person = await deps.db.run(change)
+    if person.authentik_pk is not None:
+        try:
+            if locked:
+                await deps.authentik.set_active(person.authentik_pk, False)
+                await deps.authentik.end_sessions(person.authentik_pk)
+            else:
+                await deps.authentik.set_active(person.authentik_pk, True)
+        except AuthentikError as error:
+            # The lock is kept in hallpass; the warning tells the admin Authentik still needs the change.
+            log_event(logger, "account_sync", outcome="authentik_failed", reason=error.reason, person_id=person_id)
+            return _to(f"/admin/people/{person_id}?warning=authentik")
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/people/{person_id}/lock", dependencies=WRITE)
+async def lock_person(request: Request, person_id: int, admin: Admin) -> Response:
+    return await _set_locked(request, admin, person_id, locked=True)
+
+
+@router.post("/people/{person_id}/unlock", dependencies=WRITE)
+async def unlock_person(request: Request, person_id: int, admin: Admin) -> Response:
+    return await _set_locked(request, admin, person_id, locked=False)
+
+
+# Parent links ----------------------------------------------------------------------------------------
+
+async def _link(request: Request, admin: Person, *, child_id: int, parent_id: int, page_id: int) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        registry.link_parent(conn, child_id, parent_id, now)
+        _log(conn, now=now, admin=admin, action="parent_linked", target=child_id, detail={"parent_id": parent_id})
+
+    try:
+        await deps.db.run(change)
+    except LinkRefused as error:
+        return await _person_page(request, admin, page_id, status=400, error=str(error))
+    return _to(f"/admin/people/{page_id}")
+
+
+@router.post("/people/{person_id}/parents", dependencies=WRITE)
+async def add_parent(request: Request, person_id: int, admin: Admin,
+                     parent_id: Annotated[int, Form()]) -> Response:
+    return await _link(request, admin, child_id=person_id, parent_id=parent_id, page_id=person_id)
+
+
+@router.post("/people/{person_id}/children", dependencies=WRITE)
+async def add_child(request: Request, person_id: int, admin: Admin,
+                    child_id: Annotated[int, Form()]) -> Response:
+    return await _link(request, admin, child_id=child_id, parent_id=person_id, page_id=person_id)
+
+
+@router.post("/people/{child_id}/parents/{parent_id}/remove", dependencies=WRITE)
+async def remove_parent(request: Request, child_id: int, parent_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        registry.unlink_parent(conn, child_id, parent_id)
+        _log(conn, now=now, admin=admin, action="parent_unlinked", target=child_id, detail={"parent_id": parent_id})
+
+    await deps.db.run(change)
+    return _to(f"/admin/people/{child_id}")
+
+
+# External identities ---------------------------------------------------------------------------------
+
+@router.post("/people/{person_id}/identities", dependencies=WRITE)
+async def add_identity(request: Request, person_id: int, admin: Admin,
+                       service_slug: Annotated[str, Form()] = "",
+                       kind: Annotated[str, Form()] = "",
+                       value: Annotated[str, Form()] = "") -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        if registry.get_person(conn, person_id) is None:
+            raise registry.NoSuchPerson()
+        identity_id = registry.add_identity(conn, person_id, service_slug, kind, value)
+        _log(conn, now=now, admin=admin, action="identity_added", target=person_id,
+             detail={"identity_id": identity_id, "kind": kind})
+
+    try:
+        await deps.db.run(change)
+    except ValueError:
+        return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+    except sqlite3.IntegrityError:
+        return await _person_page(request, admin, person_id, status=400, error=text.IDENTITY_TAKEN)
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/identities/{identity_id}/remove", dependencies=WRITE)
+async def remove_identity(request: Request, identity_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int | None:
+        identity = registry.get_identity(conn, identity_id)
+        if identity is None:
+            return None
+        registry.remove_identity(conn, identity_id)
+        _log(conn, now=now, admin=admin, action="identity_removed", target=identity.person_id,
+             detail={"identity_id": identity_id})
+        return identity.person_id
+
+    owner = await deps.db.run(change)
+    return _to("/admin/people" if owner is None else f"/admin/people/{owner}")
+
+
+# Groups ----------------------------------------------------------------------------------------------
+
+async def _groups_page(request: Request, admin: Person, *, status: int = 200, error: str | None = None) -> Response:
+    groups = await _deps(request).db.run(registry.list_groups)
+    return page(request, "admin/groups.html", viewer=admin, status_code=status, error=error, groups=groups)
+
+
+@router.get("/groups")
+async def groups_page(request: Request, admin: Admin) -> Response:
+    return await _groups_page(request, admin)
+
+
+@router.post("/groups", dependencies=WRITE)
+async def create_group(request: Request, admin: Admin, name: Annotated[str, Form()] = "") -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int:
+        group_id = registry.create_group(conn, name)
+        _log(conn, now=now, admin=admin, action="group_created", target=None, detail={"group_id": group_id})
+        return group_id
+
+    try:
+        group_id = await deps.db.run(change)
+    except ValueError:
+        return await _groups_page(request, admin, status=400, error=text.INVALID_INPUT)
+    except sqlite3.IntegrityError:
+        return await _groups_page(request, admin, status=400, error=text.GROUP_TAKEN)
+    return _to(f"/admin/groups/{group_id}")
+
+
+def _ensure_group(conn, group_id: int) -> None:
+    if not any(group.id == group_id for group in registry.list_groups(conn)):
+        raise NoSuchGroup()
+
+
+def _group_context(conn, group_id: int) -> dict:
+    _ensure_group(conn, group_id)
+    group = next(g for g in registry.list_groups(conn) if g.id == group_id)
+    members = registry.members(conn, group_id)
+    member_ids = {m.id for m in members}
+    return {"group": group, "members": members,
+            "candidates": [p for p in registry.list_people(conn) if p.id not in member_ids]}
+
+
+@router.get("/groups/{group_id}")
+async def group_page(request: Request, group_id: int, admin: Admin) -> Response:
+    context = await _deps(request).db.run(lambda c: _group_context(c, group_id))
+    return page(request, "admin/group.html", viewer=admin, **context)
+
+
+@router.post("/groups/{group_id}/members", dependencies=WRITE)
+async def add_member(request: Request, group_id: int, admin: Admin,
+                     person_id: Annotated[int, Form()]) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        _ensure_group(conn, group_id)
+        if registry.get_person(conn, person_id) is None:
+            raise registry.NoSuchPerson()
+        registry.add_member(conn, group_id, person_id)
+        _log(conn, now=now, admin=admin, action="member_added", target=person_id, detail={"group_id": group_id})
+
+    await deps.db.run(change)
+    return _to(f"/admin/groups/{group_id}")
+
+
+@router.post("/groups/{group_id}/members/{person_id}/remove", dependencies=WRITE)
+async def remove_member(request: Request, group_id: int, person_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        _ensure_group(conn, group_id)
+        registry.remove_member(conn, group_id, person_id)
+        _log(conn, now=now, admin=admin, action="member_removed", target=person_id, detail={"group_id": group_id})
+
+    await deps.db.run(change)
+    return _to(f"/admin/groups/{group_id}")
+
+
+@router.post("/groups/{group_id}/delete", dependencies=WRITE)
+async def delete_group(request: Request, group_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        _ensure_group(conn, group_id)
+        registry.delete_group(conn, group_id)
+        _log(conn, now=now, admin=admin, action="group_deleted", target=None, detail={"group_id": group_id})
+
+    await deps.db.run(change)
+    return _to("/admin/groups")

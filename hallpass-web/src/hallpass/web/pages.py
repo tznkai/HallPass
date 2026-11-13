@@ -13,7 +13,7 @@ from starlette.templating import Jinja2Templates
 
 from hallpass import text
 from hallpass.auth import RedirectToLogin
-from hallpass.registry import NoSuchPerson, Person
+from hallpass.registry import NoSuchGroup, NoSuchPerson, Person
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -39,5 +39,5 @@ async def redirect_to_login(request: Request, exc: RedirectToLogin) -> RedirectR
     return RedirectResponse(f"/login?{urlencode({'next': exc.next_path})}", status_code=303)
 
 
-async def not_found(request: Request, exc: NoSuchPerson) -> HTMLResponse:
+async def not_found(request: Request, exc: NoSuchPerson | NoSuchGroup) -> HTMLResponse:
     return message_page(request, text.NOT_FOUND, 404)

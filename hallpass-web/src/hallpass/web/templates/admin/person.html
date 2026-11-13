@@ -1,0 +1,182 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: {{ person.display_name }}{% endblock %}
+{% block content %}
+<p><a href="/admin/people">All people</a></p>
+<h1>{{ person.display_name }}</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{% if warning %}<p class="notice warning">{{ warning }}</p>{% endif %}
+<p>Type: {{ person.account_type }}. Status: {{ person.status }}.</p>
+
+<section class="stack">
+  <h2>Details</h2>
+  <form method="post" action="/admin/people/{{ person.id }}" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Display name <input name="display_name" value="{{ person.display_name }}" required maxlength="200"></label>
+    <label>Type
+      <select name="account_type">
+        {% for kind in account_types %}
+        <option value="{{ kind }}"{% if kind == person.account_type %} selected{% endif %}>{{ kind }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Email <input type="email" name="email" value="{{ person.email or '' }}"></label>
+    <label>Phone <input type="tel" name="phone" value="{{ person.phone or '' }}"></label>
+    <label>Fluxer address override <input type="email" name="fluxer_email_override" value="{{ person.fluxer_email_override or '' }}"></label>
+    <button type="submit">Save</button>
+  </form>
+</section>
+
+<section class="stack">
+  <h2>Fluxer address</h2>
+  {% if fluxer_address %}
+  <p><code>{{ fluxer_address }}</code></p>
+  {% elif person.account_type == 'child' %}
+  <p class="notice warning">{{ no_address_flag }}</p>
+  {% else %}
+  <p>No Fluxer address.</p>
+  {% endif %}
+</section>
+
+{% if person.authentik_uuid is none %}
+<section class="stack">
+  <h2>Sign-in invitation</h2>
+  {% if person.invite_url %}
+  <p>{{ invite_hint }}</p>
+  <p><code>{{ person.invite_url }}</code></p>
+  {% else %}
+  <p class="notice warning">{{ invitation_not_created }}</p>
+  {% endif %}
+  <form method="post" action="/admin/people/{{ person.id }}/invite">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <button type="submit">{% if person.invite_url %}Make a new link{% else %}Create invitation{% endif %}</button>
+  </form>
+</section>
+{% else %}
+<p>Linked to a sign-in account.</p>
+{% endif %}
+
+{% if person.account_type == 'child' %}
+<section class="stack">
+  <h2>Parents</h2>
+  <ul>
+    {% for parent in parents %}
+    <li>
+      <a href="/admin/people/{{ parent.id }}">{{ parent.display_name }}</a>
+      <form method="post" action="/admin/people/{{ person.id }}/parents/{{ parent.id }}/remove" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+        <button type="submit">Remove</button>
+      </form>
+    </li>
+    {% else %}
+    <li>No parents linked.</li>
+    {% endfor %}
+  </ul>
+  {% if parent_choices %}
+  <form method="post" action="/admin/people/{{ person.id }}/parents" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Add a parent
+      <select name="parent_id">
+        {% for choice in parent_choices %}<option value="{{ choice.id }}">{{ choice.display_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Add parent</button>
+  </form>
+  {% else %}
+  <p>No other adult to add as a parent.</p>
+  {% endif %}
+</section>
+{% else %}
+<section class="stack">
+  <h2>Children</h2>
+  <ul>
+    {% for child in children %}
+    <li>
+      <a href="/admin/people/{{ child.id }}">{{ child.display_name }}</a>
+      <form method="post" action="/admin/people/{{ child.id }}/parents/{{ person.id }}/remove" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+        <button type="submit">Remove</button>
+      </form>
+    </li>
+    {% else %}
+    <li>No children linked.</li>
+    {% endfor %}
+  </ul>
+  {% if child_choices %}
+  <form method="post" action="/admin/people/{{ person.id }}/children" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Add a child
+      <select name="child_id">
+        {% for choice in child_choices %}<option value="{{ choice.id }}">{{ choice.display_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Add child</button>
+  </form>
+  {% else %}
+  <p>No child to add.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="stack">
+  <h2>External identities</h2>
+  <table>
+    <thead><tr><th>Service</th><th>Kind</th><th>Value</th><th></th></tr></thead>
+    <tbody>
+      {% for identity in identities %}
+      <tr>
+        <td>{{ identity.service_slug }}</td>
+        <td>{{ identity.kind }}</td>
+        <td>{{ identity.value }}</td>
+        <td>
+          <form method="post" action="/admin/identities/{{ identity.id }}/remove" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <button type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No identities yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/admin/people/{{ person.id }}/identities" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Service <input name="service_slug" required></label>
+    <label>Kind
+      <select name="kind">
+        {% for kind in identity_kinds %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Value <input name="value" required></label>
+    <button type="submit">Add identity</button>
+  </form>
+</section>
+
+<section class="stack">
+  <h2>Groups</h2>
+  <ul>
+    {% for group in groups %}<li><a href="/admin/groups/{{ group.id }}">{{ group.name }}</a></li>
+    {% else %}<li>Not in any group.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="stack">
+  <h2>Access</h2>
+  {% if person.status == 'locked' %}
+  <form method="post" action="/admin/people/{{ person.id }}/unlock">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <button type="submit">Unlock</button>
+  </form>
+  {% else %}
+  <form method="post" action="/admin/people/{{ person.id }}/lock">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <button type="submit">Lock</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

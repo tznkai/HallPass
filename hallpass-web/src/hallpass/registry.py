@@ -31,6 +31,10 @@ class NoSuchPerson(LookupError):
     """A person id that does not exist."""
 
 
+class NoSuchGroup(LookupError):
+    """A group id that does not exist."""
+
+
 @dataclass(frozen=True)
 class Person:
     id: int
@@ -305,6 +309,12 @@ def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, ki
 
 def remove_identity(conn: sqlite3.Connection, identity_id: int) -> None:
     conn.execute("DELETE FROM external_identity WHERE id = ?", (identity_id,))
+
+
+def get_identity(conn: sqlite3.Connection, identity_id: int) -> ExternalIdentity | None:
+    row = conn.execute("SELECT id, person_id, service_slug, kind, value FROM external_identity WHERE id = ?",
+                       (identity_id,)).fetchone()
+    return None if row is None else ExternalIdentity(*row)
 
 
 def identities_of(conn: sqlite3.Connection, person_id: int) -> list[ExternalIdentity]:

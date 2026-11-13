@@ -18,5 +18,6 @@ SIGNIN_UNAVAILABLE = "Sign-in is unavailable right now. Try again in a few minut
 NOT_FOUND = "That page does not exist."
 INVALID_INPUT = "Check the values and try again."
 IDENTITY_TAKEN = "That identity is already recorded for this service."
+GROUP_TAKEN = "A group with that name already exists."
 AUTHENTIK_NOT_UPDATED = "The change is saved in hallpass, but Authentik could not be updated yet."
 INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."

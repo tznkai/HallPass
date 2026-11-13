@@ -1,0 +1,59 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: people{% endblock %}
+{% block content %}
+<h1>People</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+
+<section class="stack">
+  <h2>Missing Fluxer address</h2>
+  {% if missing %}
+  <p class="notice warning">{{ no_address_flag }}</p>
+  <ul>
+    {% for person in missing %}
+    <li><a href="/admin/people/{{ person.id }}">{{ person.display_name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Every child has a Fluxer address.</p>
+  {% endif %}
+</section>
+
+<section class="stack">
+  <h2>All people</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Signed in</th></tr></thead>
+    <tbody>
+      {% for person in people %}
+      <tr>
+        <td><a href="/admin/people/{{ person.id }}">{{ person.display_name }}</a></td>
+        <td>{{ person.account_type }}</td>
+        <td>{{ person.status }}</td>
+        <td>{{ 'yes' if person.authentik_uuid else 'no' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No people yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="stack">
+  <h2>Add a person</h2>
+  <form method="post" action="/admin/people" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Display name <input name="display_name" required maxlength="200"></label>
+    <label>Type
+      <select name="account_type">
+        {% for kind in account_types %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Email (optional) <input type="email" name="email"></label>
+    <label>Phone (optional) <input type="tel" name="phone"></label>
+    <button type="submit">Create and invite</button>
+  </form>
+</section>
+{% endblock %}

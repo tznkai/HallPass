@@ -38,7 +38,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <a href="/">Hallpass</a>
   {% if viewer %}
   <nav>
-    {% block nav %}{% endblock %}
+    {% if is_admin %}
+    <a href="/admin/people">People</a>
+    <a href="/admin/groups">Groups</a>
+    {% endif %}
     <form method="post" action="/logout" class="inline">
       <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <button type="submit">Sign out</button>

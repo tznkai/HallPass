@@ -14,8 +14,9 @@ from hallpass.auth import OidcClient, RedirectToLogin, add_session_middleware, c
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
-from hallpass.registry import NoSuchPerson
+from hallpass.registry import NoSuchGroup, NoSuchPerson
 from hallpass.web.pages import make_templates, not_found, redirect_to_login
+from hallpass.web.routes_admin import router as admin_router
 from hallpass.web.routes_auth import router as auth_router
 
 
@@ -38,5 +39,7 @@ def create_app(deps: AppDeps) -> FastAPI:
     add_session_middleware(app, deps.config)
     app.add_exception_handler(RedirectToLogin, redirect_to_login)
     app.add_exception_handler(NoSuchPerson, not_found)
+    app.add_exception_handler(NoSuchGroup, not_found)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     return app

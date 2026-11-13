@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.routing import APIRoute
 from starlette.requests import Request
 
 from hallpass import registry
@@ -67,7 +68,7 @@ class FakeOidc:
 
 @dataclass
 class Env:
-    app: FastAPI
+    application: FastAPI
     client: httpx.AsyncClient
     db: Database
     authentik: FakeAuthentikState
@@ -94,8 +95,21 @@ async def make_env(tmp_path: Path, **overrides: str) -> Env:
     app = web_app.create_app(web_app.AppDeps(config=config, db=db, authentik=authentik_client, oidc=oidc,
                                              clock=clock.now))
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE_URL, follow_redirects=False)
-    return Env(app=app, client=client, db=db, authentik=state, authentik_client=authentik_client,
+    return Env(application=app, client=client, db=db, authentik=state, authentik_client=authentik_client,
                oidc=oidc, config=config, clock=clock)
+
+
+def api_routes(app: FastAPI) -> list[APIRoute]:
+    """Every APIRoute in the app, with its full path. FastAPI keeps included routers in app.routes as wrappers whose
+    original_router holds the routes, with the router's prefix already applied to each path."""
+    found: list[APIRoute] = []
+    for entry in app.routes:
+        original = getattr(entry, "original_router", None)
+        if original is not None:
+            found.extend(route for route in original.routes if isinstance(route, APIRoute))
+        elif isinstance(entry, APIRoute):
+            found.append(entry)
+    return found
 
 
 async def sign_in(env: Env, *, sub: str, username: str | None = None, enrollment_ref: str | None = None,
