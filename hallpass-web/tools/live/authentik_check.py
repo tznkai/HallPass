@@ -148,7 +148,7 @@ class AuthentikChecks:
     def invitation_binding(self) -> None:
         if self.invitation_pk is None:
             raise Skip("no invitation was created")
-        self.console.line("Open the invitation URL printed above on the Authentik host, in a private window.")
+        self.console.line("Open the invitation URL printed above, with <authentik> replaced by the instance URL, in a private window.")
         self.console.line("Enrol as a new user and do not give an email address.")
         self.console.ask("Press Enter when the enrolment has finished.")
 
