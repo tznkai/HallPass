@@ -25,7 +25,16 @@ REFUSALS = {
     "not_registered": (text.NOT_REGISTERED, 403),
     "locked": (text.LOCKED, 403),
     "unavailable": (text.SIGNIN_UNAVAILABLE, 503),
+    "sign_in_failed": (text.SIGN_IN_FAILED, 400),
 }
+
+
+def _refused(request: Request, error: SignInError) -> Response:
+    """Ends any partial session and shows the refusal page for the reason. Used by both sign-in steps."""
+    end_session(request)
+    log_event(logger, "sign_in", outcome="refused", reason=error.reason)
+    message, status = REFUSALS[error.reason]
+    return message_page(request, message, status)
 
 
 def safe_next(value: str | None, config: Config) -> str | None:
@@ -60,20 +69,20 @@ async def login(request: Request, next_path: Annotated[str | None, Query(alias="
         request.session.pop("next", None)
     else:
         request.session["next"] = target
-    return await deps.oidc.begin(request, f"{deps.config.public_url}/auth/callback")
+    try:
+        return await deps.oidc.begin(request, f"{deps.config.public_url}/auth/callback")
+    except SignInError as error:
+        return _refused(request, error)
 
 
 @router.get("/auth/callback")
 async def callback(request: Request) -> Response:
     deps = request.app.state.deps
-    identity = await deps.oidc.finish(request)
     try:
+        identity = await deps.oidc.finish(request)
         person = await resolve_sign_in(deps.db, deps.authentik, deps.config, identity, deps.clock())
     except SignInError as error:
-        end_session(request)
-        log_event(logger, "sign_in", outcome="refused", reason=error.reason)
-        message, status = REFUSALS[error.reason]
-        return message_page(request, message, status)
+        return _refused(request, error)
     destination = request.session.get("next") or "/"
     start_session(request, person.id)
     log_event(logger, "sign_in", outcome="ok", person_id=person.id)

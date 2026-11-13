@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,8 @@ from typing import Annotated
 
 import httpx
 import pytest
+from authlib.integrations.base_client import OAuthError
+from authlib.integrations.base_client.errors import MismatchingStateError
 from fastapi import Depends, FastAPI, Request
 
 from hallpass import registry
@@ -32,8 +35,10 @@ from hallpass.auth import (
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
+from hallpass.logs import FIELDS_ATTR
 from hallpass.registry import Person
 from tests.fake_authentik import FakeAuthentikState, add_user, enrol, make_app
+from tests.helpers import StubOidcClient
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 EXPIRES = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
@@ -229,6 +234,50 @@ def test_authlib_oidc_builds_without_contacting_the_provider():
     oidc = AuthlibOidc(metadata_url=ENV["OIDC_METADATA_URL"], client_id=ENV["OIDC_CLIENT_ID"],
                        client_secret=ENV["OIDC_CLIENT_SECRET"])
     assert oidc is not None
+
+
+# OIDC failures: each becomes a SignInError with a reason. The IdP's text and any URL stay out of the error and the log.
+
+LEAK = "idp-text-with-a-token-abc123-and-a-host-authentik-invalid"
+REDIRECT = "https://hallpass.invalid/auth/callback"
+
+
+def stub_oidc(client: StubOidcClient) -> AuthlibOidc:
+    oidc = AuthlibOidc(metadata_url=ENV["OIDC_METADATA_URL"], client_id=ENV["OIDC_CLIENT_ID"],
+                       client_secret=ENV["OIDC_CLIENT_SECRET"])
+    oidc._client = client
+    return oidc
+
+
+@pytest.mark.parametrize(("call", "client", "reason"), [
+    pytest.param("begin", StubOidcClient(redirect_error=httpx.ConnectError(LEAK)), "unavailable",
+                 id="begin-unreachable"),
+    pytest.param("finish", StubOidcClient(token_error=httpx.ConnectError(LEAK)), "unavailable",
+                 id="finish-unreachable"),
+    pytest.param("finish", StubOidcClient(token_error=httpx.HTTPStatusError(LEAK, request=None, response=None)),
+                 "unavailable", id="finish-non-2xx"),
+    pytest.param("finish", StubOidcClient(token_error=OAuthError(error="access_denied", description=LEAK)),
+                 "sign_in_failed", id="finish-idp-refused"),
+    pytest.param("finish", StubOidcClient(token_error=MismatchingStateError(description=LEAK)),
+                 "sign_in_failed", id="finish-replayed-or-stale"),
+    pytest.param("finish", StubOidcClient(token={}), "sign_in_failed", id="finish-no-userinfo"),
+    pytest.param("finish", StubOidcClient(token={"userinfo": {"preferred_username": LEAK}}), "sign_in_failed",
+                 id="finish-no-sub"),
+])
+async def test_oidc_failures_become_sign_in_errors_without_their_text(caplog, call: str, client, reason: str):
+    caplog.set_level(logging.INFO)
+    oidc = stub_oidc(client)
+    pending = oidc.begin(None, REDIRECT) if call == "begin" else oidc.finish(None)
+
+    with pytest.raises(SignInError) as error:
+        await pending
+
+    assert error.value.reason == reason
+    assert LEAK not in str(error.value)
+    assert error.value.__suppress_context__
+    assert LEAK not in caplog.text and "https://" not in caplog.text
+    [record] = [r for r in caplog.records if r.name == "hallpass.auth"]
+    assert getattr(record, FIELDS_ATTR) == {"outcome": "oidc_failed", "reason": reason}
 
 
 # Sessions, CSRF and the request checks, through a small app that is not the hallpass app.

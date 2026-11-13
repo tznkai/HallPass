@@ -4,17 +4,30 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import httpx
 import pytest
+from authlib.integrations.base_client import OAuthError
 
 from hallpass import registry, text
 from tests.fake_authentik import enrol
-from tests.helpers import Env, admin_client, form, invite_person, make_env, sign_in, store_person
+from tests.helpers import (
+    Env,
+    StubOidcClient,
+    admin_client,
+    form,
+    invite_person,
+    make_env,
+    sign_in,
+    store_person,
+    use_oidc_client,
+)
 
 KID_SUB = "00000000-0000-4000-8000-0000000000c1"
 UNKNOWN_SUB = "00000000-0000-4000-8000-0000000000c3"
+LEAK = "idp-text-with-a-token-abc123-and-a-host-authentik-invalid"
 
 
 def session_cookie(response: httpx.Response) -> list[str]:
@@ -142,4 +155,27 @@ async def test_next_is_dropped_when_sign_in_is_refused(env: Env):
     response = await sign_in(env, sub=UNKNOWN_SUB, next_path="/children")
     assert response.status_code == 403
     assert "/children" not in response.headers.get("location", "")
+
+
+@pytest.mark.parametrize(("path", "client", "status", "message"), [
+    pytest.param("/login", StubOidcClient(redirect_error=httpx.ConnectError(LEAK)), 503,
+                 text.SIGNIN_UNAVAILABLE, id="begin-idp-unreachable"),
+    pytest.param("/auth/callback", StubOidcClient(token_error=httpx.ConnectError(LEAK)), 503,
+                 text.SIGNIN_UNAVAILABLE, id="finish-idp-unreachable"),
+    pytest.param("/auth/callback", StubOidcClient(token_error=OAuthError(error="access_denied", description=LEAK)),
+                 400, text.SIGN_IN_FAILED, id="finish-user-denied"),
+    pytest.param("/auth/callback", StubOidcClient(token={}), 400, text.SIGN_IN_FAILED, id="finish-no-userinfo"),
+])
+async def test_idp_failure_shows_the_message_page_not_a_500(env: Env, caplog, path: str, client: StubOidcClient,
+                                                           status: int, message: str):
+    caplog.set_level(logging.INFO)
+    use_oidc_client(env, client)
+
+    response = await env.client.get(path)
+
+    assert response.status_code == status
+    assert message in response.text
+    assert LEAK not in response.text and LEAK not in caplog.text
+    home = await env.client.get("/")
+    assert home.status_code == 303 and home.headers["location"].startswith("/login")
 

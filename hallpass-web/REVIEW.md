@@ -17,18 +17,18 @@ as the code they cite.
 
 ## Enrollment binding
 
-- `src/hallpass/auth.py:179` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
+- `src/hallpass/auth.py:199` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
 - `src/hallpass/registry.py:179` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
-- `src/hallpass/auth.py:89` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
-- `src/hallpass/auth.py:115` `async def require_csrf` — every POST checks the form token and the Origin header
-- `src/hallpass/web/routes_auth.py:31` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
+- `src/hallpass/auth.py:109` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
+- `src/hallpass/auth.py:135` `async def require_csrf` — every POST checks the form token and the Origin header
+- `src/hallpass/web/routes_auth.py:40` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
 
 ## Admin check
 
-- `src/hallpass/auth.py:212` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:232` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 

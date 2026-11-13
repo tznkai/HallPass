@@ -21,8 +21,10 @@ import authlib.deprecate  # noqa: F401
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="The httpx module is deprecated", category=DeprecationWarning)
+    from authlib.integrations.base_client import OAuthError
     from authlib.integrations.starlette_client import OAuth
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
@@ -51,6 +53,26 @@ class OidcClient(Protocol):
     async def finish(self, request: Request) -> Identity: ...
 
 
+class SignInError(Exception):
+    """reason is one of "not_registered", "locked", "unavailable" or "sign_in_failed"."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+# What the OIDC library raises for a refused or unusable sign-in: an IdP error reply or a state mismatch (OAuthError),
+# an unreachable or non-2xx IdP or metadata endpoint (httpx), and a reply without the claims hallpass reads.
+_OIDC_ERRORS = (httpx.HTTPError, OAuthError, KeyError, ValueError)
+
+
+def _oidc_failure(error: Exception) -> SignInError:
+    """Logs the failure by reason only. The exception text can carry URLs or the IdP's own words, so it is dropped."""
+    reason = "unavailable" if isinstance(error, httpx.HTTPError) else "sign_in_failed"
+    log_event(logger, "sign_in", outcome="oidc_failed", reason=reason)
+    return SignInError(reason)
+
+
 class AuthlibOidc:
     """The production OIDC client. Verified against the live IdP, not in unit tests."""
 
@@ -61,21 +83,19 @@ class AuthlibOidc:
         self._client = oauth.create_client("authentik")
 
     async def begin(self, request: Request, redirect_uri: str) -> Response:
-        return await self._client.authorize_redirect(request, redirect_uri)
+        try:
+            return await self._client.authorize_redirect(request, redirect_uri)
+        except _OIDC_ERRORS as error:
+            raise _oidc_failure(error) from None
 
     async def finish(self, request: Request) -> Identity:
-        token = await self._client.authorize_access_token(request)
-        userinfo = token["userinfo"]
-        return Identity(sub=userinfo["sub"], username=userinfo.get("preferred_username"),
-                        enrollment_ref=userinfo.get("hallpass_enrollment"))
-
-
-class SignInError(Exception):
-    """reason is one of "not_registered", "locked" or "unavailable"."""
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(reason)
+        try:
+            token = await self._client.authorize_access_token(request)
+            userinfo = token["userinfo"]
+            return Identity(sub=userinfo["sub"], username=userinfo.get("preferred_username"),
+                            enrollment_ref=userinfo.get("hallpass_enrollment"))
+        except _OIDC_ERRORS as error:
+            raise _oidc_failure(error) from None
 
 
 class RedirectToLogin(Exception):

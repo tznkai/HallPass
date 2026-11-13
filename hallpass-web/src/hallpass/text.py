@@ -15,6 +15,7 @@ NO_FLUXER_ADDRESS_FLAG = ("No Fluxer address: this child has no email, and no li
                           "The child cannot sign in to Fluxer until one is set.")
 CSRF_FAILED = "The form has expired or came from another site. Reload the page and try again."
 SIGNIN_UNAVAILABLE = "Sign-in is unavailable right now. Try again in a few minutes."
+SIGN_IN_FAILED = "Sign-in did not complete. Start again from the sign-in link."
 NOT_FOUND = "That page does not exist."
 INVALID_INPUT = "Check the values and try again."
 IDENTITY_TAKEN = "That identity is already recorded for this service."

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -16,7 +17,7 @@ from fastapi.routing import APIRoute
 from starlette.requests import Request
 
 from hallpass import registry
-from hallpass.auth import Identity
+from hallpass.auth import AuthlibOidc, Identity
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
@@ -64,6 +65,35 @@ class FakeOidc:
         if self.next_identity is None:
             raise RuntimeError("no identity queued for this sign-in")
         return self.next_identity
+
+
+class StubOidcClient:
+    """Stands in for the Authlib client under AuthlibOidc. Each call raises its error, or returns its token. Used to
+    run the real translation in AuthlibOidc against IdP failures."""
+
+    def __init__(self, *, redirect_error: Exception | None = None, token: object = None,
+                 token_error: Exception | None = None) -> None:
+        self._redirect_error = redirect_error
+        self._token = token
+        self._token_error = token_error
+
+    async def authorize_redirect(self, request, redirect_uri: str):
+        if self._redirect_error is not None:
+            raise self._redirect_error
+        return RedirectResponse(redirect_uri + "?code=stub&state=x", 302)
+
+    async def authorize_access_token(self, request):
+        if self._token_error is not None:
+            raise self._token_error
+        return self._token
+
+
+def use_oidc_client(env: Env, client: StubOidcClient) -> None:
+    """Puts a real AuthlibOidc, built over the stub client, into the running app's dependencies."""
+    oidc = AuthlibOidc(metadata_url=env.config.oidc_metadata_url, client_id=env.config.oidc_client_id,
+                       client_secret=env.config.oidc_client_secret)
+    oidc._client = client
+    env.application.state.deps = dataclasses.replace(env.application.state.deps, oidc=oidc)
 
 
 @dataclass
