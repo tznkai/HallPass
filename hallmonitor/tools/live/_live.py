@@ -27,9 +27,12 @@ def required_env(name: str) -> str:
 
 
 def instance_secrets(base_url: str) -> list[str]:
-    """The forms of the instance address that must never reach the terminal log."""
-    url = httpx.URL(base_url)
-    return [base_url, url.host, url.netloc.decode("ascii")]
+    """The forms of the instance address that must never reach the terminal log. A malformed URL keeps its raw form."""
+    try:
+        url = httpx.URL(base_url)
+    except httpx.InvalidURL:
+        return [base_url]
+    return [base_url, url.host, url.netloc.decode("ascii", "replace")]
 
 
 def make_client(base_url: str, key: str, transport: httpx.BaseTransport | None = None) -> httpx.Client:
@@ -45,11 +48,14 @@ class Console:
     """The only print path. Every line and error passes the redactor first."""
 
     def __init__(self, secrets: Iterable[str]) -> None:
-        self._secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
+        # Longest first: in an alternation the first branch that matches wins, so a longer secret that contains
+        # a shorter one is replaced whole. Matching ignores case, since a host may be echoed in another spelling.
+        ordered = sorted({s for s in secrets if s}, key=len, reverse=True)
+        self._pattern = re.compile("|".join(re.escape(s) for s in ordered), re.IGNORECASE) if ordered else None
 
     def redact(self, text: str) -> str:
-        for secret in self._secrets:
-            text = text.replace(secret, REDACTED)
+        if self._pattern is not None:
+            text = self._pattern.sub(REDACTED, text)
         return DIGIT_RUN.sub("<id>", text)
 
     def line(self, text: str) -> None:
