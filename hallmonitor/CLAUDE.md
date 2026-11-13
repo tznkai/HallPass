@@ -48,8 +48,9 @@ URLs, tokens or message content.
   built at runtime from parts.
 - The private denylist is `docs/private/hallmonitor/denylist.txt` in the main checkout. It is gitignored and absent
   in the published split, so the check skips there. Denylist findings name the path and line only.
-- Private material (real network layout, deployment notes) lives in the main checkout's `docs/private/hallmonitor/`.
-  Never copy it into this directory.
+- Private material lives in the main checkout's `docs/private/`, in two places. Hallmonitor's own material (its
+  denylist, and its service-key environment notes) lives in `docs/private/hallmonitor/`. Shared deployment notes,
+  including the Fluxer SSO setup, live in `docs/private/hallpass/`. Never copy either into this directory.
 
 ## REVIEW.md
 
