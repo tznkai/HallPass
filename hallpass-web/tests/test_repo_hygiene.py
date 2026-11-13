@@ -157,6 +157,7 @@ ALLOWED_HOSTS = frozenset({
     "minecraft.wiki",                             # the Minecraft public wiki
     "developer.valvesoftware.com",                # Valve's public developer documentation
     "unused", "override",                         # placeholder hosts in test fixtures
+    "localhost",                                  # the loopback name the config accepts over http (RFC 6761)
 })
 RESERVED_SUFFIXES = (".invalid", ".test", ".example", ".localhost")  # RFC 2606 and RFC 6761
 # Bare dotted names are checked only when they end in one of these: public TLDs and the names a

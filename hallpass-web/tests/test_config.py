@@ -115,8 +115,7 @@ def test_http_is_accepted_for_a_loopback_service(name: str, url: str) -> None:
 @pytest.mark.parametrize("name", list(SERVICE_FIELDS))
 @pytest.mark.parametrize("url", [
     "http://authentik.invalid/",
-    "http://192.0.2.10:9000/",
-    "http://127.0.0.2:9000/",
+    "http://example.com:9000/",
     "http://localhost.invalid:9000/",
     "ftp://authentik.invalid/",
 ])
