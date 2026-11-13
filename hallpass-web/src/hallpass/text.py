@@ -9,6 +9,8 @@ INVITE_SHOWN_ONCE_HINT = ("This link works once. If it has already been used, or
                           "the administrator can make a new one.")
 LINK_REFUSED_CHILD_TYPE = "Only a person of type child can be linked as a child."
 LINK_REFUSED_PARENT_TYPE = "A child cannot be linked as a parent."
+TYPE_CHANGE_REFUSED_IS_PARENT = "This person has linked children, so they cannot be changed to type child."
+TYPE_CHANGE_REFUSED_HAS_PARENTS = "This child has linked parents. Unlink them before changing the type."
 NO_FLUXER_ADDRESS_FLAG = ("No Fluxer address: this child has no email, and no linked parent has one. "
                           "The child cannot sign in to Fluxer until one is set.")
 CSRF_FAILED = "The form has expired or came from another site. Reload the page and try again."
