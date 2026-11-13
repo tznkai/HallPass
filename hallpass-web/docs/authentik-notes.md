@@ -50,8 +50,9 @@ After a person enrolled through the invite URL without giving an email:
   `session__last_user_agent`.
 - **Per-user session revocation exists as a bulk action:**
   `DELETE /api/v3/core/authenticated_sessions/bulk_delete/?user_pks=<pk>` → 200 `{"deleted": <n>}`. It needs
-  the `authentik_core.delete_authenticatedsession` permission. Seen in the 2026.8.5 source, not exercised by the
-  script.
+  the `authentik_core.delete_authenticatedsession` permission. Seen in the 2026.8.5 source. **Pending:** the
+  bulk_delete check is not yet run live. `tools/live/authentik_sessions_check.py` runs it on a throwaway user,
+  and until that run is recorded here this endpoint is unverified.
 
 ## group_gate
 
@@ -95,3 +96,7 @@ but does not apply while `expiring` is false.
   `DELETE /api/v3/core/authenticated_sessions/bulk_delete/?user_pks=<pk>`, returning `deleted`. Because
   deactivation already deletes sessions, the call after `set_active(False)` is a safety net and normally deletes
   0. The Phase 2 fake models `bulk_delete` and ignores `?user=` as real Authentik does.
+- **Guarding the bulk delete.** An empty or missing `user_pks` must never reach Authentik as "all users". Phase 2's
+  `end_sessions` must (a) refuse to call `bulk_delete` with an empty or missing pk, and (b) Phase 2's fake
+  Authentik must reject a missing or empty `user_pks` with 400 rather than treat it as all. Until the live
+  `authentik_sessions_check.py` run confirms the parameter behaviour, this guard is the only protection.
