@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 K. Chen
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hallpass"
+version = "0.1.0"
+description = "Registry and authorization for neighbourhood services"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSES/AGPL-3.0-or-later.txt"]
+dependencies = [
+    "fastapi>=0.162",
+    "uvicorn>=0.54",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.33",
+    "itsdangerous>=2.2",
+    "httpx>=0.28.1",
+    "authlib>=1.9.5",
+    "aiosmtplib>=5.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.17.2",
+    "reuse>=6.2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hallpass"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "BLE"]
