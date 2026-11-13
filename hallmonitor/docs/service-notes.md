@@ -81,7 +81,7 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
   3. ends the person's Fluxer sessions through `DELETE /v1/admin/users/{id}/sessions` (hallmonitor).
 
   Restoring needs no Fluxer call: hallpass puts the person back in the group and they sign in again. Hallmonitor
-  reports `suspended` once the sessions are ended and `active` when no hold applies; it never sets or reads the
+  reports `suspended` once the sessions are ended and `allowed` when no hold applies; it never sets or reads the
   DISABLED bit as its own state. The key drops `user:temp_ban` and `enforcement:view`, and keeps
   `user:update_flags` only because session termination requires it.
 - **Fluxer account lookup by SSO subject.** Hallmonitor finds a person's Fluxer account from their Authentik uuid
