@@ -21,11 +21,12 @@ import authlib.deprecate  # noqa: F401
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", message="The httpx module is deprecated", category=DeprecationWarning)
-    from authlib.integrations.base_client import OAuthError
+    from authlib.common.errors import AuthlibBaseError
     from authlib.integrations.starlette_client import OAuth
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
+from joserfc.errors import JoseError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 
@@ -61,9 +62,12 @@ class SignInError(Exception):
         super().__init__(reason)
 
 
-# What the OIDC library raises for a refused or unusable sign-in: an IdP error reply or a state mismatch (OAuthError),
-# an unreachable or non-2xx IdP or metadata endpoint (httpx), and a reply without the claims hallpass reads.
-_OIDC_ERRORS = (httpx.HTTPError, OAuthError, KeyError, ValueError)
+# What the OIDC libraries raise for a refused or unusable sign-in. AuthlibBaseError is the base of authlib's OAuth
+# errors (an IdP error reply, a state mismatch) and of its JOSE errors (an ID token that fails the issuer, audience,
+# nonce or expiry checks). JoseError is joserfc's base, raised for a bad signature or an undecodable ID token. httpx
+# covers an unreachable or non-2xx IdP or metadata endpoint, and KeyError and ValueError cover a reply without the
+# claims hallpass reads.
+_OIDC_ERRORS = (httpx.HTTPError, AuthlibBaseError, JoseError, KeyError, ValueError)
 
 
 def _oidc_failure(error: Exception) -> SignInError:
