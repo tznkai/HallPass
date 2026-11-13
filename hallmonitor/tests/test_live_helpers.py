@@ -15,8 +15,8 @@ from _live import Console, instance_secrets  # noqa: E402
 
 TOKEN = "SENTINEL-TOKEN-xyz"
 HOST = "fluxer.invalid"
-BASE = f"https://{HOST}:8443/api"
-ADMIN_BASE = f"https://{HOST}"
+BASE = "https://fluxer.invalid:8443/api"
+ADMIN_BASE = "https://fluxer.invalid"
 USER_ID = "1001"
 DECISION_ID = "5001"
 LONG_ID = "1" * 15  # built at runtime: no 15-digit run is written in this file
@@ -65,7 +65,7 @@ def test_no_secrets_still_masks_long_ids():
 
 def test_malformed_instance_url_keeps_its_raw_form_as_a_secret():
     # httpx refuses this port, so the URL has no parsed host; its raw text is still hidden.
-    raw = f"https://{HOST}:notaport"
+    raw = "https://fluxer.invalid:notaport"
     assert instance_secrets(raw) == [raw]
     assert Console(instance_secrets(raw)).redact(f"at {raw}") == "at <redacted>"
 
