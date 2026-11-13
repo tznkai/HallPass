@@ -14,3 +14,9 @@ TYPE_CHANGE_REFUSED_HAS_PARENTS = "This child has linked parents. Unlink them be
 NO_FLUXER_ADDRESS_FLAG = ("No Fluxer address: this child has no email, and no linked parent has one. "
                           "The child cannot sign in to Fluxer until one is set.")
 CSRF_FAILED = "The form has expired or came from another site. Reload the page and try again."
+SIGNIN_UNAVAILABLE = "Sign-in is unavailable right now. Try again in a few minutes."
+NOT_FOUND = "That page does not exist."
+INVALID_INPUT = "Check the values and try again."
+IDENTITY_TAKEN = "That identity is already recorded for this service."
+AUTHENTIK_NOT_UPDATED = "The change is saved in hallpass, but Authentik could not be updated yet."
+INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."
