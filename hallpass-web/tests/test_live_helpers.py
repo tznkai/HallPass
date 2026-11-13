@@ -17,7 +17,7 @@ from _live import Console, instance_secrets  # noqa: E402
 
 TOKEN = "SENTINEL-TOKEN-xyz"
 HOST = "hallpass.invalid"
-BASE = f"https://{HOST}:8443/api"
+BASE = "https://hallpass.invalid:8443/api"
 LONG_ID = "1" * 15  # built at runtime: no 15-digit run is written in this file
 SHORT_ID = "1" * 14
 
@@ -64,7 +64,7 @@ def test_no_secrets_still_masks_long_ids():
 
 def test_malformed_instance_url_keeps_its_raw_form_as_a_secret():
     # httpx refuses this port, so the URL has no parsed host; its raw text is still hidden.
-    raw = f"https://{HOST}:notaport"
+    raw = "https://hallpass.invalid:notaport"
     assert instance_secrets(raw) == [raw]
     assert Console(instance_secrets(raw)).redact(f"at {raw}") == "at <redacted>"
 
