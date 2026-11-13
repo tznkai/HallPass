@@ -270,14 +270,23 @@ async def add_child(request: Request, person_id: int, admin: Admin,
     return await _link(request, admin, child_id=child_id, parent_id=person_id, page_id=person_id)
 
 
+def _ensure_people(conn, *person_ids: int) -> None:
+    for person_id in person_ids:
+        if registry.get_person(conn, person_id) is None:
+            raise registry.NoSuchPerson()
+
+
 @router.post("/people/{child_id}/parents/{parent_id}/remove", dependencies=WRITE)
 async def remove_parent(request: Request, child_id: int, parent_id: int, admin: Admin) -> Response:
     deps = _deps(request)
     now = deps.clock()
 
     def change(conn) -> None:
-        registry.unlink_parent(conn, child_id, parent_id)
-        _log(conn, now=now, admin=admin, action="parent_unlinked", target=child_id, detail={"parent_id": parent_id})
+        _ensure_people(conn, child_id, parent_id)
+        # Log only a link that existed, so a repeated or stale form records no change that did not happen.
+        if registry.unlink_parent(conn, child_id, parent_id) == 1:
+            _log(conn, now=now, admin=admin, action="parent_unlinked", target=child_id,
+                 detail={"parent_id": parent_id})
 
     await deps.db.run(change)
     return _to(f"/admin/people/{child_id}")
@@ -402,8 +411,10 @@ async def remove_member(request: Request, group_id: int, person_id: int, admin: 
 
     def change(conn) -> None:
         _ensure_group(conn, group_id)
-        registry.remove_member(conn, group_id, person_id)
-        _log(conn, now=now, admin=admin, action="member_removed", target=person_id, detail={"group_id": group_id})
+        _ensure_people(conn, person_id)
+        if registry.remove_member(conn, group_id, person_id) == 1:
+            _log(conn, now=now, admin=admin, action="member_removed", target=person_id,
+                 detail={"group_id": group_id})
 
     await deps.db.run(change)
     return _to(f"/admin/groups/{group_id}")

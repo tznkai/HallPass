@@ -225,8 +225,10 @@ def link_parent(conn: sqlite3.Connection, child_id: int, parent_id: int, now: da
                  (child_id, parent_id, _iso(now)))
 
 
-def unlink_parent(conn: sqlite3.Connection, child_id: int, parent_id: int) -> None:
-    conn.execute("DELETE FROM parent_link WHERE child_id = ? AND parent_id = ?", (child_id, parent_id))
+def unlink_parent(conn: sqlite3.Connection, child_id: int, parent_id: int) -> int:
+    """Removes the link. Returns the rows removed: 0 when there was no such link."""
+    return conn.execute("DELETE FROM parent_link WHERE child_id = ? AND parent_id = ?",
+                        (child_id, parent_id)).rowcount
 
 
 def parents_of(conn: sqlite3.Connection, child_id: int) -> list[Person]:
@@ -269,8 +271,10 @@ def add_member(conn: sqlite3.Connection, grp_id: int, person_id: int) -> None:
     conn.execute("INSERT OR IGNORE INTO grp_member (grp_id, person_id) VALUES (?, ?)", (grp_id, person_id))
 
 
-def remove_member(conn: sqlite3.Connection, grp_id: int, person_id: int) -> None:
-    conn.execute("DELETE FROM grp_member WHERE grp_id = ? AND person_id = ?", (grp_id, person_id))
+def remove_member(conn: sqlite3.Connection, grp_id: int, person_id: int) -> int:
+    """Removes the membership. Returns the rows removed: 0 when the person was not a member."""
+    return conn.execute("DELETE FROM grp_member WHERE grp_id = ? AND person_id = ?",
+                        (grp_id, person_id)).rowcount
 
 
 def members(conn: sqlite3.Connection, grp_id: int) -> list[Person]:

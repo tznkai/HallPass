@@ -256,6 +256,64 @@ async def test_a_parent_cannot_become_a_child_while_linked_children_exist(env: E
     assert (await person_row(env, parent)).account_type == "adult"
 
 
+# Removals: unknown ids and links that do not exist -----------------------------------------------------
+
+async def logged(env: Env, action: str) -> int:
+    return await env.db.run(lambda c: c.execute(
+        "SELECT COUNT(*) FROM decision_log WHERE action = ?", (action,)).fetchone()[0])
+
+
+async def test_removing_with_an_unknown_id_is_not_found_and_logs_nothing(env: Env):
+    await admin_client(env)
+    child = await create_person(env, "Kid", account_type="child")
+    parent = await create_person(env, "Ana")
+    assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    group = new_id(await post(env, "/admin/groups", name="Lunch club"))
+    before = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM decision_log").fetchone()[0])
+
+    for path in [
+        f"/admin/people/999/parents/{parent}/remove",
+        f"/admin/people/{child}/parents/999/remove",
+        f"/admin/groups/{group}/members/999/remove",
+        f"/admin/groups/999/members/{child}/remove",
+    ]:
+        response = await post(env, path)
+        assert response.status_code == 404, path
+        assert text.NOT_FOUND in response.text
+
+    after = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM decision_log").fetchone()[0])
+    assert after == before
+    assert [p.id for p in await env.db.run(lambda c: registry.parents_of(c, child))] == [parent]
+
+
+async def test_removing_a_link_or_membership_that_is_not_there_logs_nothing(env: Env):
+    await admin_client(env)
+    child = await create_person(env, "Kid", account_type="child")
+    parent = await create_person(env, "Ana")
+    group = new_id(await post(env, "/admin/groups", name="Lunch club"))
+
+    assert (await post(env, f"/admin/people/{child}/parents/{parent}/remove")).status_code == 303
+    assert (await post(env, f"/admin/groups/{group}/members/{parent}/remove")).status_code == 303
+    assert await logged(env, "parent_unlinked") == 0
+    assert await logged(env, "member_removed") == 0
+
+
+async def test_removing_a_real_link_and_membership_logs_each_once(env: Env):
+    await admin_client(env)
+    child = await create_person(env, "Kid", account_type="child")
+    parent = await create_person(env, "Ana")
+    group = new_id(await post(env, "/admin/groups", name="Lunch club"))
+    assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    assert (await post(env, f"/admin/groups/{group}/members", person_id=parent)).status_code == 303
+
+    assert (await post(env, f"/admin/people/{child}/parents/{parent}/remove")).status_code == 303
+    assert (await post(env, f"/admin/groups/{group}/members/{parent}/remove")).status_code == 303
+    assert (await post(env, f"/admin/people/{child}/parents/{parent}/remove")).status_code == 303
+
+    assert await logged(env, "parent_unlinked") == 1
+    assert await logged(env, "member_removed") == 1
+
+
 # AC2.3: groups and identities -------------------------------------------------------------------------
 
 async def test_the_admin_manages_groups_and_their_members(env: Env):
