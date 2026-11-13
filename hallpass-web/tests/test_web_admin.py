@@ -120,6 +120,31 @@ async def test_a_failed_invitation_leaves_the_person_and_offers_a_retry(env: Env
     assert INVITE_MARK in (await env.client.get(f"/admin/people/{person_id}")).text
 
 
+async def test_binding_during_a_regeneration_keeps_the_identity_and_discards_the_new_invitation(
+        env: Env, monkeypatch: pytest.MonkeyPatch):
+    await admin_client(env)
+    person_id = await create_person(env, "Kid", account_type="child")
+    [old_pk] = env.authentik.invitations
+    create = env.authentik_client.create_invitation
+
+    async def bind_while_the_new_invitation_is_made(**kwargs):
+        # The person follows the old link in the window between the unbound check and the store.
+        user = enrol(env.authentik, old_pk, "kid1")
+        await env.db.run(lambda c: registry.bind_identity(c, person_id, uuid=user["uuid"], authentik_pk=user["pk"],
+                                                          username="kid1"))
+        return await create(**kwargs)
+
+    monkeypatch.setattr(env.authentik_client, "create_invitation", bind_while_the_new_invitation_is_made)
+    assert (await post(env, f"/admin/people/{person_id}/invite")).status_code == 303
+
+    bound = next(user for user in env.authentik.users.values() if user["username"] == "kid1")
+    row = await person_row(env, person_id)
+    assert row.authentik_uuid == bound["uuid"]
+    assert row.enrollment_ref is None and row.invitation_pk is None and row.invite_url is None
+    assert env.authentik.invitations == {}, "the invitation made during binding must be deleted"
+    assert await logged(env, "invitation_created") == 1
+
+
 # AC1.6: locking ---------------------------------------------------------------------------------------
 
 async def test_locking_blocks_sign_in_and_unlocking_restores_it(env: Env):

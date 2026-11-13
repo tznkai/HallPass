@@ -88,8 +88,9 @@ async def create_person(request: Request, admin: Admin,
 # Invitations -----------------------------------------------------------------------------------------
 
 async def _issue_invitation(deps, *, person: Person, enrollment_ref: str, admin: Person, now: datetime) -> bool:
-    """Creates an Authentik invitation for an unbound person and stores it. False when Authentik refuses; the person
-    is kept either way, and the page then offers a retry."""
+    """Creates an Authentik invitation for an unbound person and stores it. False when Authentik refuses, or when the
+    person bound while the invitation was being made; the person is kept either way. In the second case the new
+    invitation is deleted, because its ref can never match anyone."""
     try:
         invitation = await deps.authentik.create_invitation(
             name=f"hallpass-{person.ref}", flow_slug=deps.config.authentik_invite_flow,
@@ -98,13 +99,18 @@ async def _issue_invitation(deps, *, person: Person, enrollment_ref: str, admin:
         log_event(logger, "invitation_created", outcome="authentik_failed", reason=error.reason, person_id=person.id)
         return False
 
-    def store(conn) -> None:
-        registry.set_invitation(conn, person.id, invitation_pk=invitation.pk, invite_url=invitation.url,
-                                enrollment_ref=enrollment_ref)
+    def store(conn) -> bool:
+        if not registry.set_invitation(conn, person.id, invitation_pk=invitation.pk, invite_url=invitation.url,
+                                       enrollment_ref=enrollment_ref):
+            return False
         _log(conn, now=now, admin=admin, action="invitation_created", target=person.id)
+        return True
 
-    await deps.db.run(store)
-    return True
+    if await deps.db.run(store):
+        return True
+    log_event(logger, "invitation_created", outcome="person_bound", person_id=person.id)
+    await _retire_invitation(deps, invitation.pk)
+    return False
 
 
 async def _retire_invitation(deps, invitation_pk: str | None) -> None:

@@ -184,13 +184,15 @@ def bind_identity(conn: sqlite3.Connection, person_id: int, *, uuid: str, authen
 
 
 def set_invitation(conn: sqlite3.Connection, person_id: int, *, invitation_pk: str, invite_url: str,
-                   enrollment_ref: str) -> None:
+                   enrollment_ref: str) -> bool:
+    """Stores a live invitation on an unbound person. Returns False, storing nothing, when the person is bound or
+    missing: an invitation made while the person was binding must not replace the bound identity's fields."""
     cursor = conn.execute(
-        "UPDATE person SET invitation_pk = ?, invite_url = ?, enrollment_ref = ? WHERE id = ?",
+        "UPDATE person SET invitation_pk = ?, invite_url = ?, enrollment_ref = ? "
+        "WHERE id = ? AND authentik_uuid IS NULL",
         (invitation_pk, invite_url, enrollment_ref, person_id),
     )
-    if cursor.rowcount != 1:
-        raise NoSuchPerson()
+    return cursor.rowcount == 1
 
 
 def set_locked(conn: sqlite3.Connection, person_id: int, locked: bool) -> Person:
