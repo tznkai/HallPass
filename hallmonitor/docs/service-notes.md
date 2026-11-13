@@ -22,9 +22,11 @@ Run 2026-11-13 with `tools/live/fluxer_check.py` against a dedicated test accoun
   - `temp_banned_until` and `enforcement_decision_id` are null on an account with no suspension.
   - The user object also carries `email`, `date_of_birth`, `last_active_ip`, `last_active_location` and more.
     Hallmonitor reads only `id` and `flags` from it and never logs or stores any other field.
-- **Sessions.** `GET /v1/admin/users/{id}/sessions` → count. `DELETE /v1/admin/users/{id}/sessions` → 200, and the
-  test account's open client was signed out at once. A recount straight after the delete still returned 1; whether
-  that was a lagging list or a fresh session from the client is open.
+- **Sessions.**
+  - `GET /v1/admin/users/{id}/sessions` → `{"sessions": [...]}`. The list also holds ended sessions: an entry with
+    `deleted_at` set has been terminated, and only entries with `deleted_at` null are active.
+  - `DELETE /v1/admin/users/{id}/sessions` → 200 `{"terminated_count": <n>}`. Observed: 2 active before, 2
+    terminated, 0 active after, and the test client was signed out at once. It needs `user:update_flags`.
 - **Suspension needs an enforcement decision.** `PUT /v1/admin/users/{id}/ban` with
   `{"duration_hours": 0, "decision": {}}` → 400. In the source the body is
   `{duration_hours, decision: {reason_code, source, automation, statement?, ...}}`, where:
@@ -36,19 +38,39 @@ Run 2026-11-13 with `tools/live/fluxer_check.py` against a dedicated test accoun
   ban route is the only way to set it.
 - **Lift.** Not exercised. In the source a decision ends with
   `POST /v1/admin/enforcement-decisions/{id}/end` and `{"outcome": "lifted" | "reversed", "statement"?}`.
+- **SSO identity lookup.**
+  - `GET /v1/admin/users/{id}/sso-identities` → `{"sso_identities": [{provider_id, subject, user_id, claimed_at}]}`.
+  - `GET /v1/admin/sso-identities?provider_id=<provider_id>&subject=<sub>` → `{"sso_identity": {...} | null}`, and
+    returned the right Fluxer user. Both query parameters are required (subject alone → 400). It needs `user:lookup`.
 - **ACLs.** `GET /v1/admin/api-keys` → 403 for this key, so the key's own ACL list is not visible through it.
-  With the design change below the key needs user lookup and session list/terminate only.
+  With the design change below the key needs `user:lookup`, `user:list_sessions` and `user:update_flags`
+  (Fluxer files session termination under `update_flags`).
 
 ## Fluxer SSO
 
-Pending: configure Fluxer SSO against Authentik and sign in with a plus-address presented as verified.
+Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "Require SSO" off.
 
-Known from the source:
-
-- `sso_enforced` ("Require SSO") refuses every local sign-in (password, passkey, MFA ticket) for every account,
-  admins included, while SSO is enabled. With Authentik down, nobody can sign in.
-- With enforcement on, a verified provider email is synced onto the Fluxer account unless another account already
-  holds that email.
+- **Instance identity mode:** email (`features.account_identity` in `<instance>/.well-known/fluxer`).
+- **Issuer requirements.** Fluxer refuses an `http://` issuer, and refuses a host that resolves to a private
+  address unless `FLUXER_SSO_ALLOW_PRIVATE_ADDRESSES=true` is set on the Fluxer server.
+  The callback is `<fluxer web app>/auth/sso/callback`.
+- **Provider settings.** Subject mode "Based on the User's UUID"; an `email` scope mapping returning the
+  `fluxer_email` attribute with `email_verified: True`; the Authentik application bound to a `fluxer` group.
+- **Plus-address.** A first SSO sign-in with a plus-address presented as verified created a new account, whose
+  email is the plus-address and is verified. On an instance with approval-mode registration the new account
+  waits for approval like any other sign-up. Tested with "Allowed Email Domains" empty.
+- **Subject binding.** Fluxer binds the account to `sub`, and the stored `subject` equals Authentik's bare uuid.
+  A later sign-in with a known `sub` goes straight to that account and ignores the email.
+- **Linking an existing account.** A new `sub` whose verified email matches an existing account with a verified
+  email signed straight into that account and bound it. Per the source it refuses instead
+  (`SSO_ACCOUNT_LINK_REQUIRES_SIGN_IN`) when that account's email is unverified or the instance has email off, and
+  refuses when the account is already bound to another `sub`.
+- **Email sync.** Changing the provider email later did not change the account while "Require SSO" was off. Per the
+  source, sync runs only with enforcement on, and never takes an email another account holds.
+- **Group gate.** A user outside the `fluxer` group got Authentik's "Request has been denied" and never reached
+  Fluxer.
+- **Require SSO** (`sso_enforced`, from the source, not switched on here): refuses every local sign-in (password,
+  passkey, MFA ticket) for every account, admins included. With Authentik down, nobody can sign in.
 
 ## Design changes
 
@@ -60,7 +82,11 @@ Known from the source:
 
   Restoring needs no Fluxer call: hallpass puts the person back in the group and they sign in again. Hallmonitor
   reports `suspended` once the sessions are ended and `active` when no hold applies; it never sets or reads the
-  DISABLED bit as its own state. The key drops `user:temp_ban`, `user:update_flags` and `enforcement:view`.
+  DISABLED bit as its own state. The key drops `user:temp_ban` and `enforcement:view`, and keeps
+  `user:update_flags` only because session termination requires it.
+- **Fluxer account lookup by SSO subject.** Hallmonitor finds a person's Fluxer account from their Authentik uuid
+  with `GET /v1/admin/sso-identities?provider_id=&subject=`. The provider id is configuration (read once from any
+  bound account's identity list); a null result means the person has not signed in to Fluxer yet.
 
 ## Minecraft
 

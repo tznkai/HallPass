@@ -22,7 +22,8 @@ DISABLED_BIT = 38
 DISABLED_MASK = 1 << DISABLED_BIT
 FILL_TEXT = "hallmonitor live check"
 LIFT_STATEMENT = "hallmonitor live check"
-MINIMAL_ACLS = ("user:lookup", "user:temp_ban", "user:update_flags", "user:list_sessions", "enforcement:view")
+# Lookup (user and SSO identity), list sessions, and terminate sessions (which Fluxer files under update_flags).
+MINIMAL_ACLS = ("user:lookup", "user:list_sessions", "user:update_flags")
 DIGITS = re.compile(r"[0-9]+")
 UUID_SHAPE = re.compile(r"[0-9a-fA-F-]{36}")
 USER_FIELDS = ("flags", "temp_banned_until", "enforcement_decision_id")
@@ -102,12 +103,16 @@ def listed_entries(payload: Any) -> list[Any]:
     return []
 
 
-def count_sessions(payload: Any) -> int:
-    if isinstance(payload, list):
-        return len(payload)
+def count_sessions(payload: Any) -> tuple[int, int]:
+    """Returns (active, total). The admin list also returns ended sessions, each with `deleted_at` set."""
     if isinstance(payload, dict) and isinstance(payload.get("sessions"), list):
-        return len(payload["sessions"])
-    raise StepFailed(f"unexpected sessions shape, top_keys={top_keys(payload)}")
+        entries = payload["sessions"]
+    elif isinstance(payload, list):
+        entries = payload
+    else:
+        raise StepFailed(f"unexpected sessions shape, top_keys={top_keys(payload)}")
+    active = sum(1 for s in entries if not (isinstance(s, dict) and s.get("deleted_at")))
+    return active, len(entries)
 
 
 def contains_value(node: Any, wanted: str) -> bool:
@@ -216,24 +221,23 @@ class FluxerChecks:
             raise Skip("the test account exposes no enforcement_decision_id")
         return quote(str(self.decision_id), safe="")
 
-    def session_count(self) -> int:
+    def session_count(self) -> tuple[int, int]:
         resp = self.client.get(f"{self.user_path}/sessions")
         if resp.status_code >= 400:
             raise StepFailed(f"sessions status={resp.status_code}")
         return count_sessions(body(resp))
 
     def sessions(self) -> None:
-        before = self.session_count()
-        self.console.step("sessions before delete", f"count={before}")
-        self.console.line(
-            f"  suspension_alone_ended_sessions={before == 0} "
-            "(only meaningful if the test account had a session before the suspension)"
-        )
+        active, total = self.session_count()
+        self.console.step("sessions before delete", f"active={active} listed={total}")
         resp = self.client.delete(f"{self.user_path}/sessions")
-        self.console.step("sessions delete", f"status={resp.status_code}")
+        payload = body(resp)
+        terminated = payload.get("terminated_count") if isinstance(payload, dict) else None
+        self.console.step("sessions delete", f"status={resp.status_code} terminated_count={terminated}")
         if resp.status_code >= 400:
             raise StepFailed(f"sessions delete status={resp.status_code}")
-        self.console.step("sessions after delete", f"count={self.session_count()}")
+        active, total = self.session_count()
+        self.console.step("sessions after delete", f"active={active} listed={total}")
 
     def decision_owner(self) -> None:
         decision_id = self.require_decision()
@@ -275,11 +279,32 @@ class FluxerChecks:
     def lookup_sso(self) -> None:
         if self.subject is None:
             raise Skip("no --subject given")
-        resp = self.client.get("/v1/admin/sso-identities", params={"subject": self.subject})
+        # The subject lookup needs the provider id too; the user's own identity list supplies it.
+        resp = self.client.get(f"{self.user_path}/sso-identities")
+        payload = body(resp)
+        if resp.status_code >= 400:
+            raise StepFailed(f"user sso-identities status={resp.status_code}")
+        identities = payload.get("sso_identities") if isinstance(payload, dict) else None
+        identities = identities if isinstance(identities, list) else []
+        mine = [i for i in identities if isinstance(i, dict) and i.get("subject") == self.subject]
+        self.console.step(
+            "lookup_sso user identities",
+            f"status={resp.status_code} count={len(identities)} subject_bound={bool(mine)} "
+            f"identity_keys={sorted(identities[0]) if identities and isinstance(identities[0], dict) else []}",
+        )
+        for identity in identities:
+            if isinstance(identity, dict):
+                self.console.line(f"  bound subject={identity.get('subject')}")
+        if not mine or not mine[0].get("provider_id"):
+            raise StepFailed("the subject is not bound to this account, so there is no provider id to look it up by")
+        resp = self.client.get(
+            "/v1/admin/sso-identities",
+            params={"provider_id": mine[0]["provider_id"], "subject": self.subject},
+        )
         payload = body(resp)
         if resp.status_code >= 400:
             raise StepFailed(f"sso-identities status={resp.status_code}")
-        self.console.step("lookup_sso", f"status={resp.status_code} top_keys={top_keys(payload)}")
+        self.console.step("lookup_sso by subject", f"status={resp.status_code} top_keys={top_keys(payload)}")
         self.console.line(f"  returns_fluxer_user_id={contains_value(payload, self.user_id)}")
 
     def acls(self) -> None:
