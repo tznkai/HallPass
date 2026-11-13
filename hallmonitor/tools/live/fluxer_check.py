@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Hand-run Fluxer admin live checks for hallmonitor. Acts only on the --user test account it is given.
 
+Holds no longer ban: a Fluxer hold ends sessions and relies on Require SSO (see docs/service-notes.md). The suspend,
+decision_owner and lift steps are the ban path, and run only with --try-ban. A ban always carries a rule-violation
+decision and notifies the user, so that flag is off by default.
+
 Environment: FLUXER_ADMIN_URL (API base, before /v1), FLUXER_ADMIN_KEY.
 Exit codes: 0 every step ran; 1 at least one step failed; 2 configuration error; 130 interrupted.
 """
@@ -20,8 +24,9 @@ from _live import Console, LiveConfigError, instance_secrets, make_client, requi
 
 DISABLED_BIT = 38
 DISABLED_MASK = 1 << DISABLED_BIT
-FILL_TEXT = "hallmonitor live check"
 LIFT_STATEMENT = "hallmonitor live check"
+SKIP_NO_BAN = "skipped: holds no longer ban (see docs/service-notes.md)"
+BAN_STEPS = ("suspend", "decision_owner", "lift")
 # Lookup (user and SSO identity), list sessions, and terminate sessions (which Fluxer files under update_flags).
 MINIMAL_ACLS = ("user:lookup", "user:list_sessions", "user:update_flags")
 DIGITS = re.compile(r"[0-9]+")
@@ -136,6 +141,7 @@ class FluxerChecks:
         decision_json: dict[str, Any] | None,
         key_owner: str | None,
         subject: str | None,
+        try_ban: bool = False,
     ) -> None:
         self.client = client
         self.console = console
@@ -144,19 +150,36 @@ class FluxerChecks:
         self.decision_json = decision_json
         self.key_owner = key_owner
         self.subject = subject
+        self.try_ban = try_ban
         self.decision_id: Any = None
+        # A ban this run placed and has not seen lifted. Its decision id is None for a ban placed without one.
+        self.ban_active = False
+        self.ban_decision_id: Any = None
         self.failures = 0
 
     def run_steps(self) -> int:
         """Runs every step in order. Returns the number of steps that failed."""
         self.run("lookup", self.lookup)
-        self.run("suspend", self.suspend)
-        self.run("sessions", self.sessions)
-        self.run("decision_owner", self.decision_owner)
-        self.run("lift", self.lift)
+        if self.try_ban:
+            self.run_ban_steps()
+        else:
+            for name in BAN_STEPS:
+                self.console.step(name, SKIP_NO_BAN)
+            self.run("sessions", self.sessions)
         self.run("lookup_sso", self.lookup_sso)
         self.run("acls", self.acls)
         return self.failures
+
+    def run_ban_steps(self) -> None:
+        """Suspend, end sessions, check the owner and lift. A ban still active afterwards is lifted in the finally."""
+        try:
+            self.run("suspend", self.suspend)
+            self.run("sessions", self.sessions)
+            self.run("decision_owner", self.decision_owner)
+            self.run("lift", self.lift)
+        finally:
+            if self.ban_active:
+                self.run("lift after failure", self.lift_after_failure)
 
     def run(self, name: str, step: Callable[[], None]) -> None:
         try:
@@ -192,23 +215,19 @@ class FluxerChecks:
         self.show_user("lookup")
 
     def suspend(self) -> None:
+        """Sends only the --decision-json body (or an empty decision). A refusal names its fields and is not retried."""
         decision: dict[str, Any] = {} if self.decision_json is None else dict(self.decision_json)
         resp = self.put_ban(decision)
         self.console.step("suspend", f"status={resp.status_code} sent_decision_keys={sorted(decision)}")
-        if resp.status_code == 400 and self.decision_json is None:
-            names = error_fields(body(resp))
-            self.console.line(f"  validation error fields={names}")
-            fill = {name: FILL_TEXT for name in names if name not in decision}
-            if not fill:
-                raise StepFailed("400 named no fields; re-run with --decision-json")
-            decision = {**decision, **fill}
-            resp = self.put_ban(decision)
-            self.console.step("suspend retry", f"status={resp.status_code} sent_decision_keys={sorted(decision)}")
         if resp.status_code >= 400:
+            self.console.line(f"  validation error fields={error_fields(body(resp))}")
             raise StepFailed(f"suspend status={resp.status_code}")
+        self.ban_active = True
+        self.ban_decision_id = None
         self.console.line(f"  accepted ban body keys=[duration_hours, decision] response_keys={top_keys(body(resp))}")
         user = self.show_user("lookup after suspend")
         self.decision_id = user.get("enforcement_decision_id")
+        self.ban_decision_id = self.decision_id
 
     def put_ban(self, decision: dict[str, Any] | None) -> httpx.Response:
         payload: dict[str, Any] = {"duration_hours": 0}
@@ -261,6 +280,7 @@ class FluxerChecks:
         self.console.step("lift via decision", f"status={resp.status_code} response_keys={top_keys(body(resp))}")
         if resp.status_code >= 400:
             raise StepFailed(f"lift status={resp.status_code}")
+        self.ban_active = False
         self.show_user("lookup after lift")
         self.run("lift without decision", self.lift_without_decision)
 
@@ -270,11 +290,26 @@ class FluxerChecks:
         if resp.status_code >= 400:
             self.console.line("  the API did not accept a suspension without a decision")
             return
+        self.ban_active = True
+        self.ban_decision_id = None
         resp = self.client.delete(f"{self.user_path}/ban")
         self.console.step("unban without decision", f"status={resp.status_code}")
         if resp.status_code >= 400:
             raise StepFailed(f"unban status={resp.status_code}; the test account may still be suspended")
+        self.ban_active = False
         self.show_user("lookup after unban")
+
+    def lift_after_failure(self) -> None:
+        """Ends a ban this run placed and did not lift: through its decision, or by removing a ban without one."""
+        if self.ban_decision_id is not None:
+            path = f"/v1/admin/enforcement-decisions/{quote(str(self.ban_decision_id), safe='')}/end"
+            resp = self.client.post(path, json={"outcome": "lifted", "statement": LIFT_STATEMENT})
+        else:
+            resp = self.client.delete(f"{self.user_path}/ban")
+        self.console.step("lift after failure", f"status={resp.status_code}")
+        if resp.status_code >= 400:
+            raise StepFailed("the test account may still be suspended; lift it in the admin UI")
+        self.ban_active = False
 
     def lookup_sso(self) -> None:
         if self.subject is None:
@@ -330,8 +365,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Hand-run Fluxer admin live checks against one test account.")
     parser.add_argument("--user", required=True, help="id of a dedicated test account, never a real member")
     parser.add_argument(
+        "--try-ban",
+        action="store_true",
+        help="also run the ban path (suspend, decision_owner, lift). Creates a real enforcement decision and notice; "
+             "off by default",
+    )
+    parser.add_argument(
         "--decision-json",
-        help="JSON object sent as the ban's decision (default: minimal body, then the fields a 400 names)",
+        help="JSON object sent as the ban's decision, used only with --try-ban (default: an empty decision)",
     )
     parser.add_argument("--key-owner", help="account id of the admin key's owner, to compare with decided_by")
     parser.add_argument("--subject", help="Authentik uuid of the SSO test user; enables the lookup_sso step")
@@ -367,15 +408,22 @@ def main() -> int:
 
     extra = [args.user, args.key_owner or "", args.subject or ""]
     console = Console([key, *instance_secrets(base_url), *extra])
-    client = make_client(base_url, key)
-    checks = FluxerChecks(client, console, args.user, decision_json, args.key_owner, args.subject)
+    client: httpx.Client | None = None
     try:
+        client = make_client(base_url, key)
+        checks = FluxerChecks(
+            client, console, args.user, decision_json, args.key_owner, args.subject, try_ban=args.try_ban,
+        )
         failures = checks.run_steps()
     except (KeyboardInterrupt, EOFError):
         console.line("interrupted")
         return 130
+    except Exception as exc:  # noqa: BLE001 - any unexpected error leaves only as its redacted type and message
+        console.line(console.error(exc))
+        return 1
     finally:
-        client.close()
+        if client is not None:
+            client.close()
     return 1 if failures else 0
 
 
