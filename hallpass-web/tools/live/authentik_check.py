@@ -306,16 +306,23 @@ def main() -> int:
         print(f"config error: {exc}")
         return 2
     console = Console([token, *instance_secrets(base_url)])
-    client = make_client(base_url, token)
-    checks = AuthentikChecks(client, console, flow_slug, token_identifier)
+    client: httpx.Client | None = None
     try:
-        failures = checks.run_steps()
+        client = make_client(base_url, token)
+        checks = AuthentikChecks(client, console, flow_slug, token_identifier)
+        try:
+            failures = checks.run_steps()
+        finally:
+            checks.cleanup_all()
     except (KeyboardInterrupt, EOFError):
         console.line("interrupted")
         return 130
+    except Exception as exc:  # noqa: BLE001 - any unexpected error leaves only as its redacted type and message
+        console.line(console.error(exc))
+        return 1
     finally:
-        checks.cleanup_all()
-        client.close()
+        if client is not None:
+            client.close()
     return 1 if failures else 0
 
 
