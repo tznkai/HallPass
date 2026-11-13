@@ -37,6 +37,10 @@ MIN_ANCHOR = 4
 
 TOPICS = [
     "Project layout",
+    "Enrollment binding",
+    "Sessions and CSRF",
+    "Admin check",
+    "Fluxer address",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.
