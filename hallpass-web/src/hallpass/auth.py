@@ -63,10 +63,10 @@ class SignInError(Exception):
 
 
 # What the OIDC libraries raise for a refused or unusable sign-in. AuthlibBaseError is the base of authlib's OAuth
-# errors (an IdP error reply, a state mismatch) and of its JOSE errors (an ID token that fails the issuer, audience,
-# nonce or expiry checks). JoseError is joserfc's base, raised for a bad signature or an undecodable ID token. httpx
-# covers an unreachable or non-2xx IdP or metadata endpoint, and KeyError and ValueError cover a reply without the
-# claims hallpass reads.
+# errors (an IdP error reply, a state mismatch). JoseError is joserfc's base, which authlib uses to validate the ID
+# token: a bad signature, an undecodable token, or a failed issuer, audience, nonce or expiry check. httpx covers an
+# unreachable or non-2xx IdP or metadata endpoint, and KeyError and ValueError cover a reply without the claims
+# hallpass reads.
 _OIDC_ERRORS = (httpx.HTTPError, AuthlibBaseError, JoseError, KeyError, ValueError)
 
 

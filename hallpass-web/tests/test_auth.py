@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,16 +13,10 @@ from typing import Annotated
 
 import httpx
 import pytest
-from authlib.deprecate import AuthlibDeprecationWarning
 from authlib.integrations.base_client import OAuthError
 from authlib.integrations.base_client.errors import MismatchingStateError
-
-# The authlib.jose module warns on import that it is deprecated. Only that message is muted, for this import.
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message="authlib.jose module is deprecated", category=AuthlibDeprecationWarning)
-    from authlib.jose.errors import InvalidClaimError as JoseInvalidClaimError
 from fastapi import Depends, FastAPI, Request
-from joserfc.errors import BadSignatureError
+from joserfc.errors import BadSignatureError, ExpiredTokenError, InvalidClaimError
 
 from hallpass import registry
 from hallpass.auth import (
@@ -270,8 +263,10 @@ def stub_oidc(client: StubOidcClient) -> AuthlibOidc:
                  "sign_in_failed", id="finish-replayed-or-stale"),
     pytest.param("begin", StubOidcClient(redirect_error=OAuthError(error="server_error", description=LEAK)),
                  "sign_in_failed", id="begin-oauth-error"),
-    pytest.param("finish", StubOidcClient(token_error=JoseInvalidClaimError(LEAK)), "sign_in_failed",
+    pytest.param("finish", StubOidcClient(token_error=InvalidClaimError("iss", LEAK)), "sign_in_failed",
                  id="finish-id-token-claim-refused"),
+    pytest.param("finish", StubOidcClient(token_error=ExpiredTokenError("exp", LEAK)), "sign_in_failed",
+                 id="finish-id-token-expired"),
     pytest.param("finish", StubOidcClient(token_error=BadSignatureError(LEAK)), "sign_in_failed",
                  id="finish-id-token-bad-signature"),
     pytest.param("finish", StubOidcClient(token={}), "sign_in_failed", id="finish-no-userinfo"),
