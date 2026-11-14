@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from hallmonitor.adapters.steam import STEAM64_BASE, steam2
+from hallmonitor.adapters.steam import STEAM64_BASE, steam2, valid_steam64
 
 
 def _id64(offset: int) -> str:
@@ -54,3 +54,16 @@ def test_steam2_rejects_an_id_below_the_base_without_echoing_it():
     with pytest.raises(ValueError) as info:
         steam2(below, "0")
     assert below not in str(info.value)
+
+
+@pytest.mark.parametrize("offset", [0, 1, 2 * 4567])
+def test_valid_steam64_accepts_decimal_ids_at_or_above_the_base(offset: int):
+    assert valid_steam64(_id64(offset))
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "12a", " " + "1", "+1", "1_0", "١", "-1", "0" * 40, "9" * 25, str(STEAM64_BASE - 1)],
+)
+def test_valid_steam64_refuses_anything_else_without_raising(value: str):
+    assert not valid_steam64(value)

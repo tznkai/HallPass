@@ -30,7 +30,7 @@ as the code they cite.
 ## Adapter registry
 
 - `src/hallmonitor/adapters/registry.py:23` `ADAPTERS: dict[str, AdapterPlugin] = {` — the one map from adapter name to plugin; an adapter name that is not in this map builds no adapter
-- `src/hallmonitor/adapters/registry.py:30` `def build_adapter(name: str, ctx: AdapterContext)` — the single entry point; a plugin that returns None leaves its service without an adapter, so every subject of that service is reported as `no_adapter`
+- `src/hallmonitor/adapters/registry.py:31` `def build_adapter(name: str, ctx: AdapterContext)` — the single entry point; a plugin that returns None leaves its service without an adapter, so every subject of that service is reported as `no_adapter`
 
 ## RCON framing
 

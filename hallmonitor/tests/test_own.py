@@ -53,3 +53,15 @@ async def test_forget_removes_only_that_pair(db: Database) -> None:
 async def test_own_ref_defaults_to_empty_text(db: Database) -> None:
     await db.run(lambda c: own.record_own(c, "minecraft", "Steve", "", NOW))
     assert await db.run(lambda c: own.own_ref(c, "minecraft", "Steve")) == ""
+
+
+async def test_own_record_reads_the_reference_and_the_time_it_was_placed(db: Database) -> None:
+    later = datetime(2026, 11, 13, 12, 30, tzinfo=UTC)
+    await db.run(lambda c: own.record_own(c, "valheim", "1001", "ban", NOW))
+    assert await db.run(lambda c: own.own_record(c, "valheim", "1001")) == ("ban", NOW)
+    await db.run(lambda c: own.record_own(c, "valheim", "1001", "restore", later))
+    assert await db.run(lambda c: own.own_record(c, "valheim", "1001")) == ("restore", later)
+
+
+async def test_own_record_of_an_unknown_pair_is_none(db: Database) -> None:
+    assert await db.run(lambda c: own.own_record(c, "valheim", "1001")) is None

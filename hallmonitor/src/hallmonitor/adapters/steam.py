@@ -10,6 +10,7 @@ import re
 STEAM64_BASE = (1 << 56) | (1 << 52) | (1 << 32)
 UNIVERSE_DIGITS = frozenset("012345")  # the digit in STEAM_[0-5], as the engine prints it
 DECIMAL = re.compile(r"[0-9]+")
+MAX_DIGITS = 20  # a 64-bit integer has at most 20 decimal digits
 
 
 def steam2(steam_id64: str, universe: str) -> str:
@@ -23,3 +24,11 @@ def steam2(steam_id64: str, universe: str) -> str:
     if value < STEAM64_BASE:
         raise ValueError("steam id is below the SteamID64 base")
     return f"STEAM_{universe}:{value % 2}:{(value - STEAM64_BASE) // 2}"
+
+
+def valid_steam64(steam_id64: str) -> bool:
+    """True for a decimal SteamID64 at or above the base. Adapters check an identity with this before it reaches a request
+    or a file line. Anything else, including a value too long to be an id, is False and never raises."""
+    if len(steam_id64) > MAX_DIGITS or DECIMAL.fullmatch(steam_id64) is None:
+        return False
+    return int(steam_id64) >= STEAM64_BASE
