@@ -583,6 +583,8 @@ async def create_service(request: Request, admin: Admin,
 
     try:
         service_id = await deps.db.run(change)
+    except services.ServiceRefused as refused:
+        return await _services_page(request, admin, status=400, error=str(refused))
     except ValueError:
         return await _services_page(request, admin, status=400, error=text.INVALID_INPUT)
     except sqlite3.IntegrityError:
@@ -642,6 +644,8 @@ async def update_service(request: Request, service_id: int, admin: Admin,
 
     try:
         await deps.db.run(change)
+    except services.ServiceRefused as refused:
+        return await _service_page(request, admin, service_id, status=400, error=str(refused))
     except ValueError:
         return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
     await _sync_every_bound(deps)

@@ -64,10 +64,11 @@ async def subject_for(db: Database, subject_kind: str) -> str:
 
 @pytest.mark.parametrize("kind", ["oidc", "forward_auth", "game", "feed"])
 async def test_each_kind_is_stored_with_its_adapter_and_suspend_flag(db: Database, admin_id: int, kind: str) -> None:
-    created = await make_service(db, admin_id, slug=f"svc-{kind}", kind=kind, adapter="minecraft-plugin",
+    slug = f"svc-{kind.replace('_', '-')}"
+    created = await make_service(db, admin_id, slug=slug, kind=kind, adapter="minecraft-plugin",
                                  auto_suspendable=True, url="https://svc.invalid/")
 
-    stored = await db.run(lambda c: services.get_by_slug(c, f"svc-{kind}"))
+    stored = await db.run(lambda c: services.get_by_slug(c, slug))
     assert stored == created
     assert stored.kind == kind
     assert stored.adapter == "minecraft-plugin"
@@ -114,11 +115,19 @@ async def test_update_changes_the_editable_fields_and_keeps_slug_and_kind(db: Da
     assert updated.kind == "forward_auth"
 
 
-@pytest.mark.parametrize("slug", ["Calendar", "-calendar", "cal/feed", "cal feed", "cal.feed", ""])
+@pytest.mark.parametrize("slug", ["Calendar", "-calendar", "cal/feed", "cal feed", "cal.feed", "", "the_ship",
+                                  "a" * 65])
 async def test_slug_outside_the_allowed_shape_is_refused(db: Database, admin_id: int, slug: str) -> None:
-    with pytest.raises(ValueError, match="invalid service slug"):
+    with pytest.raises(services.ServiceRefused) as info:
         await make_service(db, admin_id, slug=slug)
+    assert str(info.value) == text.SERVICE_SLUG_INVALID
     assert await db.run(lambda c: services.list_services(c, include_retired=True)) == []
+
+
+@pytest.mark.parametrize("slug", ["the-ship", "a", "1-2", "a" * 64])
+async def test_slug_in_the_allowed_shape_is_accepted(db: Database, admin_id: int, slug: str) -> None:
+    created = await make_service(db, admin_id, slug=slug)
+    assert created.slug == slug
 
 
 async def test_duplicate_slug_is_refused(db: Database, admin_id: int) -> None:

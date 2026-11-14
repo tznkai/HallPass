@@ -66,8 +66,29 @@ async def test_a_duplicate_slug_and_a_bad_slug_are_refused_and_nothing_is_stored
     bad = await create_service_form(env, "Not A Slug", "game")
 
     assert duplicate.status_code == 400 and text.SERVICE_TAKEN in duplicate.text
-    assert bad.status_code == 400 and text.INVALID_INPUT in bad.text
+    assert bad.status_code == 400 and text.SERVICE_SLUG_INVALID in bad.text
     assert len(await env.db.run(services.list_services)) == 1
+
+
+async def test_a_slug_with_an_underscore_is_refused_with_the_slug_rule(env: Env):
+    await admin_client(env)
+
+    refused = await create_service_form(env, "the_ship", "game")
+
+    assert refused.status_code == 400
+    assert text.SERVICE_SLUG_INVALID in refused.text
+    assert await service_for(env, "the_ship") is None
+
+
+async def test_a_hyphenated_slug_is_accepted_and_a_65_character_one_is_refused(env: Env):
+    await admin_client(env)
+
+    accepted = await create_service_form(env, "the-ship", "game")
+    too_long = await create_service_form(env, "a" * 65, "game")
+
+    assert accepted.status_code == 303
+    assert (await service_for(env, "the-ship")).slug == "the-ship"
+    assert too_long.status_code == 400 and text.SERVICE_SLUG_INVALID in too_long.text
 
 
 async def test_a_retired_service_leaves_the_pages_and_forward_auth_refuses_it(env: Env):

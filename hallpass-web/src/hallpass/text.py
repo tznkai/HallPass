@@ -52,6 +52,8 @@ FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading th
 FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. Ask the administrator."
 # The admin service pages.
 SERVICE_TAKEN = "A service with that slug already exists."
+SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters, digits or hyphens, and it starts with a letter or digit. "
+                        "Underscores are not allowed, because hallmonitor cannot configure a slug that has one.")
 ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
 # Holds and the conflict rules. Actor labels are what a person sees as "Suspended by ...".
 ACTOR_ADMIN = "the administrator"

@@ -21,7 +21,7 @@ SERVICE_KINDS = ("oidc", "forward_auth", "game", "feed")
 SUBJECT_KINDS = ("type", "group", "person")
 EFFECTS = ("grant", "deny")
 DEFAULT_ADAPTER = "manual"
-_SLUG = re.compile(r"[a-z0-9][a-z0-9_-]*")
+_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _DIGITS = re.compile(r"[0-9]+")
 
 
@@ -31,6 +31,10 @@ class NoSuchService(LookupError):
 
 class EntitlementRefused(Exception):
     """A refused entitlement. `str(exc)` is a text constant that is safe to show the admin."""
+
+
+class ServiceRefused(ValueError):
+    """A refused service value. `str(exc)` is a text constant that is safe to show the admin."""
 
 
 @dataclass(frozen=True)
@@ -67,7 +71,7 @@ def _service(row: tuple) -> Service:
 def _checked_slug(slug: str) -> str:
     clean = (slug or "").strip()
     if not _SLUG.fullmatch(clean):
-        raise ValueError("invalid service slug")
+        raise ServiceRefused(text.SERVICE_SLUG_INVALID)
     return clean
 
 

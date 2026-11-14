@@ -83,7 +83,7 @@ as the code they cite.
 - `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
 - `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
 - `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
-- `src/hallpass/web/routes_admin.py:929` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/web/routes_admin.py:933` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
 - `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 
 ## Outbox
