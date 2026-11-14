@@ -1,0 +1,37 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: terms{% endblock %}
+{% block content %}
+<h1>Terms versions</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<table>
+  <thead>
+    <tr><th>Version</th><th>Published</th><th>Blocking</th><th>Accepted</th><th>Not accepted</th></tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><a href="/admin/terms/{{ row.version.id }}">{{ row.version.version }}</a></td>
+      <td>{{ row.version.published_at }}</td>
+      <td>{{ "yes" if row.version.blocking else "no" }}</td>
+      <td>{{ row.accepted }}</td>
+      <td>{{ row.not_accepted }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">No terms have been published yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<h2>Publish a new version</h2>
+<form method="post" action="/admin/terms" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <label>Terms of service<br><textarea name="tos_text" required rows="10" cols="60"></textarea></label>
+  <label>Privacy disclosure<br><textarea name="privacy_text" required rows="10" cols="60"></textarea></label>
+  <label><input type="checkbox" name="blocking" checked> Blocking: services stop for anyone who has not accepted it.
+    The first version is always blocking.</label>
+  <button type="submit">Publish</button>
+</form>
+{% endblock %}

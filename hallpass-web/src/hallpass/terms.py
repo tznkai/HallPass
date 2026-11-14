@@ -63,6 +63,12 @@ def current(conn: sqlite3.Connection) -> TermsVersion | None:
     return None if row is None else _version(row)
 
 
+def list_versions(conn: sqlite3.Connection) -> list[TermsVersion]:
+    """Every published version, newest first."""
+    rows = conn.execute(f"SELECT {_VERSION_COLUMNS} FROM terms_version ORDER BY version DESC").fetchall()
+    return [_version(row) for row in rows]
+
+
 def get(conn: sqlite3.Connection, version_id: int) -> TermsVersion | None:
     row = conn.execute(f"SELECT {_VERSION_COLUMNS} FROM terms_version WHERE id = ?", (version_id,)).fetchone()
     return None if row is None else _version(row)

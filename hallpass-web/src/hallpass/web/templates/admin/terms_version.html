@@ -1,0 +1,31 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: terms version {{ version.version }}{% endblock %}
+{% block content %}
+<h1>Terms version {{ version.version }}</h1>
+<p>Published {{ version.published_at }}. {{ "Blocking." if version.blocking else "Not blocking." }}
+  <a href="/admin/terms">All versions</a></p>
+<section id="accepted" class="stack">
+  <h2>Accepted ({{ accepted|length }})</h2>
+  <ul>
+  {% for person, accepted_at in accepted %}
+    <li data-person="{{ person.id }}">{{ person.display_name }}, accepted {{ accepted_at }}</li>
+  {% else %}
+    <li>No one has accepted this version.</li>
+  {% endfor %}
+  </ul>
+</section>
+<section id="not-accepted" class="stack">
+  <h2>Not accepted ({{ missing|length }})</h2>
+  <ul>
+  {% for person in missing %}
+    <li data-person="{{ person.id }}">{{ person.display_name }}</li>
+  {% else %}
+    <li>Everyone with an account has accepted this version.</li>
+  {% endfor %}
+  </ul>
+</section>
+{% endblock %}

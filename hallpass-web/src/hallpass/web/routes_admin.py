@@ -17,16 +17,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import registry, text
-from hallpass.auth import require_admin, require_csrf
+from hallpass import registry, terms, text
+from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
 from hallpass.logs import log_event
 from hallpass.registry import LinkRefused, NoSuchGroup, Person
-from hallpass.web.pages import page
+from hallpass.web.pages import message_page, page
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
 Admin = Annotated[Person, Depends(require_admin)]
+# The terms pages are the one exemption from the page gate: the first version must be publishable before anyone has accepted.
+AdminAnyTerms = Annotated[Person, Depends(require_admin_any_terms)]
 WRITE = [Depends(require_csrf)]
 WarningParam = Annotated[str | None, Query(alias="warning")]
 WARNINGS = {"authentik": text.AUTHENTIK_NOT_UPDATED}
@@ -438,3 +440,58 @@ async def delete_group(request: Request, group_id: int, admin: Admin) -> Respons
 
     await deps.db.run(change)
     return _to("/admin/groups")
+
+
+# Terms -----------------------------------------------------------------------------------------------
+
+def _versions_rows(conn) -> list[dict]:
+    rows = []
+    for version in terms.list_versions(conn):
+        accepted, missing = terms.acceptance_report(conn, version.id)
+        rows.append({"version": version, "accepted": len(accepted), "not_accepted": len(missing)})
+    return rows
+
+
+async def _terms_page(request: Request, admin: Person, *, status: int = 200, error: str | None = None) -> Response:
+    rows = await _deps(request).db.run(_versions_rows)
+    return page(request, "admin/terms.html", viewer=admin, status_code=status, error=error, rows=rows)
+
+
+@router.get("/terms")
+async def terms_page(request: Request, admin: AdminAnyTerms) -> Response:
+    return await _terms_page(request, admin)
+
+
+@router.post("/terms", dependencies=WRITE)
+async def publish_terms(request: Request, admin: AdminAnyTerms,
+                        tos_text: Annotated[str, Form()] = "",
+                        privacy_text: Annotated[str, Form()] = "",
+                        blocking: Annotated[str | None, Form()] = None) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        terms.publish(conn, tos_text=tos_text, privacy_text=privacy_text, blocking=blocking is not None,
+                      actor_id=admin.id, now=now)
+
+    try:
+        await deps.db.run(change)
+    except ValueError:
+        return await _terms_page(request, admin, status=400, error=text.INVALID_INPUT)
+    return _to("/admin/terms")
+
+
+def _version_report(conn, version_id: int) -> dict | None:
+    version = terms.get(conn, version_id)
+    if version is None:
+        return None
+    accepted, missing = terms.acceptance_report(conn, version_id)
+    return {"version": version, "accepted": accepted, "missing": missing}
+
+
+@router.get("/terms/{version_id}")
+async def terms_version_page(request: Request, version_id: int, admin: AdminAnyTerms) -> Response:
+    report = await _deps(request).db.run(lambda c: _version_report(c, version_id))
+    if report is None:
+        return message_page(request, text.NOT_FOUND, 404)
+    return page(request, "admin/terms_version.html", viewer=admin, **report)
