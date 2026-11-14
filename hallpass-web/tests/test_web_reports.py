@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Report display: the status line on a person's page, and the monitor health page for the administrator.
 
-Covers hallpass.AC8.3, AC9.8 (display), AC9.9 and AC12.1 (display).
+Covers hallpass.AC8.3, AC9.8 (display), AC9.9, AC12.1 (display) and AC12.4 (display).
 """
 
 from __future__ import annotations
@@ -184,3 +184,22 @@ async def test_a_service_that_becomes_forward_auth_shows_no_report_line(env: Env
     await env.db.run(lambda c: c.execute("UPDATE service SET kind = 'forward_auth' WHERE slug = 'minecraft'"))
 
     assert REPORT_LINE not in (await browser.get("/")).text
+
+
+# AC12.4 (display, end to end): a suspension waiting for a restart reads so on the person's page ----------
+
+async def test_a_suspension_pending_a_restart_reads_waiting_for_the_service_to_restart(env: Env) -> None:
+    person, browser = await signed_in_person(env)
+    await entitle(env, person, "valheim", "game")
+    await browser.get("/")
+    await admin_hold(env, person)
+    await browser.get("/")   # the page refreshes the desired state, so the generation below is the held one
+    valheim = await env.db.run(lambda c: services.get_by_slug(c, "valheim"))
+    _, generation = await env.db.run(lambda c: desired.desired_for(c, person.id, valheim.id))
+    stored = await post_report(env, slug="valheim", ref=person.ref, observed="suspended", generation=generation,
+                               detail="pending_restart")
+    assert stored.status_code == 204
+
+    page = await browser.get("/")
+
+    assert f'{REPORT_LINE}{text.PENDING_RESTART}<' in page.text
