@@ -28,7 +28,7 @@ as the code they cite.
 
 ## Admin check
 
-- `src/hallpass/auth.py:260` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:262` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 

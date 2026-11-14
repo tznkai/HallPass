@@ -18,6 +18,7 @@ from hallpass.registry import NoSuchGroup, NoSuchPerson
 from hallpass.web.pages import make_templates, not_found, redirect_to_login, redirect_to_terms
 from hallpass.web.routes_admin import router as admin_router
 from hallpass.web.routes_auth import router as auth_router
+from hallpass.web.routes_family import router as family_router
 from hallpass.web.routes_terms import router as terms_router
 
 
@@ -45,4 +46,5 @@ def create_app(deps: AppDeps) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(terms_router)
     app.include_router(admin_router)
+    app.include_router(family_router)
     return app

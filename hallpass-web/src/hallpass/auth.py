@@ -227,7 +227,8 @@ async def resolve_sign_in(db: Database, authentik: AuthentikClient, config: Conf
 # Request dependencies --------------------------------------------------------------------------------
 
 async def current_person_any_terms(request: Request) -> Person:
-    """The signed-in, unlocked person, whatever their terms state. Only the terms routes and sign-out use it directly."""
+    """The signed-in, unlocked person, whatever their terms state. Only the terms routes and sign-out use it directly.
+    It also records on request.state whether the person has linked children, for the nav link."""
     deps = _deps(request)
     person_id = request.session.get("person_id")
     if person_id is None:
@@ -239,6 +240,7 @@ async def current_person_any_terms(request: Request) -> Person:
     if person.status == "locked":
         end_session(request)
         raise HTTPException(403, text.LOCKED)
+    request.state.has_children = await deps.db.run(lambda c: bool(registry.children_of(c, person.id)))
     return person
 
 
