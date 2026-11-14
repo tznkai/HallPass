@@ -258,7 +258,8 @@ async def test_a_server_that_does_not_confirm_the_ban_is_not_applied_and_not_rec
 
 # Identity: a missing or malformed steam_id is refused before any console command is sent -----------------
 
-@pytest.mark.parametrize("value", ["12a", "1 2", "1\nremoveid 1", "", str(STEAM64_BASE - 2)])
+@pytest.mark.parametrize("value", ["12a", "1 2", "1\nremoveid 1", "", str(STEAM64_BASE - 2),
+                                   "0" + OWN_ID, str(STEAM64_BASE + (1 << 32))])
 async def test_a_malformed_steam_id_is_refused_before_any_command(db: Database, http: httpx.AsyncClient,
                                                                   value: str) -> None:
     state = server_state()

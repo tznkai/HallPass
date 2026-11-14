@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from hallmonitor.adapters.steam import STEAM64_BASE, steam2, valid_steam64
+from hallmonitor.adapters.steam import STEAM64_BASE, STEAM64_LIMIT, steam2, valid_steam64
 
 
 def _id64(offset: int) -> str:
@@ -56,14 +56,35 @@ def test_steam2_rejects_an_id_below_the_base_without_echoing_it():
     assert below not in str(info.value)
 
 
-@pytest.mark.parametrize("offset", [0, 1, 2 * 4567])
-def test_valid_steam64_accepts_decimal_ids_at_or_above_the_base(offset: int):
+def test_steam2_rejects_an_id_at_or_above_the_individual_range_limit_without_echoing_it():
+    above = str(STEAM64_LIMIT)
+    with pytest.raises(ValueError) as info:
+        steam2(above, "0")
+    assert above not in str(info.value)
+
+
+def test_steam2_rejects_a_leading_zero_without_echoing_it():
+    padded = "0" + _id64(2 * 123)
+    with pytest.raises(ValueError) as info:
+        steam2(padded, "0")
+    assert padded not in str(info.value)
+
+
+@pytest.mark.parametrize("offset", [0, 1, 2 * 4567, (1 << 32) - 1])
+def test_valid_steam64_accepts_canonical_ids_in_the_individual_range(offset: int):
     assert valid_steam64(_id64(offset))
 
 
 @pytest.mark.parametrize(
     "value",
-    ["", "12a", " " + "1", "+1", "1_0", "\u0661", "-1", "0" * 40, "9" * 25, str(STEAM64_BASE - 1)],
+    [
+        "", "12a", " " + "1", "+1", "1_0", "\u0661", "-1", "0" * 40, "9" * 25,
+        str(STEAM64_BASE - 1),
+        "0" + _id64(0),                 # a leading zero: the game never matches this form
+        "00" + _id64(0),
+        str(STEAM64_LIMIT),             # one past the individual range
+        str(STEAM64_BASE + (1 << 40)),  # well above the individual range, still decimal digits
+    ],
 )
 def test_valid_steam64_refuses_anything_else_without_raising(value: str):
     assert not valid_steam64(value)

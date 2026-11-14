@@ -237,7 +237,8 @@ async def test_a_subject_without_a_steam_id_is_no_identity_and_sends_nothing(db:
     assert outcomes(hallpass) == [("r1", "error", "no_identity")]
 
 
-@pytest.mark.parametrize("value", ["12a", "", "+" + OWN_ID, str(STEAM64_BASE - 2), OWN_ID + " ", "9" * 25])
+@pytest.mark.parametrize("value", ["12a", "", "+" + OWN_ID, str(STEAM64_BASE - 2), OWN_ID + " ", "9" * 25,
+                                   "0" + OWN_ID, str(STEAM64_BASE + (1 << 32))])
 async def test_a_malformed_steam_id_is_bad_identity_and_nothing_is_sent_or_written(db: Database, value: str) -> None:
     pal, ptero = pal_state(), banlist()
     hallpass = pal_service(subject("r1", "suspended", steam(value)))

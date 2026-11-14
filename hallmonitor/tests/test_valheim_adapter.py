@@ -316,7 +316,8 @@ async def test_a_subject_without_a_steam_id_is_no_identity_and_nothing_is_writte
     assert writes(fake) == []
 
 
-@pytest.mark.parametrize("value", ["12a", "", "+" + OWN_ID, str(STEAM64_BASE - 2), OWN_ID + "\n", "9" * 25])
+@pytest.mark.parametrize("value", ["12a", "", "+" + OWN_ID, str(STEAM64_BASE - 2), OWN_ID + "\n", "9" * 25,
+                                   "0" + OWN_ID, str(STEAM64_BASE + (1 << 32))])
 async def test_a_malformed_steam_id_is_bad_identity_and_nothing_is_written(db: Database, value: str) -> None:
     fake = ptero_state(COMMENT)
     hallpass = valheim_service(subject("r1", "suspended", steam(value)))
