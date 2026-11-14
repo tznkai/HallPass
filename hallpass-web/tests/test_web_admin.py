@@ -389,6 +389,19 @@ async def test_the_admin_records_and_removes_external_identities(env: Env):
     assert len(left) == 3
 
 
+@pytest.mark.parametrize(("kind", "value"), [("java_name", "@a"), ("java_name", "A" * 17),
+                                             ("bedrock_gamertag", "@e[type=player]"), ("bedrock_gamertag", "Ste ve")])
+async def test_a_minecraft_identity_outside_the_pattern_is_refused_and_stores_nothing(env: Env, kind: str, value: str):
+    await admin_client(env)
+    person_id = await create_person(env, "Kid", account_type="child")
+    await make_service(env.db, "minecraft")
+    response = await post(env, f"/admin/people/{person_id}/identities", service_slug="minecraft", kind=kind,
+                          value=value)
+    assert response.status_code == 400
+    assert text.INVALID_INPUT in response.text
+    assert await env.db.run(lambda c: registry.identities_of(c, person_id)) == []
+
+
 async def test_a_duplicate_identity_is_refused(env: Env):
     await admin_client(env)
     person_id = await create_person(env, "Kid", account_type="child")

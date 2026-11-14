@@ -255,6 +255,33 @@ async def test_unknown_identity_kind_is_refused(db: Database) -> None:
         await db.run(lambda c: registry.add_identity(c, person.id, "steam", "discord", "1"))
 
 
+# A Minecraft name reaches a console command, so a java_name or bedrock_gamertag must match its pattern in full.
+# A selector such as @a, an over-long name, a space, a non-ASCII space and punctuation are all refused.
+MINECRAFT_BAD_NAMES = ["", "Ste ve", "Ste\nve", "@a", "@e[type=player]", "@p", "@r", "A" * 17, "Ste\u00a0ve",
+                       "Steve;op", "Steve/op", "Steve[x]"]
+
+
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
+@pytest.mark.parametrize("value", MINECRAFT_BAD_NAMES)
+async def test_a_minecraft_name_outside_the_pattern_is_refused_and_nothing_is_stored(db: Database, kind: str,
+                                                                                     value: str) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "minecraft")
+    with pytest.raises(ValueError):
+        await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", kind, value))
+    assert await db.run(lambda c: registry.identities_of(c, person.id)) == []
+
+
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
+@pytest.mark.parametrize("value", ["Steve", "kid_player_9", "A" * 16])
+async def test_a_minecraft_name_inside_the_pattern_is_stored(db: Database, kind: str, value: str) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", kind, value))
+    stored = await db.run(lambda c: registry.identities_of(c, person.id))
+    assert [(i.kind, i.value) for i in stored] == [(kind, value)]
+
+
 # AC2.4 ----------------------------------------------------------------------------------------------
 
 async def _child_with_parents(db: Database, parent_emails: list[str | None], *, child_email: str | None = None,

@@ -21,6 +21,10 @@ from hallpass import display_names, text
 ACCOUNT_TYPES = ("adult", "parent", "child")
 IDENTITY_KINDS = ("fluxer_user_id", "java_name", "bedrock_gamertag", "steam_id")
 _DIGITS = re.compile(r"[0-9]+")
+# A Minecraft name reaches a console command in hallmonitor, so it must match in full. A selector such as @a is refused.
+# A Bedrock gamertag uses the Java class for now: spaces stay refused until the live check shows how Floodgate passes them.
+JAVA_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
+BEDROCK_GAMERTAG = re.compile(r"[A-Za-z0-9_]{1,16}")
 
 
 class LinkRefused(Exception):
@@ -322,6 +326,10 @@ def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, ki
         raise ValueError("unknown service")
     if kind == "steam_id" and not _DIGITS.fullmatch(clean):
         raise ValueError("steam_id must be digits")
+    if kind == "java_name" and not JAVA_NAME.fullmatch(clean):
+        raise ValueError("java_name must be 1 to 16 letters, digits or underscores")
+    if kind == "bedrock_gamertag" and not BEDROCK_GAMERTAG.fullmatch(clean):
+        raise ValueError("bedrock_gamertag must be 1 to 16 letters, digits or underscores")
     return conn.execute(
         "INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, ?, ?, ?)",
         (person_id, slug, kind, clean),
