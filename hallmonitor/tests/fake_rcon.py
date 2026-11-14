@@ -36,6 +36,7 @@ class FakeRconState:
     password: str = "test-pass"
     whitelist: list[str] = field(default_factory=list)  # vanilla list names; Bedrock names carry the prefix
     bans: list[tuple[str, str, str]] = field(default_factory=list)  # (name, banner, reason)
+    source_bans: list[str] = field(default_factory=list)  # Source ban ids, as `listid` shows them
     online: set[str] = field(default_factory=set)
     prefix: str = "."
     dialect: Literal["minecraft", "source"] = "minecraft"
@@ -123,6 +124,35 @@ def default_minecraft_handler(state: FakeRconState, cmd: str) -> str:
         return _kick(state, args)
     if cmd == "list":
         return _list_online(state)
+    return UNKNOWN_COMMAND
+
+
+def _source_listid(state: FakeRconState) -> str:
+    # The default format: a header, then one numbered line per ban, `1 STEAM_0:1:123 : permanent`.
+    lines = [f"ID filter list: {len(state.source_bans)} entries"]
+    lines += [f"{number} {sid} : permanent" for number, sid in enumerate(state.source_bans, start=1)]
+    return "\n".join(lines)
+
+
+def source_handler(state: FakeRconState, cmd: str) -> str:
+    """The Source console's ban commands: `banid <minutes> <id> [kick]`, `removeid <id>`, `writeid` and `listid`."""
+    verb, _, args = cmd.partition(" ")
+    fields = args.split()
+    if verb == "banid" and len(fields) in (2, 3) and fields[0].isdigit() and fields[2:] in ([], ["kick"]):
+        sid = fields[1]
+        if sid not in state.source_bans:
+            state.source_bans.append(sid)
+        return f"Banned {sid}"
+    if verb == "removeid" and len(fields) == 1:
+        sid = fields[0]
+        if sid not in state.source_bans:
+            return "Id not found"
+        state.source_bans.remove(sid)
+        return f"Removed {sid}"
+    if cmd == "writeid":
+        return "Wrote banned user list"
+    if cmd == "listid":
+        return _source_listid(state)
     return UNKNOWN_COMMAND
 
 
