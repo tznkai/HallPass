@@ -1,11 +1,21 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The hallpass process: `python -m hallpass`. Exit 2 for a bad environment, 3 for a refused database."""
+"""The hallpass process: `python -m hallpass`.
+
+Exit codes:
+- 0: stopped on SIGINT or SIGTERM, after both listeners and the database have closed.
+- 2: a bad environment (a setting is missing or invalid).
+- 3: the database was refused (quarantined or unreadable).
+- 4: a listener failed to start, or ended with SystemExit. The other listener is asked to stop too.
+Any other uncaught error exits 1 through Python's default handling.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import signal
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -16,30 +26,69 @@ from hallpass.auth import AuthlibOidc
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config, ConfigError
 from hallpass.db import Database, DatabaseRefused
-from hallpass.logs import setup_logging
+from hallpass.logs import log_event, setup_logging
 from hallpass.mail import build_sender
 from hallpass.monitor_api import create_monitor_app
 from hallpass.web import app as web_app
 
+logger = logging.getLogger(__name__)
 
-class MonitorServer(uvicorn.Server):
-    """The monitor listener installs no signal handlers. The public server owns SIGINT and SIGTERM and stops this one
-    through `serve_both`, so the two servers never overwrite each other's handlers."""
+EXIT_OK = 0
+EXIT_BAD_ENVIRONMENT = 2
+EXIT_DATABASE_REFUSED = 3
+EXIT_LISTENER_FAILED = 4
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+
+class _NoSignalServer(uvicorn.Server):
+    """uvicorn's own signal capture re-raises the signal after its shutdown, which ends the process before the cleanup
+    runs. `serve_both` owns SIGINT and SIGTERM instead, so neither listener installs a handler."""
 
     @contextlib.contextmanager
     def capture_signals(self) -> Iterator[None]:
         yield
 
 
-async def serve_both(public: uvicorn.Server, monitor: uvicorn.Server) -> None:
-    """Runs both listeners. When either one ends, normally or by error, the other is asked to stop."""
-    async def run(server: uvicorn.Server, other: uvicorn.Server) -> None:
+class PublicServer(_NoSignalServer):
+    """The public listener."""
+
+
+class MonitorServer(_NoSignalServer):
+    """The monitor listener. `serve_both` stops it along with the public one."""
+
+
+async def serve_both(public: uvicorn.Server, monitor: uvicorn.Server) -> int:
+    """Runs both listeners until SIGINT or SIGTERM, or until one of them stops. A stop request reaches both servers. A
+    listener that ends, normally or by error, asks the other to stop. Returns EXIT_LISTENER_FAILED when a listener
+    failed to start (uvicorn exits with SystemExit on a bind failure) and EXIT_OK otherwise. Any other exception from
+    a listener is raised after the other listener has stopped."""
+    loop = asyncio.get_running_loop()
+    servers = (public, monitor)
+
+    def request_stop() -> None:
+        for server in servers:
+            server.should_exit = True
+
+    async def run(server: uvicorn.Server, other: uvicorn.Server) -> int:
         try:
             await server.serve()
+        except SystemExit:
+            return EXIT_LISTENER_FAILED
         finally:
             other.should_exit = True
+        return EXIT_OK
 
-    await asyncio.gather(run(public, monitor), run(monitor, public))
+    for sig in STOP_SIGNALS:
+        loop.add_signal_handler(sig, request_stop)
+    try:
+        results = await asyncio.gather(run(public, monitor), run(monitor, public), return_exceptions=True)
+    finally:
+        for sig in STOP_SIGNALS:
+            loop.remove_signal_handler(sig)
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+    return max(results)
 
 
 def _utc_now() -> datetime:
@@ -49,14 +98,14 @@ def _utc_now() -> datetime:
 def build_servers(config: Config, deps: web_app.AppDeps) -> tuple[uvicorn.Server, MonitorServer]:
     """The public server, which trusts forwarded headers only from the local reverse proxy, and the monitor listener,
     which trusts none: it refuses any request that carries a proxy header, so it never reads one."""
-    public = uvicorn.Server(uvicorn.Config(web_app.create_app(deps), host=config.bind_host, port=config.bind_port,
-                                           proxy_headers=True, forwarded_allow_ips="127.0.0.1", log_config=None))
+    public = PublicServer(uvicorn.Config(web_app.create_app(deps), host=config.bind_host, port=config.bind_port,
+                                         proxy_headers=True, forwarded_allow_ips="127.0.0.1", log_config=None))
     monitor = MonitorServer(uvicorn.Config(create_monitor_app(deps), host=config.monitor_host,
                                            port=config.monitor_port, proxy_headers=False, log_config=None))
     return public, monitor
 
 
-async def _serve(config: Config, database: Database) -> None:
+async def _serve(config: Config, database: Database) -> int:
     authentik = AuthentikClient(config.authentik_url, config.authentik_token)
     oidc = AuthlibOidc(metadata_url=config.oidc_metadata_url, client_id=config.oidc_client_id,
                        client_secret=config.oidc_client_secret)
@@ -64,7 +113,7 @@ async def _serve(config: Config, database: Database) -> None:
                            sender=build_sender(config))
     public, monitor = build_servers(config, deps)
     try:
-        await serve_both(public, monitor)
+        return await serve_both(public, monitor)
     finally:
         await authentik.aclose()
 
@@ -74,18 +123,19 @@ def main() -> int:
         config = Config.from_env()
     except ConfigError as error:
         print(f"hallpass: {error}", file=sys.stderr)
-        return 2
+        return EXIT_BAD_ENVIRONMENT
     setup_logging(config.log_level, config.secrets())
     try:
         database = Database.open(config.data_dir / "hallpass.db")
     except DatabaseRefused as error:
         print(f"hallpass: {error}", file=sys.stderr)
-        return 3
+        return EXIT_DATABASE_REFUSED
     try:
-        asyncio.run(_serve(config, database))
+        code = asyncio.run(_serve(config, database))
     finally:
         database.close()
-    return 0
+    log_event(logger, "shutdown_complete", code=code)
+    return code
 
 
 if __name__ == "__main__":
