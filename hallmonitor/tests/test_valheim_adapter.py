@@ -280,6 +280,23 @@ async def test_a_restart_after_the_suspension_clears_pending_restart(db: Databas
     assert outcomes(hallpass) == [("r1", "suspended", None)]
 
 
+@pytest.mark.parametrize(("uptime_seconds", "pending"), [
+    (599, True),   # one second short of the time since the change: the margin keeps it pending
+    (600, True),   # exactly the time since the change: the server may have started at the change
+    (598, False),  # two seconds short: the server started after the change, so it has restarted
+])
+async def test_the_restart_test_keeps_the_error_on_the_pending_side_by_one_second(
+        db: Database, uptime_seconds: int, pending: bool) -> None:
+    """placed_at is stored to the second, so the time since the change can run a second over. A one-second margin keeps a
+    change pending when the uptime is within a second of that time."""
+    fake = ptero_state(COMMENT, uptime_ms=HOUR_MS)
+    await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)
+    fake.uptime_ms = uptime_seconds * 1000
+    hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID), generation=2))
+    await run(db, hallpass, fake, T0 + TEN_MINUTES)
+    assert outcomes(hallpass) == [("r1", "suspended", PENDING if pending else None)]
+
+
 async def test_a_stopped_server_keeps_a_suspension_pending(db: Database) -> None:
     fake = ptero_state(COMMENT, uptime_ms=HOUR_MS)
     await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)

@@ -9,6 +9,11 @@ someone else placed is `banned_external` and is never removed.
 
 The server reads the file at start, so unless `live_reload` is on, a change is `pending_restart` until the server's
 uptime shows a restart since the change. The uptime is compared with the time the change was placed.
+
+The file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read before it. A
+moderator's edit saved between that read and that write would be overwritten. The window is one read and one write,
+with only a local database call between them, and the race is accepted for that reason. The live check should watch
+for it.
 """
 
 from __future__ import annotations
@@ -80,10 +85,13 @@ def _without_id(text: str, steam_id: str) -> str:
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
     """True while the server has not restarted since the change. A stopped server counts as not yet restarted. The
-    server has run continuously since the change when its uptime is longer than the time since the change."""
+    server has run continuously since the change when its uptime reaches the time since the change."""
     if uptime is None:
         return True
-    return uptime > (now - placed_at).total_seconds()
+    # placed_at is stored to the second, so the time since the change can run up to one second over the true time. The
+    # one-second margin keeps a change pending when the uptime is within a second of that time. The error is kept on the
+    # pending side: calling a change restarted when it was not is the unsafe mistake.
+    return uptime >= (now - placed_at).total_seconds() - 1
 
 
 class ValheimAdapter:
