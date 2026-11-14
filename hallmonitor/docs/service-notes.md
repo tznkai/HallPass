@@ -93,6 +93,21 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 ## Minecraft
 
+Not yet recorded from a live server. Until `tools/live/minecraft_check.py` is run, the adapter follows the plan's
+defaults, and each item below is pending live confirmation. Hosts and names are placeholders such as `<mc-host>`.
+
+- **End-of-response sentinel.** A Minecraft command is sent alone. Its sentinel (type 200) follows only after the first
+  response packet for that command has arrived, and never in the same read as the command, because a vanilla server
+  may drop the connection when it receives both at once. The Source dialect keeps its pipelined empty sentinel.
+- **Whitelist list.** Parsed from `There are N whitelisted player(s): a, b, c`, or `There are no whitelisted players`.
+- **Ban list.** Each entry is read as `NAME was banned by BANNER: REASON`. A name counts as banned only at the start
+  of an entry line, so a name that appears only as the banner or in the reason is not banned.
+- **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
+  `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
+  `still_connected`, and the subject is not reported as suspended.
+- **Names sent to the console.** A Java name matches 1 to 16 letters, digits or underscores. A Bedrock gamertag uses
+  the same class for now, since spaces are refused until the live check shows how Floodgate passes them.
+
 ## Palworld
 
 ## Valheim
