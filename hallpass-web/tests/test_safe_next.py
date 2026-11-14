@@ -15,6 +15,7 @@ BASE_ENV = {
     "AUTHENTIK_URL": "https://authentik.test",
     "AUTHENTIK_TOKEN": "test-token",
     "AUTHENTIK_INVITE_FLOW": "invite",
+    "AUTHENTIK_FLUXER_GROUP": "00000000-0000-4000-8000-0000000000f1",
     "OIDC_METADATA_URL": "https://authentik.test/application/o/hallpass/.well-known/openid-configuration",
     "OIDC_CLIENT_ID": "hallpass-client",
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",

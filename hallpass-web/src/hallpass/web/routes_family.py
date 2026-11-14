@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import grants, registry, terms, text
+from hallpass import authentik_sync, grants, registry, terms, text
 from hallpass.auth import current_person, require_csrf
 from hallpass.registry import Person
 from hallpass.web.pages import page
@@ -46,6 +46,7 @@ async def grant_child(request: Request, child_id: int, person: Annotated[Person,
         await deps.db.run(change)
     except grants.GrantRefused as refused:
         return await _children_page(request, person, status=403, error=text.GRANT_REFUSED[refused.reason])
+    await authentik_sync.sync_people(deps, [child_id])
     return RedirectResponse("/children", status_code=303)
 
 

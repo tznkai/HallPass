@@ -26,6 +26,7 @@ from hallpass.web import app as web_app
 from tests.fake_authentik import FakeAuthentikState, add_user, enrol, make_app
 
 ADMIN_SUB = "00000000-0000-4000-8000-000000000001"
+FLUXER_GROUP = "00000000-0000-4000-8000-0000000000f1"
 BASE_URL = "https://hallpass.test"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 TERMS_TOS = "Test terms of service text."
@@ -41,6 +42,7 @@ ENV = {
     "OIDC_CLIENT_ID": "hallpass-client",
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",
     "HALLPASS_ADMIN_EMAIL": "admin@example.com",
+    "AUTHENTIK_FLUXER_GROUP": FLUXER_GROUP,
 }
 CSRF_FIELD = re.compile(r'name="csrf" value="([^"]+)"')
 VERSION_FIELD = re.compile(r'name="version_id" value="(\d+)"')
@@ -122,6 +124,7 @@ async def make_env(tmp_path: Path, **overrides: str) -> Env:
     """Builds the app over a real database in tmp_path. Keyword overrides are environment variable names."""
     config = Config.from_env({**ENV, "HALLPASS_DATA_DIR": str(tmp_path / "data"), **overrides})
     state = FakeAuthentikState()
+    state.groups[FLUXER_GROUP] = set()
     authentik_client = AuthentikClient(config.authentik_url, config.authentik_token,
                                        transport=httpx.ASGITransport(app=make_app(state)))
     db = Database.open(config.data_dir / "hallpass.db")

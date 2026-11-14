@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import terms, text
+from hallpass import authentik_sync, registry, terms, text
 from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
 from hallpass.logs import log_event
@@ -79,9 +79,12 @@ async def callback(request: Request) -> Response:
     deps = request.app.state.deps
     try:
         identity = await deps.oidc.finish(request)
+        was_bound = await deps.db.run(lambda c: registry.get_by_uuid(c, identity.sub)) is not None
         person = await resolve_sign_in(deps.db, deps.authentik, deps.config, identity, deps.clock())
     except SignInError as error:
         return _refused(request, error)
+    if not was_bound:
+        await authentik_sync.sync_people(deps, [person.id])     # the first sign-in binds the person to Authentik
     destination = request.session.get("next") or "/"
     state = await deps.db.run(lambda c: terms.state_for(c, person.id))
     start_session(request, person.id)

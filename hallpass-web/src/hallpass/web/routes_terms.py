@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import grants, terms, text
+from hallpass import authentik_sync, grants, terms, text
 from hallpass.auth import current_person_any_terms, end_session, require_csrf
 from hallpass.registry import Person
 from hallpass.web.pages import message_page, page
@@ -53,4 +53,5 @@ async def accept_terms(request: Request, person: Annotated[Person, Depends(curre
         raise HTTPException(403, text.LOCKED) from None
     if not accepted:
         return message_page(request, text.TERMS_CHANGED, 409)
+    await authentik_sync.sync_people(deps, [person.id])
     return RedirectResponse(safe_next(next_path, deps.config) or "/", status_code=303)

@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import registry, services, terms, text, tokens
+from hallpass import authentik_sync, registry, services, terms, text, tokens
 from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
 from hallpass.logs import log_event
@@ -46,6 +46,18 @@ def _log(conn, *, now: datetime, admin: Person, action: str, target: int | None,
          detail: dict | None = None) -> None:
     registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin.id, target_person_id=target,
                           action=action, detail=detail)
+
+
+async def _sync_affected(deps, person_id: int) -> bool:
+    """After a change to one person: their Authentik state, and their children's, which carry the parent's address.
+    Returns False when Authentik could not be brought in line."""
+    affected = await deps.db.run(lambda c: authentik_sync.affected_by(c, person_id))
+    return await authentik_sync.sync_people(deps, affected)
+
+
+async def _sync_every_bound(deps) -> bool:
+    """After a change that can reach anyone, such as a service, an entitlement, the terms or a group."""
+    return await authentik_sync.sync_people(deps, await deps.db.run(authentik_sync.bound_person_ids))
 
 
 # People ----------------------------------------------------------------------------------------------
@@ -211,6 +223,7 @@ async def update_person(request: Request, person_id: int, admin: Admin,
         return await _person_page(request, admin, person_id, status=400, error=str(error))
     except ValueError:
         return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+    await _sync_affected(deps, person_id)
     return _to(f"/admin/people/{person_id}")
 
 
@@ -226,18 +239,16 @@ async def _set_locked(request: Request, admin: Person, person_id: int, *, locked
         return person
 
     person = await deps.db.run(change)
-    if person.authentik_pk is not None:
+    # The sync sets the active flag. The lock is kept in hallpass either way; the warning tells the admin when
+    # Authentik still needs the change, and the resync loop retries it.
+    synced = await _sync_affected(deps, person_id)
+    if locked and synced and person.authentik_pk is not None:
         try:
-            if locked:
-                await deps.authentik.set_active(person.authentik_pk, False)
-                await deps.authentik.end_sessions(person.authentik_pk)
-            else:
-                await deps.authentik.set_active(person.authentik_pk, True)
+            await deps.authentik.end_sessions(person.authentik_pk)
         except AuthentikError as error:
-            # The lock is kept in hallpass; the warning tells the admin Authentik still needs the change.
             log_event(logger, "account_sync", outcome="authentik_failed", reason=error.reason, person_id=person_id)
-            return _to(f"/admin/people/{person_id}?warning=authentik")
-    return _to(f"/admin/people/{person_id}")
+            synced = False
+    return _to(f"/admin/people/{person_id}" if synced else f"/admin/people/{person_id}?warning=authentik")
 
 
 @router.post("/people/{person_id}/lock", dependencies=WRITE)
@@ -264,6 +275,7 @@ async def _link(request: Request, admin: Person, *, child_id: int, parent_id: in
         await deps.db.run(change)
     except LinkRefused as error:
         return await _person_page(request, admin, page_id, status=400, error=str(error))
+    await _sync_affected(deps, child_id)
     return _to(f"/admin/people/{page_id}")
 
 
@@ -298,6 +310,7 @@ async def remove_parent(request: Request, child_id: int, parent_id: int, admin: 
                  detail={"parent_id": parent_id})
 
     await deps.db.run(change)
+    await _sync_affected(deps, child_id)
     return _to(f"/admin/people/{child_id}")
 
 
@@ -324,6 +337,7 @@ async def add_identity(request: Request, person_id: int, admin: Admin,
         return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
     except sqlite3.IntegrityError:
         return await _person_page(request, admin, person_id, status=400, error=text.IDENTITY_TAKEN)
+    await _sync_affected(deps, person_id)
     return _to(f"/admin/people/{person_id}")
 
 
@@ -342,6 +356,8 @@ async def remove_identity(request: Request, identity_id: int, admin: Admin) -> R
         return identity.person_id
 
     owner = await deps.db.run(change)
+    if owner is not None:
+        await _sync_affected(deps, owner)
     return _to("/admin/people" if owner is None else f"/admin/people/{owner}")
 
 
@@ -410,6 +426,7 @@ async def add_member(request: Request, group_id: int, admin: Admin,
         _log(conn, now=now, admin=admin, action="member_added", target=person_id, detail={"group_id": group_id})
 
     await deps.db.run(change)
+    await authentik_sync.sync_people(deps, [person_id])
     return _to(f"/admin/groups/{group_id}")
 
 
@@ -426,6 +443,7 @@ async def remove_member(request: Request, group_id: int, person_id: int, admin: 
                  detail={"group_id": group_id})
 
     await deps.db.run(change)
+    await authentik_sync.sync_people(deps, [person_id])
     return _to(f"/admin/groups/{group_id}")
 
 
@@ -440,6 +458,7 @@ async def delete_group(request: Request, group_id: int, admin: Admin) -> Respons
         _log(conn, now=now, admin=admin, action="group_deleted", target=None, detail={"group_id": group_id})
 
     await deps.db.run(change)
+    await _sync_every_bound(deps)
     return _to("/admin/groups")
 
 
@@ -479,6 +498,7 @@ async def publish_terms(request: Request, admin: AdminAnyTerms,
         await deps.db.run(change)
     except ValueError:
         return await _terms_page(request, admin, status=400, error=text.INVALID_INPUT)
+    await _sync_every_bound(deps)
     return _to("/admin/terms")
 
 
@@ -600,6 +620,7 @@ async def update_service(request: Request, service_id: int, admin: Admin,
         await deps.db.run(change)
     except ValueError:
         return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
+    await _sync_every_bound(deps)
     return _to(f"/admin/services/{service_id}")
 
 
@@ -614,6 +635,7 @@ async def _set_retired(request: Request, admin: Person, service_id: int, *, reti
             services.unretire_service(conn, service_id, actor_id=admin.id, now=now)
 
     await deps.db.run(change)
+    await _sync_every_bound(deps)
     return _to(f"/admin/services/{service_id}")
 
 
@@ -649,6 +671,7 @@ async def add_service_entitlement(request: Request, service_id: int, admin: Admi
         return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
     except sqlite3.IntegrityError:
         return await _service_page(request, admin, service_id, status=400, error=text.ENTITLEMENT_TAKEN)
+    await _sync_every_bound(deps)
     return _to(f"/admin/services/{service_id}")
 
 
@@ -664,6 +687,8 @@ async def remove_service_entitlement(request: Request, entitlement_id: int, admi
         return service_id
 
     service_id = await deps.db.run(change)
+    if service_id is not None:
+        await _sync_every_bound(deps)
     return _to("/admin/services" if service_id is None else f"/admin/services/{service_id}")
 
 

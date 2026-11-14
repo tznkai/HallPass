@@ -20,6 +20,7 @@ _COOKIE_DOMAIN = re.compile(r"\.?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 _FLOW_SLUG = re.compile(r"[A-Za-z0-9_-]{1,100}")
 _HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+_SERVICE_SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 class ConfigError(ValueError):
@@ -116,6 +117,21 @@ def _smtp_host(env: Mapping[str, str], name: str) -> str | None:
     return value
 
 
+def _group_uuid(env: Mapping[str, str], name: str) -> str:
+    value = _required(env, name)
+    try:
+        return str(uuid.UUID(value))
+    except ValueError:
+        raise ConfigError(f"{name} must be a uuid") from None
+
+
+def _service_slug(env: Mapping[str, str], name: str) -> str:
+    value = _opt(env, name) or "fluxer"
+    if not _SERVICE_SLUG.fullmatch(value):
+        raise ConfigError(f"{name} must be a service slug")
+    return value
+
+
 def _admin_subs(env: Mapping[str, str], name: str) -> frozenset[str]:
     raw = _opt(env, name)
     if raw is None:
@@ -139,6 +155,7 @@ class Config:
     oidc_metadata_url: str
     oidc_client_id: str
     oidc_client_secret: str = field(repr=False)
+    authentik_fluxer_group: str
     cookie_domain: str | None = None
     session_max_age_seconds: int = 43200
     data_dir: Path = Path("data")
@@ -155,6 +172,8 @@ class Config:
     smtp_starttls: bool = True
     admin_email: str | None = None
     conflict_window_hours: int = 24
+    fluxer_service_slug: str = "fluxer"
+    resync_seconds: int = 300
 
     def secrets(self) -> list[str]:
         """Every non-empty secret value, for the log redaction filter. Add each new secret field here."""
@@ -191,6 +210,7 @@ class Config:
             oidc_metadata_url=_service_url(env, "OIDC_METADATA_URL"),
             oidc_client_id=_required(env, "OIDC_CLIENT_ID"),
             oidc_client_secret=_required(env, "OIDC_CLIENT_SECRET"),
+            authentik_fluxer_group=_group_uuid(env, "AUTHENTIK_FLUXER_GROUP"),
             cookie_domain=cookie_domain,
             session_max_age_seconds=_positive_int(env, "HALLPASS_SESSION_MAX_AGE_SECONDS", "43200"),
             data_dir=Path(_opt(env, "HALLPASS_DATA_DIR") or "data"),
@@ -207,4 +227,6 @@ class Config:
             smtp_starttls=_flag(env, "SMTP_STARTTLS", True),
             admin_email=_email(env, "HALLPASS_ADMIN_EMAIL"),
             conflict_window_hours=_positive_int(env, "HALLPASS_CONFLICT_WINDOW_HOURS", "24"),
+            fluxer_service_slug=_service_slug(env, "HALLPASS_FLUXER_SERVICE"),
+            resync_seconds=_positive_int(env, "HALLPASS_RESYNC_SECONDS", "300"),
         )

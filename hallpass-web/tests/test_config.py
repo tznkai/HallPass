@@ -43,11 +43,14 @@ GOOD_ENV = {
     "SMTP_STARTTLS": "false",
     "HALLPASS_ADMIN_EMAIL": "admin@hallpass.invalid",
     "HALLPASS_CONFLICT_WINDOW_HOURS": "12",
+    "AUTHENTIK_FLUXER_GROUP": "00000000-0000-4000-8000-0000000000f1",
+    "HALLPASS_FLUXER_SERVICE": "fluxer-game",
+    "HALLPASS_RESYNC_SECONDS": "60",
 }
 
 REQUIRED = [
     "HALLPASS_PUBLIC_URL", "HALLPASS_SESSION_SECRET", "AUTHENTIK_URL", "AUTHENTIK_TOKEN",
-    "AUTHENTIK_INVITE_FLOW", "OIDC_METADATA_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET",
+    "AUTHENTIK_INVITE_FLOW", "OIDC_METADATA_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "AUTHENTIK_FLUXER_GROUP",
 ]
 
 
@@ -75,6 +78,9 @@ def test_complete_env_parses_with_every_field() -> None:
     assert config.smtp_starttls is False
     assert config.admin_email == "admin@hallpass.invalid"
     assert config.conflict_window_hours == 12
+    assert config.authentik_fluxer_group == "00000000-0000-4000-8000-0000000000f1"
+    assert config.fluxer_service_slug == "fluxer-game"
+    assert config.resync_seconds == 60
 
 
 def test_smtp_and_admin_email_are_optional_when_blank() -> None:
@@ -108,6 +114,19 @@ def test_smtp_starttls_must_be_true_or_false(bad: str) -> None:
         Config.from_env({**GOOD_ENV, "SMTP_STARTTLS": bad})
 
 
+def test_fluxer_group_is_required() -> None:
+    env = {key: value for key, value in GOOD_ENV.items() if key != "AUTHENTIK_FLUXER_GROUP"}
+    with pytest.raises(ConfigError, match="AUTHENTIK_FLUXER_GROUP is required"):
+        Config.from_env(env)
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", "00000000-0000-4000-8000-0000000000f1 ; drop"])
+def test_fluxer_group_must_be_a_uuid_and_is_not_echoed(bad: str) -> None:
+    with pytest.raises(ConfigError, match="AUTHENTIK_FLUXER_GROUP must be a uuid") as info:
+        Config.from_env({**GOOD_ENV, "AUTHENTIK_FLUXER_GROUP": bad})
+    assert bad not in str(info.value)
+
+
 @pytest.mark.parametrize("bad", ["0", "-3", "soon"])
 def test_conflict_window_must_be_a_positive_integer(bad: str) -> None:
     with pytest.raises(ConfigError, match="HALLPASS_CONFLICT_WINDOW_HOURS"):
@@ -137,8 +156,11 @@ def test_malformed_smtp_host_is_refused_without_echoing_it() -> None:
 def test_defaults_apply_when_optional_variables_are_blank() -> None:
     env = {**GOOD_ENV, "HALLPASS_SESSION_MAX_AGE_SECONDS": "", "HALLPASS_DATA_DIR": "  ", "HALLPASS_BIND": "",
            "HALLPASS_INVITE_EXPIRY_HOURS": "", "HALLPASS_LOG_LEVEL": "", "HALLPASS_COOKIE_DOMAIN": "",
-           "HALLPASS_ADMIN_SUBS": "", "HALLPASS_CONFLICT_WINDOW_HOURS": ""}
+           "HALLPASS_ADMIN_SUBS": "", "HALLPASS_CONFLICT_WINDOW_HOURS": "", "HALLPASS_FLUXER_SERVICE": "",
+           "HALLPASS_RESYNC_SECONDS": ""}
     config = Config.from_env(env)
+    assert config.fluxer_service_slug == "fluxer"
+    assert config.resync_seconds == 300
     assert config.session_max_age_seconds == 43200
     assert config.conflict_window_hours == 24
     assert config.data_dir == Path("data")
