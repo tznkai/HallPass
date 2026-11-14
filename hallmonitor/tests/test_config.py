@@ -98,6 +98,20 @@ def test_service_variable_needs_a_slug_and_a_key(name: str) -> None:
         Config.from_env(base_env(**{name: "x"}))
 
 
+# A slug never has a doubled or trailing hyphen, so `a--b` and `a-` have no variable name that splits cleanly at
+# the first `__`. A variable that would name either one is refused, and so is any key that starts or ends with `_`.
+@pytest.mark.parametrize("name", ["HM_SERVICE_A__B__HOST", "HM_SERVICE_A___HOST", "HM_SERVICE_THE_SHIP___HOST",
+                                  "HM_SERVICE_A__HOST_"])
+def test_service_variable_that_names_an_invalid_slug_or_key_is_refused(name: str) -> None:
+    with pytest.raises(ConfigError, match=name):
+        Config.from_env(base_env(**{name: "x"}))
+
+
+def test_service_slug_with_single_hyphens_is_accepted() -> None:
+    config = Config.from_env(base_env(**{"HM_SERVICE_A_B_C__HOST": "example"}))
+    assert config.service_settings["a-b-c"]["host"] == "example"
+
+
 def test_secrets_hold_tokens_and_secret_service_settings_only() -> None:
     config = Config.from_env(base_env(FLUXER_ADMIN_URL="https://fluxer.invalid", FLUXER_ADMIN_KEY=FLUXER_KEY,
                                       **{"HM_SERVICE_MINECRAFT__RCON_PASSWORD": RCON,

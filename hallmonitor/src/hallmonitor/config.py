@@ -18,7 +18,10 @@ SERVICE_PREFIX = "HM_SERVICE_"
 SECRET_KEY_PARTS = ("password", "key", "token")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _INTEGER = re.compile(r"[0-9]{1,9}")
-_SERVICE_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+SERVICE_SLUG_MAX = 64
+# The same slug rule as hallpass (its services.is_valid_slug), kept as a separate copy: the two projects share no code.
+_SERVICE_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_SERVICE_KEY = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
 
 
 class ConfigError(ValueError):
@@ -89,8 +92,11 @@ def _log_level(env: Mapping[str, str], name: str) -> str:
 
 
 def _service_settings(env: Mapping[str, str]) -> dict[str, dict[str, str]]:
-    """HM_SERVICE_<SLUG>__<KEY> variables, grouped by service. The slug is lower-cased with `_` turned into `-`; the
-    key is lower-cased. An empty value is not a setting, so a blank line in the template changes nothing."""
+    """HM_SERVICE_<SLUG>__<KEY> variables, grouped by service. The name splits at its first `__`. The slug is
+    lower-cased with `_` turned into `-`, and it must be a valid slug: single hyphens only, up to 64 characters. The key
+    is lower-cased, and it must be lower-case letters and digits joined by single underscores, so a `__` or a leading
+    or trailing `_` in the key is refused. An empty value is not a setting, so a blank line in the template changes
+    nothing."""
     settings: dict[str, dict[str, str]] = {}
     for name, raw in env.items():
         if not name.startswith(SERVICE_PREFIX):
@@ -99,11 +105,14 @@ def _service_settings(env: Mapping[str, str]) -> dict[str, dict[str, str]]:
         if not separator or not slug_part or not key_part:
             raise ConfigError(f"{name} must be HM_SERVICE_<SLUG>__<KEY>")
         slug = slug_part.lower().replace("_", "-")
-        if not _SERVICE_SLUG.fullmatch(slug):
+        if len(slug) > SERVICE_SLUG_MAX or not _SERVICE_SLUG.fullmatch(slug):
             raise ConfigError(f"{name} names a service slug that is not valid")
+        key = key_part.lower()
+        if not _SERVICE_KEY.fullmatch(key):
+            raise ConfigError(f"{name} must be HM_SERVICE_<SLUG>__<KEY>, with a key of letters and digits joined by _")
         value = raw.strip()
         if value:
-            settings.setdefault(slug, {})[key_part.lower()] = value
+            settings.setdefault(slug, {})[key] = value
     return settings
 
 
