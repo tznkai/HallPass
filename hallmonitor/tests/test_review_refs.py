@@ -40,6 +40,8 @@ TOPICS = [
     "Reconcile decisions",
     "Fluxer never bans",
     "Adapter registry",
+    "RCON framing",
+    "Minecraft never pardons",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.

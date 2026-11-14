@@ -30,3 +30,15 @@ as the code they cite.
 
 - `src/hallmonitor/adapters/registry.py:23` `ADAPTERS: dict[str, AdapterPlugin] = {` — the one map from adapter name to plugin; an adapter name that is not in this map builds no adapter
 - `src/hallmonitor/adapters/registry.py:30` `def build_adapter(name: str, ctx: AdapterContext)` — the single entry point; a plugin that returns None leaves its service without an adapter, so every subject of that service is reported as `no_adapter`
+
+## RCON framing
+
+- `src/hallmonitor/rcon.py:95` `if got_id == sentinel_id:` — the end of a response is the sentinel's reply, never the command's own packet, so a multi-packet answer is read in full before it is returned
+- `src/hallmonitor/rcon.py:97` `if self._dialect == "minecraft" or data == SOURCE_TERMINATOR` — the dialect split: a Minecraft reply to the sentinel ends the read, while a Source echo of the empty sentinel is skipped until the terminator body arrives
+- `src/hallmonitor/rcon.py:110` `if req_id == -1:` — the auth check: a type-2 reply with id -1 is a wrong password and raises `auth`; any other type-2 reply authenticates
+
+## Minecraft never pardons
+
+- `src/hallmonitor/adapters/minecraft.py:114` `if any(_is_banned(entry.listed, ban_text) for entry in entries):` — the ban branch of observe: a player on the ban list is checked before any whitelist state is read, so a ban placed by someone else is never lifted
+- `src/hallmonitor/adapters/minecraft.py:115` `return Observed("banned_external")` — the observation that keeps the reconcile loop from applying anything to a banned player
+- `src/hallmonitor/adapters/minecraft.py:147` `if actual != desired:` — the apply re-check: the whitelist is read again after the change, and any disagreement is `not_applied`, so a partial change is never reported as success
