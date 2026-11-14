@@ -166,6 +166,8 @@ async def _serve(state: FakeRconState, reader: asyncio.StreamReader, writer: asy
         if ptype == PACKET_AUTH:
             if state.silent_auth:
                 continue
+            if state.dialect == "source":
+                writer.write(_packet(req_id, PACKET_RESPONSE, b""))   # a Source server sends an empty type-0 first
             if body.decode("utf-8", "replace") == state.password:
                 writer.write(_packet(req_id, PACKET_COMMAND, b""))
             else:

@@ -174,6 +174,23 @@ async def test_command_at_the_limit_is_sent():
     assert len(state.commands[0]) == COMMAND_LIMIT
 
 
+async def test_source_dialect_authenticates_past_the_empty_response_packet_that_comes_first() -> None:
+    state = FakeRconState(dialect="source", handler=lambda _state, _cmd: "ok")
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD, dialect="source") as client:
+            text = await client.command("whitelist list")
+    assert text == "ok"
+
+
+async def test_source_dialect_wrong_password_after_the_empty_packet_is_auth_failure() -> None:
+    state = FakeRconState(dialect="source", password="right-pass")
+    async with rcon_server(state) as port:
+        with pytest.raises(RconError) as info:
+            async with RconClient(LOOPBACK, port, "wrong-pass", dialect="source"):
+                pass
+    assert info.value.reason == "auth"
+
+
 def test_repr_never_shows_the_password():
     assert PASSWORD not in repr(RconClient(LOOPBACK, 1, PASSWORD))
 
