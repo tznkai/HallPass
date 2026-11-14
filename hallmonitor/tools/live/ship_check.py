@@ -4,7 +4,8 @@
 
 Runs listid, banid, listid, writeid, removeid, writeid and listid through the shared RCON client in the source dialect,
 and prints each raw reply. The other IDs in a reply are masked, keeping only the universe and parity digits. The test
-account is removed again if the ban was attempted and the sequence did not reach its removal.
+account is removed again if the ban was attempted and the sequence did not reach the writeid that saves its removal.
+If that cleanup fails too, the run says so and asks for a manual check of the ban list.
 
 Environment: SHIP_RCON_HOST, SHIP_RCON_PASSWORD, and optionally SHIP_RCON_PORT (default 27015).
 Exit codes: 0 every step ran; 1 a step or the connection failed; 2 configuration error; 130 interrupted.
@@ -16,6 +17,7 @@ import argparse
 import asyncio
 import os
 import re
+from dataclasses import dataclass
 
 from _live import Console, LiveConfigError, required_env
 
@@ -57,26 +59,38 @@ async def _cleanup(console: Console, client: RconClient, sid: str) -> bool:
     return True
 
 
-async def run_checks(console: Console, client: RconClient, steam64: str, universe: str) -> bool:
-    """The Source sequence. Returns False when a cleanup removal could not run. A failing step raises, after cleanup."""
+@dataclass
+class Progress:
+    """How far the Source sequence got, kept by the caller so the cleanup outcome is known on every exit.
+
+    `attempted` is set once the test account's ban is first sent. `removed` is set only after the final writeid, so a
+    failed writeid after removeid still triggers cleanup. `cleanup_ok` is False from the moment a cleanup starts until
+    it succeeds, so an interrupted cleanup still reads as incomplete.
+    """
+
+    attempted: bool = False
+    removed: bool = False
+    cleanup_ok: bool = True
+
+
+async def run_checks(console: Console, client: RconClient, steam64: str, universe: str, progress: Progress) -> None:
+    """The Source sequence. A failing step raises after the cleanup, which is run whenever the ban may still be in
+    place. The outcome is left in `progress`."""
     sid = steam2(steam64, universe)
-    attempted = False
-    removed = False
-    cleanup_ok = True
     try:
         await _show(console, client, "listid (before)", "listid")
-        attempted = True
+        progress.attempted = True
         await _show(console, client, "banid (permanent)", f"banid 0 {sid}")
         await _show(console, client, "listid after banid", "listid")
         await _show(console, client, "writeid after banid", "writeid")
         await _show(console, client, "removeid", f"removeid {sid}")
-        removed = True
         await _show(console, client, "writeid after removeid", "writeid")
+        progress.removed = True
         await _show(console, client, "listid after removeid", "listid")
     finally:
-        if attempted and not removed:
-            cleanup_ok = await _cleanup(console, client, sid)
-    return cleanup_ok
+        if progress.attempted and not progress.removed:
+            progress.cleanup_ok = False
+            progress.cleanup_ok = await _cleanup(console, client, sid)
 
 
 def _port() -> int | None:
@@ -90,19 +104,21 @@ def _port() -> int | None:
 
 
 async def _run(console: Console, host: str, port: int, password: str, steam: str, universe: str) -> int:
+    progress = Progress()
+    code = 1
     try:
         async with RconClient(host, port, password, dialect="source") as client:
-            ok = await run_checks(console, client, steam, universe)
+            await run_checks(console, client, steam, universe, progress)
+        code = 0 if progress.cleanup_ok else 1
     except RconError as exc:
         console.line(f"rcon error: {exc.reason}")
-        return 1
     except OSError as exc:
         console.line(console.error(exc))
-        return 1
-    if not ok:
-        console.line("cleanup incomplete: check the ban list by hand")
-        return 1
-    return 0
+    finally:
+        # Printed on every exit where the test ban may still be in place, including an interrupt.
+        if progress.attempted and not progress.cleanup_ok:
+            console.line("cleanup incomplete: check the ban list by hand")
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:

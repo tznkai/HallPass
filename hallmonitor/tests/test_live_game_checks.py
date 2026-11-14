@@ -219,6 +219,64 @@ def test_the_ban_is_lifted_even_when_the_wait_is_interrupted(capsys):
     assert log[-1] == ("POST", "/v1/api/unban", {"userid": "steam_" + STEAM})
 
 
+UNBAN_BY_HAND = "test ban may still be in place: unban by hand"
+
+
+def _palworld_unban_answers(log, status: int | None = None, error: BaseException | None = None):
+    base = _palworld_handler(log)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/api/unban":
+            log.append((request.method, request.url.path, json.loads(request.content)))
+            if error is not None:
+                raise error
+            return httpx.Response(status or 200, json={})
+        return base(request)
+    return handler
+
+
+def test_a_refused_unban_is_reported_with_the_manual_step_and_no_id(capsys):
+    log: list[tuple[str, str, object]] = []
+    client = httpx.Client(base_url=PAL_BASE, auth=httpx.BasicAuth("admin", PAL_PASSWORD),
+                          transport=httpx.MockTransport(_palworld_unban_answers(log, status=500)))
+    lifted = palworld_check.run_checks(Console([PAL_PASSWORD, STEAM]), client, STEAM, pause=lambda: None)
+    assert lifted is False
+    out = capsys.readouterr().out
+    assert UNBAN_BY_HAND in out
+    assert "steam_" not in out and STEAM not in out
+
+
+def test_an_unreachable_unban_is_reported_with_the_manual_step_and_no_id(capsys):
+    log: list[tuple[str, str, object]] = []
+    refused = httpx.ConnectError("connection refused")
+    client = httpx.Client(base_url=PAL_BASE, auth=httpx.BasicAuth("admin", PAL_PASSWORD),
+                          transport=httpx.MockTransport(_palworld_unban_answers(log, error=refused)))
+    assert palworld_check.run_checks(Console([PAL_PASSWORD, STEAM]), client, STEAM, pause=lambda: None) is False
+    out = capsys.readouterr().out
+    assert UNBAN_BY_HAND in out
+    assert "steam_" not in out and STEAM not in out
+
+
+def test_palworld_main_exits_1_when_the_test_ban_could_not_be_lifted(monkeypatch, capsys):
+    monkeypatch.setenv("PAL_REST_URL", PAL_BASE)
+    monkeypatch.setenv("PAL_ADMIN_PASSWORD", PAL_PASSWORD)
+    log: list[tuple[str, str, object]] = []
+    code = palworld_check.main(["--steam", STEAM], transport=httpx.MockTransport(_palworld_unban_answers(log, status=500)),
+                               pause=lambda: None)
+    assert code == 1
+    assert UNBAN_BY_HAND in capsys.readouterr().out
+
+
+def test_palworld_main_exits_0_when_the_ban_is_lifted(monkeypatch, capsys):
+    monkeypatch.setenv("PAL_REST_URL", PAL_BASE)
+    monkeypatch.setenv("PAL_ADMIN_PASSWORD", PAL_PASSWORD)
+    log: list[tuple[str, str, object]] = []
+    code = palworld_check.main(["--steam", STEAM], transport=httpx.MockTransport(_palworld_handler(log)),
+                               pause=lambda: None)
+    assert code == 0
+    assert UNBAN_BY_HAND not in capsys.readouterr().out
+
+
 def test_palworld_main_rejects_a_steam_id_with_letters_before_any_request(monkeypatch, capsys):
     monkeypatch.setenv("PAL_REST_URL", PAL_BASE)
     monkeypatch.setenv("PAL_ADMIN_PASSWORD", PAL_PASSWORD)
@@ -259,9 +317,10 @@ class FakeRcon:
 async def test_the_source_sequence_runs_in_order_and_prints_masked_output(capsys):
     client = FakeRcon()
     console = Console([STEAM, SID2, "fake-rcon-pass", HOST])
-    ok = await ship_check.run_checks(console, client, STEAM, "0")
+    progress = ship_check.Progress()
+    await ship_check.run_checks(console, client, STEAM, "0", progress)
 
-    assert ok is True
+    assert progress.removed is True and progress.cleanup_ok is True
     assert client.commands == [
         "listid", f"banid 0 {SID2}", "listid", "writeid", f"removeid {SID2}", "writeid", "listid",
     ]
@@ -273,9 +332,76 @@ async def test_the_source_sequence_runs_in_order_and_prints_masked_output(capsys
 async def test_a_failed_ban_still_removes_the_id(capsys):
     client = FakeRcon(fail_on=frozenset({"banid"}))
     with pytest.raises(ship_check.RconError):
-        await ship_check.run_checks(Console([STEAM]), client, STEAM, "0")
+        await ship_check.run_checks(Console([STEAM]), client, STEAM, "0", ship_check.Progress())
     assert f"removeid {SID2}" in client.commands
     assert client.commands[-1] == "writeid"
+
+
+# Cleanup after a failed sequence: the ban is marked removed only after the final writeid, and the manual check line is
+# printed on every exit where the ban may still be in place. A scripted client fails the command at each listed index.
+
+class ScriptedRconClient:
+    def __init__(self, failures: dict[int, BaseException] | None = None) -> None:
+        self.commands: list[str] = []
+        self._failures = failures or {}
+
+    async def __aenter__(self) -> "ScriptedRconClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return False
+
+    async def command(self, cmd: str) -> str:
+        index = len(self.commands)
+        self.commands.append(cmd)
+        if index in self._failures:
+            raise self._failures[index]
+        return f"ID filter list: 1 entries\n1 {SID2} : permanent\n" if cmd == "listid" else "ok"
+
+
+def _use(monkeypatch, client: ScriptedRconClient) -> None:
+    monkeypatch.setattr(ship_check, "RconClient", lambda *args, **kwargs: client)
+
+
+MANUAL_CHECK = "cleanup incomplete: check the ban list by hand"
+SEQUENCE_AFTER_BAN = ["listid", f"banid 0 {SID2}", "listid", "writeid", f"removeid {SID2}", "writeid"]
+
+
+async def test_a_failed_final_writeid_still_runs_the_cleanup(monkeypatch, capsys):
+    client = ScriptedRconClient({5: ship_check.RconError("timeout")})
+    _use(monkeypatch, client)
+    code = await ship_check._run(Console([STEAM]), HOST, 27015, "fake-rcon-pass", STEAM, "0")
+    assert client.commands == SEQUENCE_AFTER_BAN + [f"removeid {SID2}", "writeid"]
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "rcon error: timeout" in out and MANUAL_CHECK not in out
+
+
+async def test_a_failed_cleanup_prints_the_manual_check_line_and_exits_1(monkeypatch, capsys):
+    client = ScriptedRconClient({5: ship_check.RconError("timeout"), 6: ship_check.RconError("timeout")})
+    _use(monkeypatch, client)
+    code = await ship_check._run(Console([STEAM]), HOST, 27015, "fake-rcon-pass", STEAM, "0")
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "rcon error: timeout" in out and MANUAL_CHECK in out
+    assert SID2 not in out and STEAM not in out
+
+
+async def test_an_interrupt_during_a_failed_cleanup_still_prints_the_manual_check_line(monkeypatch, capsys):
+    client = ScriptedRconClient({1: ship_check.RconError("timeout"), 2: KeyboardInterrupt()})
+    _use(monkeypatch, client)
+    with pytest.raises(KeyboardInterrupt):
+        await ship_check._run(Console([STEAM]), HOST, 27015, "fake-rcon-pass", STEAM, "0")
+    assert MANUAL_CHECK in capsys.readouterr().out
+
+
+async def test_a_clean_run_exits_0_and_prints_no_manual_check_line(monkeypatch, capsys):
+    client = ScriptedRconClient()
+    _use(monkeypatch, client)
+    code = await ship_check._run(Console([STEAM]), HOST, 27015, "fake-rcon-pass", STEAM, "0")
+    assert code == 0
+    assert client.commands[-1] == "listid"
+    assert MANUAL_CHECK not in capsys.readouterr().out
 
 
 def test_ship_main_rejects_a_steam_id_that_is_not_digits(monkeypatch, capsys):

@@ -4,7 +4,8 @@
 
 Lists the players and prints only the key names of the reply. Bans the test account with the REST API, then waits
 while the operator checks the ban-list file with ptero_files_check.py. The ban is lifted in every case once it was
-sent, including when the wait is interrupted. The account's id is printed as <redacted>.
+sent, including when the wait is interrupted. When the unban is refused or cannot be sent, the run says the test ban may
+still be in place and asks for it to be lifted by hand. The account's id is never printed.
 
 Environment: PAL_REST_URL, PAL_ADMIN_PASSWORD. The admin password is never printed.
 Exit codes: 0 every step ran; 1 a step failed; 2 configuration error; 130 interrupted.
@@ -22,6 +23,7 @@ from _live import Console, LiveConfigError, instance_secrets, required_env
 
 ADMIN_USER = "admin"
 BAN_MESSAGE = "hallmonitor test"
+UNBAN_BY_HAND = "test ban may still be in place: unban by hand"
 TIMEOUT_SECONDS = 30.0
 DIGITS = re.compile(r"[0-9]{1,20}")
 
@@ -54,8 +56,25 @@ def _show(console: Console, label: str, response: httpx.Response) -> None:
     console.step(label, f"status={response.status_code}")
 
 
-def run_checks(console: Console, client: httpx.Client, steam: str, pause: Callable[[], None]) -> None:
-    """The list, the ban, the operator's check, then the unban. The unban runs in a finally once the ban was sent."""
+def _unban(console: Console, client: httpx.Client, userid: str) -> bool:
+    """Lifts the test ban. A refused or unreachable unban is reported with the manual step, and never with the id. True
+    when the server answered with a 2xx status."""
+    try:
+        response = client.post("/v1/api/unban", json={"userid": userid})
+    except httpx.HTTPError as exc:
+        console.step("unban", f"failed: {console.error(exc)}")
+        console.line(UNBAN_BY_HAND)
+        return False
+    _show(console, "unban", response)
+    if not 200 <= response.status_code < 300:
+        console.line(UNBAN_BY_HAND)
+        return False
+    return True
+
+
+def run_checks(console: Console, client: httpx.Client, steam: str, pause: Callable[[], None]) -> bool:
+    """The list, the ban, the operator's check, then the unban. The unban runs in a finally once the ban was sent. Returns
+    True when the test ban was lifted."""
     userid = _userid(steam)
     players = client.get("/v1/api/players")
     _show(console, "players", players)
@@ -65,6 +84,7 @@ def run_checks(console: Console, client: httpx.Client, steam: str, pause: Callab
         console.step("players keys", "reply was not JSON")
 
     banned = False
+    lifted = True
     try:
         banned = True
         _show(console, "ban", client.post("/v1/api/ban", json={"userid": userid, "message": BAN_MESSAGE}))
@@ -73,7 +93,8 @@ def run_checks(console: Console, client: httpx.Client, steam: str, pause: Callab
         pause()
     finally:
         if banned:
-            _show(console, "unban", client.post("/v1/api/unban", json={"userid": userid}))
+            lifted = _unban(console, client, userid)
+    return lifted
 
 
 def _wait_for_enter() -> None:
@@ -101,8 +122,7 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     client = httpx.Client(base_url=base_url.rstrip("/"), auth=httpx.BasicAuth(ADMIN_USER, password),
                           timeout=TIMEOUT_SECONDS, transport=transport)
     try:
-        run_checks(console, client, args.steam, pause)
-        return 0
+        return 0 if run_checks(console, client, args.steam, pause) else 1
     except httpx.HTTPError as exc:
         console.line(console.error(exc))
         return 1
