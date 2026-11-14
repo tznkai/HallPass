@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 
 from hallpass import registry, text
+from hallpass.auth import current_person_any_terms
+from hallpass.registry import Person
 from tests.fake_authentik import enrol
 from tests.helpers import (
     TERMS_PRIVACY,
@@ -136,7 +138,9 @@ async def test_with_no_version_published_the_terms_page_says_so_and_pages_redire
 
 # AC3.2: acceptance is checked against the current version ------------------------------------------------
 
-async def test_a_person_locked_after_reading_terms_gets_403_and_no_acceptance(env: Env):
+async def test_a_person_already_locked_when_they_post_is_refused_by_the_auth_gate(env: Env):
+    # The auth gate (current_person_any_terms) sees the lock and refuses before the route body runs. The route's own
+    # AcceptanceLocked mapping is covered by test_a_person_locked_between_the_sign_in_check_and_the_write.
     await publish_terms(env)
     person, browser = await signed_in_person(env, accepted=False)
     page = await browser.get("/terms")
@@ -150,6 +154,35 @@ async def test_a_person_locked_after_reading_terms_gets_403_and_no_acceptance(en
     assert text.LOCKED in locked.text
     count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
     assert count == 0
+
+
+async def test_a_person_locked_between_the_sign_in_check_and_the_write_is_refused_and_signed_out(env: Env):
+    # The auth gate reads the person before the lock lands, so the route reaches the write and the write refuses.
+    await publish_terms(env)
+    person, browser = await signed_in_person(env, accepted=False)
+    assert person.status != "locked"
+    stale_person = person          # what the auth gate read before the lock was written
+
+    async def read_before_the_lock() -> Person:
+        return stale_person
+
+    page = await browser.get("/terms")
+    token = (await form(env, "/terms", client=browser))["csrf"]
+    version_id = re.search(r'name="version_id" value="(\d+)"', page.text).group(1)
+    env.application.dependency_overrides[current_person_any_terms] = read_before_the_lock
+    try:
+        await env.db.run(lambda c: registry.set_locked(c, person.id, True))
+        locked = await browser.post("/terms/accept", data={"csrf": token, "version_id": version_id})
+    finally:
+        env.application.dependency_overrides.pop(current_person_any_terms, None)
+
+    assert locked.status_code == 403
+    assert text.LOCKED in locked.text
+    count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
+    assert count == 0
+    follow_up = await browser.get("/")
+    assert follow_up.status_code == 303
+    assert follow_up.headers["location"].startswith("/login")
 
 
 async def test_accepting_a_stale_version_is_refused_and_records_nothing(env: Env):
