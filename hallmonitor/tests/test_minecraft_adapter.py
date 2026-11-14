@@ -66,6 +66,11 @@ def bedrock_identity(tag: str) -> dict[str, str]:
     return {"kind": "bedrock_gamertag", "value": tag}
 
 
+def ban(name: str, by: str = "Admin", reason: str = "griefing") -> tuple[str, str, str]:
+    """One vanilla ban entry: `NAME was banned by BANNER: REASON`."""
+    return (name, by, reason)
+
+
 def subject(ref: str, desired: str, *identities: dict[str, str], generation: int = 1) -> dict[str, Any]:
     return {"ref": ref, "identities": list(identities), "desired": desired, "generation": generation}
 
@@ -161,7 +166,7 @@ async def test_lifting_the_hold_re_adds_the_player() -> None:
 # AC11.4: a player on the ban list is banned_external, and nothing is applied or pardoned ------------------
 
 async def test_a_banned_player_is_reported_banned_external_and_never_re_added() -> None:
-    state = server_state(bans=["Steve"])
+    state = server_state(bans=[ban("Steve")])
     hallpass = mc_service(subject("r1", "allowed", java_identity("Steve"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
@@ -171,7 +176,7 @@ async def test_a_banned_player_is_reported_banned_external_and_never_re_added() 
 
 
 async def test_a_banned_player_with_a_suspend_desired_is_banned_external_and_left_as_it_is() -> None:
-    state = server_state(whitelist=["Steve"], bans=["Steve"])
+    state = server_state(whitelist=["Steve"], bans=[ban("Steve")])
     hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
@@ -181,7 +186,7 @@ async def test_a_banned_player_with_a_suspend_desired_is_banned_external_and_lef
 
 
 async def test_a_ban_on_a_bedrock_player_is_matched_by_its_prefixed_name() -> None:
-    state = server_state(bans=[".Tim"])
+    state = server_state(bans=[ban(".Tim")])
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
@@ -190,7 +195,7 @@ async def test_a_ban_on_a_bedrock_player_is_matched_by_its_prefixed_name() -> No
 
 
 async def test_a_ban_on_a_longer_name_does_not_ban_a_shorter_one() -> None:
-    state = server_state(bans=["Steven"])
+    state = server_state(bans=[ban("Steven")])
     hallpass = mc_service(subject("r1", "allowed", java_identity("Steve"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
@@ -199,11 +204,51 @@ async def test_a_ban_on_a_longer_name_does_not_ban_a_shorter_one() -> None:
 
 
 async def test_the_ban_list_header_line_is_not_a_ban_on_a_player_named_as_its_words() -> None:
-    state = server_state(whitelist=["ban"], bans=["Other"])
+    state = server_state(whitelist=["ban"], bans=[ban("Other")])
     hallpass = mc_service(subject("r1", "allowed", java_identity("ban"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
     assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+# A managed name that appears only as the banner or in the reason is not banned --------------------------
+
+async def test_a_managed_name_that_only_banned_someone_else_is_not_banned_and_is_suspended() -> None:
+    # "Steve" is the banner of Griefer's ban, so Steve is not on the ban list and the hold is applied.
+    state = server_state(whitelist=["Steve"], online={"Steve"}, bans=[ban("Griefer", by="Steve", reason="x")])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert "Steve" not in state.online
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
+async def test_a_managed_name_that_only_appears_in_a_ban_reason_is_not_banned_and_is_suspended() -> None:
+    state = server_state(whitelist=["Tim"], online={"Tim"},
+                         bans=[ban("Griefer", by="Admin", reason="alt of Tim")])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Tim"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
+async def test_a_managed_name_that_only_appears_in_a_ban_reason_is_allowed_when_entitled() -> None:
+    state = server_state(bans=[ban("Griefer", by="Admin", reason="alt of Tim")])
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Tim"]
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+async def test_a_managed_name_on_its_own_ban_line_is_banned_whatever_the_case() -> None:
+    state = server_state(bans=[ban("steve", by="Admin", reason="spam")])
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Steve"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
 
 
 # AC11.5: RCON refusing the connection or the password is error, never a partial success -------------------

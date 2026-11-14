@@ -34,7 +34,7 @@ Handler = Callable[["FakeRconState", str], str]
 class FakeRconState:
     password: str = "test-pass"
     whitelist: list[str] = field(default_factory=list)  # vanilla list names; Bedrock names carry the prefix
-    bans: list[str] = field(default_factory=list)
+    bans: list[tuple[str, str, str]] = field(default_factory=list)  # (name, banner, reason)
     online: set[str] = field(default_factory=set)
     prefix: str = "."
     dialect: Literal["minecraft", "source"] = "minecraft"
@@ -78,7 +78,8 @@ def _whitelist_remove(state: FakeRconState, stored: str, shown: str) -> str:
 def _banlist(state: FakeRconState) -> str:
     if not state.bans:
         return "There are no bans"
-    return "\n".join([f"There are {len(state.bans)} ban(s):", *state.bans])
+    lines = [f"{name} was banned by {banner}: {reason}" for name, banner, reason in state.bans]
+    return "\n".join([f"There are {len(state.bans)} ban(s):", *lines])
 
 
 def _list_online(state: FakeRconState) -> str:

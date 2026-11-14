@@ -80,12 +80,14 @@ def _parse_whitelist(text: str) -> list[str]:
 
 
 def _ban_names(text: str) -> str:
-    """The ban list without its header lines, so `There are 1 ban(s):` never matches a name."""
-    return "\n".join(line for line in text.splitlines() if not BAN_HEADER.fullmatch(line.strip()))
+    """The ban list without its header lines, each line stripped, so `There are 1 ban(s):` never matches a name."""
+    return "\n".join(line.strip() for line in text.splitlines() if not BAN_HEADER.fullmatch(line.strip()))
 
 
 def _is_banned(name: str, ban_text: str) -> bool:
-    return re.search(rf"(?<![\w.]){re.escape(name)}(?!\w)", ban_text, re.IGNORECASE) is not None
+    """True when an entry line starts with the name. A vanilla entry reads `NAME was banned by BANNER: REASON`, so a
+    name that appears only as the banner or in the reason is not the banned player."""
+    return re.search(rf"^{re.escape(name)}(?!\w)", ban_text, re.IGNORECASE | re.MULTILINE) is not None
 
 
 def _listed_state(entries: Sequence[_Entry], listed_lower: set[str]) -> ListState:
