@@ -30,7 +30,7 @@ from tests.helpers import (
 NOW_TEXT = "2026-11-13T12:00:00+00:00"
 # Pages that answer without a terms acceptance. Later phases add their own ungated machine endpoints here, such as
 # /forward-auth in Phase 4.
-UNGATED_PATHS = {"/terms", "/login", "/auth/callback"}
+UNGATED_PATHS = {"/terms", "/login", "/auth/callback", "/forward-auth"}
 
 
 def gated_get_paths(env: Env) -> list[str]:

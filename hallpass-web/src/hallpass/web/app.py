@@ -14,6 +14,7 @@ from hallpass.auth import OidcClient, RedirectToLogin, RedirectToTerms, add_sess
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
+from hallpass.forward_auth import router as forward_auth_router
 from hallpass.registry import NoSuchGroup, NoSuchPerson
 from hallpass.web.pages import make_templates, not_found, redirect_to_login, redirect_to_terms
 from hallpass.web.routes_admin import router as admin_router
@@ -47,4 +48,5 @@ def create_app(deps: AppDeps) -> FastAPI:
     app.include_router(terms_router)
     app.include_router(admin_router)
     app.include_router(family_router)
+    app.include_router(forward_auth_router)
     return app
