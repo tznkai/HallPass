@@ -20,7 +20,7 @@ PACKET_COMMAND = 2
 PACKET_AUTH = 3
 PACKET_MC_SENTINEL = 200  # an invalid type; a Minecraft server answers it with a reply that names it as unknown
 MAX_COMMAND_BYTES = 1446
-MAX_PACKET_BODY = 4096
+MAX_RESPONSE_BODY = 4 * 4096  # a server splits output per 4096 characters, and each character is at most 4 UTF-8 bytes
 SOURCE_TERMINATOR = b"\x00\x00\x00\x01"
 COLOUR_CODE = re.compile("\u00a7.")
 HEADER_FIELDS = 8  # request id and packet type, both int32
@@ -145,7 +145,7 @@ class RconClient:
         if self._reader is None:
             raise RconError("protocol")
         (length,) = struct.unpack("<i", await self._reader.readexactly(4))
-        if length < HEADER_FIELDS + TRAILER_BYTES or length > HEADER_FIELDS + MAX_PACKET_BODY + TRAILER_BYTES:
+        if length < HEADER_FIELDS + TRAILER_BYTES or length > HEADER_FIELDS + MAX_RESPONSE_BODY + TRAILER_BYTES:
             raise RconError("protocol")
         req_id, ptype = struct.unpack("<ii", await self._reader.readexactly(HEADER_FIELDS))
         rest = await self._reader.readexactly(length - HEADER_FIELDS)

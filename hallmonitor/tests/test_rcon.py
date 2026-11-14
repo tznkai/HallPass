@@ -70,6 +70,49 @@ async def test_minecraft_colour_codes_are_stripped(dialect):
     assert text == "Hello there"
 
 
+# A server splits output per 4096 characters, and a character may take 4 UTF-8 bytes, so a packet can reach 16384 bytes.
+FOUR_BYTE_CHAR = "\U0001F600"   # 4 bytes in UTF-8
+THREE_BYTE_CHAR = "\u4e2d"      # 3 bytes in UTF-8
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+async def test_a_single_reply_of_four_byte_text_within_one_packet_is_read_in_full(dialect):
+    text = FOUR_BYTE_CHAR * 4000   # 16000 bytes in one packet: over 4096 bytes, under the 16384-byte cap
+    state = FakeRconState(dialect=dialect, handler=lambda _state, _cmd: text)
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD, dialect=dialect) as client:
+            result = await client.command("anything")
+    assert result == text
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+async def test_fragmented_multi_byte_text_is_reassembled_in_full(dialect):
+    text = THREE_BYTE_CHAR * 6000 + FOUR_BYTE_CHAR * 5000   # 43000 bytes across three character-split packets
+    state = FakeRconState(dialect=dialect, fragment=True, handler=lambda _state, _cmd: text)
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD, dialect=dialect) as client:
+            result = await client.command("anything")
+    assert result == text
+
+
+async def test_fragments_of_the_largest_size_are_all_within_the_cap():
+    text = FOUR_BYTE_CHAR * 8192   # two fragments of 4096 characters, each exactly 16384 bytes
+    state = FakeRconState(fragment=True, handler=lambda _state, _cmd: text)
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD) as client:
+            result = await client.command("anything")
+    assert result == text
+
+
+async def test_a_single_reply_over_the_inbound_cap_is_a_protocol_error():
+    state = FakeRconState(handler=lambda _state, _cmd: FOUR_BYTE_CHAR * 4097)   # 16388 bytes: one over the cap
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD) as client:
+            with pytest.raises(RconError) as info:
+                await client.command("anything")
+    assert info.value.reason == "protocol"
+
+
 async def test_connection_dropped_mid_response_is_protocol_error():
     state = FakeRconState(drop_after=0)
     async with rcon_server(state) as port:
