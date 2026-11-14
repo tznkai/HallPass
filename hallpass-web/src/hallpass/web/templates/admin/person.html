@@ -170,6 +170,80 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 </section>
 
 <section class="stack">
+  <h2>Holds</h2>
+  {% if hold_rows %}
+  <table>
+    <thead><tr><th>Service</th><th>Status</th><th>Suspension</th><th></th></tr></thead>
+    <tbody>
+      {% for row in hold_rows %}
+      <tr>
+        <td>{{ row.service.name }}</td>
+        <td>{% for label in row.labels %}<span>Suspended by {{ label }}</span><br>{% endfor %}</td>
+        <td>{{ row.suspendable }}</td>
+        <td>
+          {% if not row.service.auto_suspendable %}
+          {% if row.marked %}
+          <form method="post" action="/admin/people/{{ person.id }}/manual/{{ row.service.id }}/unmark" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <button type="submit">Unmark</button>
+          </form>
+          {% else %}
+          <form method="post" action="/admin/people/{{ person.id }}/manual/{{ row.service.id }}" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <button type="submit">Mark manually suspended</button>
+          </form>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No holds on this person.</p>
+  {% endif %}
+  <form method="post" action="/admin/people/{{ person.id }}/holds" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Place an administrator hold on
+      <select name="service_id">
+        <option value="all">All services</option>
+        {% for choice in services %}<option value="{{ choice.id }}">{{ choice.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Place hold</button>
+  </form>
+  <form method="post" action="/admin/people/{{ person.id }}/holds/lift" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Lift holds on
+      <select name="service_id">
+        <option value="all">All services</option>
+        {% for choice in services %}<option value="{{ choice.id }}">{{ choice.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label><input type="checkbox" name="include_parent" value="on"> Also lift parent holds (administrator action)</label>
+    <button type="submit">Lift holds</button>
+  </form>
+  <p>A lockdown is lifted by resolving its review, not here.</p>
+</section>
+
+{% if person.account_type == 'child' %}
+<section class="stack">
+  <h2>Conflict mode</h2>
+  <form method="post" action="/admin/people/{{ person.id }}/mode" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Mode
+      <select name="mode">
+        {% for option in modes %}<option value="{{ option }}"{% if option == person.conflict_mode %} selected{% endif %}>{{ option }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Agreement note <textarea name="agreement_note" rows="3" maxlength="2000">{{ person.agreement_note or '' }}</textarea></label>
+    <label><input type="checkbox" name="apply_to_siblings" value="on"> Apply to all children with the same parents</label>
+    <button type="submit">Save mode</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="stack">
   <h2>Access</h2>
   {% if person.status == 'locked' %}
   <form method="post" action="/admin/people/{{ person.id }}/unlock">

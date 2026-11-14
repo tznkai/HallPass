@@ -30,7 +30,7 @@ from joserfc.errors import JoseError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 
-from hallpass import registry, terms, text
+from hallpass import holds, registry, terms, text
 from hallpass.authentik import AuthentikClient, AuthentikError, AuthentikUser
 from hallpass.config import Config
 from hallpass.db import Database
@@ -241,6 +241,9 @@ async def current_person_any_terms(request: Request) -> Person:
         end_session(request)
         raise HTTPException(403, text.LOCKED)
     request.state.has_children = await deps.db.run(lambda c: bool(registry.children_of(c, person.id)))
+    # The admin's nav shows the open review count. Only an admin's request pays for that query.
+    is_admin = person.authentik_uuid is not None and person.authentik_uuid in deps.config.admin_subs
+    request.state.open_reviews = await deps.db.run(holds.open_review_count) if is_admin else 0
     return person
 
 

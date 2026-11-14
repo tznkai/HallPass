@@ -1,0 +1,51 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: review for {{ review.child.display_name }}{% endblock %}
+{% block content %}
+<p><a href="/admin/reviews">All reviews</a></p>
+<h1>Review for {{ review.child.display_name }}</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+
+<section class="stack">
+  <h2>Reason</h2>
+  <p class="prewrap">{{ review.reason }}</p>
+  <p>Opened {{ review.opened_at }}.</p>
+  {% if review.resolved_at %}
+  <p class="notice">Resolved {{ review.resolved_at }} by {{ review.resolver or 'the system' }}.<br>Outcome: <span class="prewrap">{{ review.outcome }}</span></p>
+  {% endif %}
+</section>
+
+<section class="stack">
+  <h2>Recent decisions</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Action</th><th>By</th><th></th></tr></thead>
+    <tbody>
+      {% for entry in review.decisions %}
+      <tr>
+        <td>{{ entry.at }}</td>
+        <td>{{ entry.action }}</td>
+        <td>{{ entry.actor }}</td>
+        <td>{% if entry.reversal %}reversal{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No decisions logged.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if not review.resolved_at %}
+<section class="stack">
+  <h2>Resolve</h2>
+  <form method="post" action="/admin/reviews/{{ review.id }}/resolve" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Outcome <textarea name="outcome" rows="3" maxlength="2000" required></textarea></label>
+    <label><input type="checkbox" name="lift_lockdown" value="on"> Lift the lockdown</label>
+    <button type="submit">Resolve</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

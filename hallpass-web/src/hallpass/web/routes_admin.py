@@ -17,9 +17,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, registry, services, terms, text, tokens
+from hallpass import authentik_sync, holds, registry, services, terms, text, tokens
 from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
+from hallpass.holds import HoldRefused
 from hallpass.logs import log_event
 from hallpass.registry import LinkRefused, NoSuchGroup, Person
 from hallpass.web.pages import message_page, page
@@ -174,6 +175,8 @@ def _person_context(conn, person: Person) -> dict:
         "child_choices": [] if is_child else [p for p in others if p.account_type == "child"],
         "identities": registry.identities_of(conn, person.id),
         "identity_kinds": registry.IDENTITY_KINDS,
+        "hold_rows": _hold_rows(conn, person.id),
+        "modes": holds.MODES,
         "services": services.list_services(conn),
         "groups": registry.groups_of(conn, person.id),
         "account_types": registry.ACCOUNT_TYPES,
@@ -181,6 +184,26 @@ def _person_context(conn, person: Person) -> dict:
         "invitation_not_created": text.INVITATION_NOT_CREATED,
         "invite_hint": text.INVITE_SHOWN_ONCE_HINT,
     }
+
+
+def _hold_rows(conn, person_id: int) -> list[dict]:
+    """One row per service the person is held on: who placed the holds, and whether the service can be suspended
+    automatically, or is marked as suspended by hand."""
+    held = holds.services_with_holds(conn, person_id)
+    marked = holds.marked_service_ids(conn, person_id)
+    rows = []
+    for service in services.list_services(conn, include_retired=True):
+        if service.id not in held:
+            continue
+        if service.auto_suspendable:
+            wording = text.CAN_AUTO_SUSPEND
+        elif service.id in marked:
+            wording = text.MANUALLY_SUSPENDED
+        else:
+            wording = text.CANNOT_AUTO_SUSPEND
+        rows.append({"service": service, "labels": holds.hold_labels(conn, person_id, service.id),
+                     "suspendable": wording, "marked": service.id in marked})
+    return rows
 
 
 def _load_person(conn, person_id: int) -> dict:
@@ -741,3 +764,153 @@ async def revoke_token(request: Request, token_id: int, admin: Admin) -> Respons
 
     service_id = await deps.db.run(change)
     return _to("/admin/services" if service_id is None else f"/admin/services/{service_id}")
+
+
+# Holds, manual marks and conflict modes ---------------------------------------------------------------
+
+def _window(deps) -> timedelta:
+    return timedelta(hours=deps.config.conflict_window_hours)
+
+
+@router.post("/people/{person_id}/holds", dependencies=WRITE)
+async def admin_place_hold(request: Request, person_id: int, admin: Admin,
+                           service_id: Annotated[str, Form()] = "") -> Response:
+    """Places an admin hold on one service, or on every service the person has (`all`)."""
+    deps = _deps(request)
+    now = deps.clock()
+    try:
+        scope = holds.service_scope(service_id)
+    except ValueError:
+        return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+
+    def change(conn) -> None:
+        holds.place(conn, actor=holds.Actor("admin", admin.id), target_id=person_id, service_ids=scope, now=now,
+                    window=_window(deps), admin_email=deps.config.admin_email)
+
+    await deps.db.run(change)
+    await _sync_affected(deps, person_id)
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/people/{person_id}/holds/lift", dependencies=WRITE)
+async def admin_lift_holds(request: Request, person_id: int, admin: Admin,
+                           service_id: Annotated[str, Form()] = "",
+                           include_parent: Annotated[str | None, Form()] = None) -> Response:
+    """Lifts the admin holds on one service or on all of them. Parent holds go only when `include_parent` is ticked.
+    Lockdown holds stay: they are lifted by resolving their review."""
+    deps = _deps(request)
+    now = deps.clock()
+    try:
+        scope = holds.service_scope(service_id)
+    except ValueError:
+        return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+
+    def change(conn) -> None:
+        ids = sorted(holds.services_with_holds(conn, person_id)) if scope is None else scope
+        holds.lift(conn, actor=holds.Actor("admin", admin.id), target_id=person_id, service_ids=ids, now=now,
+                   window=_window(deps), admin_email=deps.config.admin_email,
+                   include_parent=include_parent is not None)
+
+    await deps.db.run(change)
+    await _sync_affected(deps, person_id)
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/people/{person_id}/manual/{service_id}", dependencies=WRITE)
+async def mark_manual(request: Request, person_id: int, service_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        holds.mark_manual(conn, admin_id=admin.id, person_id=person_id, service_id=service_id, now=now)
+
+    try:
+        await deps.db.run(change)
+    except HoldRefused as refused:
+        return await _person_page(request, admin, person_id, status=400, error=refused.message)
+    await _sync_affected(deps, person_id)
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/people/{person_id}/manual/{service_id}/unmark", dependencies=WRITE)
+async def unmark_manual(request: Request, person_id: int, service_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        holds.unmark_manual(conn, admin_id=admin.id, person_id=person_id, service_id=service_id, now=now)
+
+    await deps.db.run(change)
+    await _sync_affected(deps, person_id)
+    return _to(f"/admin/people/{person_id}")
+
+
+@router.post("/people/{person_id}/mode", dependencies=WRITE)
+async def set_conflict_mode(request: Request, person_id: int, admin: Admin,
+                            mode: Annotated[str, Form()] = "",
+                            agreement_note: Annotated[str, Form()] = "",
+                            apply_to_siblings: Annotated[str | None, Form()] = None) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> list[int]:
+        return holds.set_mode(conn, child_id=person_id, mode=mode, agreement_note=agreement_note,
+                              apply_to_siblings=apply_to_siblings is not None, admin_id=admin.id, now=now)
+
+    try:
+        changed = await deps.db.run(change)
+    except ValueError:
+        return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
+    await authentik_sync.sync_people(deps, changed)
+    return _to(f"/admin/people/{person_id}")
+
+
+# Reviews ---------------------------------------------------------------------------------------------
+
+async def _reviews_page(request: Request, admin: Person) -> Response:
+    open_items, resolved_items = await _deps(request).db.run(holds.list_reviews)
+    return page(request, "admin/reviews.html", viewer=admin, open_items=open_items, resolved_items=resolved_items)
+
+
+@router.get("/reviews")
+async def reviews_page(request: Request, admin: Admin) -> Response:
+    return await _reviews_page(request, admin)
+
+
+async def _review_page(request: Request, admin: Person, review_id: int, *, status: int = 200,
+                       error: str | None = None) -> Response:
+    detail = await _deps(request).db.run(lambda c: holds.review_detail(c, review_id))
+    if detail is None:
+        return message_page(request, text.NOT_FOUND, 404)
+    return page(request, "admin/review.html", viewer=admin, status_code=status, error=error, review=detail)
+
+
+@router.get("/reviews/{review_id}")
+async def review_page(request: Request, review_id: int, admin: Admin) -> Response:
+    return await _review_page(request, admin, review_id)
+
+
+@router.post("/reviews/{review_id}/resolve", dependencies=WRITE)
+async def resolve_review(request: Request, review_id: int, admin: Admin,
+                         outcome: Annotated[str, Form()] = "",
+                         lift_lockdown: Annotated[str | None, Form()] = None) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int:
+        child_id = holds.review_child_id(conn, review_id)
+        if child_id is None:
+            raise holds.NoSuchReview()
+        holds.resolve_review(conn, admin_id=admin.id, review_id=review_id, outcome=outcome,
+                             lift_lockdown=lift_lockdown is not None, now=now)
+        return child_id
+
+    try:
+        child_id = await deps.db.run(change)
+    except holds.NoSuchReview:
+        return message_page(request, text.NOT_FOUND, 404)
+    except ValueError:
+        return await _review_page(request, admin, review_id, status=400, error=text.INVALID_INPUT)
+    await authentik_sync.sync_people(deps, [child_id])
+    return _to(f"/admin/reviews/{review_id}")
+

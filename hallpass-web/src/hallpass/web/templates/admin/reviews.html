@@ -1,0 +1,46 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: reviews{% endblock %}
+{% block content %}
+<h1>Reviews</h1>
+
+<section class="stack">
+  <h2>Open</h2>
+  <table>
+    <thead><tr><th>Child</th><th>Opened</th><th></th></tr></thead>
+    <tbody>
+      {% for item in open_items %}
+      <tr>
+        <td>{{ item.child_name }}</td>
+        <td>{{ item.opened_at }}</td>
+        <td><a href="/admin/reviews/{{ item.id }}">Open</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">No open reviews.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="stack">
+  <h2>Recently resolved</h2>
+  <table>
+    <thead><tr><th>Child</th><th>Resolved</th><th>Outcome</th><th></th></tr></thead>
+    <tbody>
+      {% for item in resolved_items %}
+      <tr>
+        <td>{{ item.child_name }}</td>
+        <td>{{ item.resolved_at }}</td>
+        <td>{{ item.outcome }}</td>
+        <td><a href="/admin/reviews/{{ item.id }}">Details</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Nothing resolved yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

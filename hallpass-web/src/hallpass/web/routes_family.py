@@ -85,15 +85,6 @@ async def child_page(request: Request, child_id: int, person: Annotated[Person, 
     return page(request, "child.html", viewer=person, **context)
 
 
-def _scope(raw: str) -> list[int] | None:
-    """`all` means every service the child has (None); anything else must be one service id."""
-    if raw == "all":
-        return None
-    if not raw.isdigit():
-        raise ValueError("service must be all or an id")
-    return [int(raw)]
-
-
 async def _apply_hold_change(request: Request, person: Person, child_id: int, change) -> Response:
     """Runs one hold change, then syncs the child's Authentik state. A refusal re-renders the child page at 403."""
     deps = request.app.state.deps
@@ -113,7 +104,7 @@ async def place_child_hold(request: Request, child_id: int, person: Annotated[Pe
     now = deps.clock()
     window = timedelta(hours=deps.config.conflict_window_hours)
     try:
-        scope = _scope(service_id)
+        scope = holds.service_scope(service_id)
     except ValueError:
         return await _child_page(request, person, child_id, status=400, error=text.INVALID_INPUT)
 

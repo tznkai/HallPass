@@ -29,6 +29,7 @@ def page(request: Request, name: str, *, viewer: Person | None, status_code: int
     context["viewer"] = viewer
     context["is_admin"] = viewer is not None and viewer.authentik_uuid in deps.config.admin_subs
     context["has_children"] = viewer is not None and bool(getattr(request.state, "has_children", False))
+    context["open_reviews"] = getattr(request.state, "open_reviews", 0)
     return request.app.state.templates.TemplateResponse(request, name, context, status_code=status_code)
 
 

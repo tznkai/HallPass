@@ -367,6 +367,16 @@ def resolve_review(conn: sqlite3.Connection, *, admin_id: int, review_id: int, o
         _queue_change_emails(conn, child=_person(conn, child_id), actor_id=admin_id, label=text.ACTOR_ADMIN, now=now)
 
 
+def service_scope(raw: str) -> list[int] | None:
+    """A form's service choice: `all` means every service the person has (None), and anything else must be one
+    service id. Raises ValueError for anything else."""
+    if raw == "all":
+        return None
+    if not raw.isdigit():
+        raise ValueError("service must be all or an id")
+    return [int(raw)]
+
+
 def open_review_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM review_item WHERE resolved_at IS NULL").fetchone()[0]
 
