@@ -36,7 +36,15 @@ NO_WHITELISTED = "There are no whitelisted players"
 WHITELIST_LINE = re.compile(r"whitelisted players?:\s*(.*)$")
 BAN_HEADER = re.compile(r"There are (?:no bans|\d+ ban\(s\):)")
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
-SAFE_NAME = re.compile(r"[^\x00-\x20\x7f]+")  # no spaces or control characters, so a name cannot split a command
+
+# Console command arguments. A target selector (@a, @e[...], @p, @r) would make `whitelist remove` and `kick` act on
+# every matching player, and any other character could split or extend a command, so a name is refused unless it
+# matches its kind's pattern in full. A Java name is 1 to 16 letters, digits or underscores. A Bedrock gamertag uses
+# the same class for now: spaces stay refused until the live check settles how Floodgate passes them to the console.
+JAVA_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
+BEDROCK_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
+# The Floodgate prefix is prepended to every Bedrock name, so it is one character from a short allowlist, or empty.
+FLOODGATE_PREFIXES = frozenset({"", ".", "*", "_"})
 
 ListState = Literal["allowed", "suspended", "partial"]
 
@@ -46,6 +54,7 @@ class _Entry:
     command: str   # "whitelist" for a Java name, "fwhitelist" for a Bedrock name
     arg: str       # the name the add or remove command takes
     listed: str    # the name the vanilla list shows, which is also the name `kick` takes
+    safe: bool     # the name matches its kind's pattern, and the prefix is allowlisted
 
 
 def _entries(subject: Subject, prefix: str) -> list[_Entry]:
@@ -53,9 +62,11 @@ def _entries(subject: Subject, prefix: str) -> list[_Entry]:
     entries: list[_Entry] = []
     for identity in subject.identities:
         if identity.kind == JAVA_KIND:
-            entries.append(_Entry("whitelist", identity.value, identity.value))
+            safe = JAVA_NAME.fullmatch(identity.value) is not None
+            entries.append(_Entry("whitelist", identity.value, identity.value, safe))
         elif identity.kind == BEDROCK_KIND:
-            entries.append(_Entry("fwhitelist", identity.value, prefix + identity.value))
+            safe = BEDROCK_NAME.fullmatch(identity.value) is not None and prefix in FLOODGATE_PREFIXES
+            entries.append(_Entry("fwhitelist", identity.value, prefix + identity.value, safe))
     return entries
 
 
@@ -109,7 +120,7 @@ class MinecraftAdapter:
         entries = _entries(subject, self._prefix)
         if not entries:
             return Observed("error", "no_identity")
-        if not all(SAFE_NAME.fullmatch(entry.arg) for entry in entries):
+        if not all(entry.safe for entry in entries):
             return Observed("error", "bad_identity")
         if any(_is_banned(entry.listed, ban_text) for entry in entries):
             return Observed("banned_external")
@@ -133,7 +144,7 @@ class MinecraftAdapter:
         entries = _entries(subject, self._prefix)
         if not entries:
             return Observed("error", "no_identity")
-        if not all(SAFE_NAME.fullmatch(entry.arg) for entry in entries):
+        if not all(entry.safe for entry in entries):
             return Observed("error", "bad_identity")
         async with self._session() as client:
             for entry in entries:
@@ -167,13 +178,14 @@ def create(ctx: AdapterContext) -> MinecraftAdapter | None:
     host = ctx.settings.get("host")
     password = ctx.settings.get("rcon_password")
     port = _port(ctx.settings.get("port", str(DEFAULT_PORT)))
-    if not (host and password and port is not None):
+    prefix = ctx.settings.get("floodgate_prefix", DEFAULT_FLOODGATE_PREFIX)
+    if not (host and password and port is not None and prefix in FLOODGATE_PREFIXES):
         log_event(log, "adapter_not_configured", adapter="minecraft", service=ctx.slug)
         return None
     return MinecraftAdapter(
         host=host,
         port=port,
         password=password,
-        floodgate_prefix=ctx.settings.get("floodgate_prefix", DEFAULT_FLOODGATE_PREFIX),
+        floodgate_prefix=prefix,
         kick_message=ctx.settings.get("kick_message", DEFAULT_KICK_MESSAGE),
     )

@@ -17,11 +17,13 @@ from typing import Any
 import httpx
 import pytest
 
+from hallmonitor.adapters.base import Observed
 from hallmonitor.adapters.context import AdapterContext
-from hallmonitor.adapters.minecraft import MinecraftAdapter
+from hallmonitor.adapters.minecraft import BEDROCK_KIND, JAVA_KIND, MinecraftAdapter
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient
 from hallmonitor.config import Config
+from hallmonitor.contract import Identity, Subject
 from hallmonitor.db import Database
 from hallmonitor.logs import JsonFormatter
 from hallmonitor.reconcile import cycle
@@ -276,14 +278,81 @@ async def test_a_subject_with_no_minecraft_identity_is_an_error_and_nothing_is_a
     assert state.whitelist == []
 
 
-@pytest.mark.parametrize("value", ["", "Ste ve", "Ste\nve"])
-async def test_a_name_that_could_break_the_command_is_bad_identity_and_nothing_is_sent(value: str) -> None:
-    state = server_state()
-    hallpass = mc_service(subject("r1", "allowed", java_identity(value)))
+# Names that are not a plain player name: selectors (@a sends every online player to the whitelist and kick commands),
+# over-long names, empty names, spaces, non-ASCII whitespace and command punctuation. Each is refused before any command.
+BAD_NAMES = ["", "Ste ve", "Ste\nve", "@a", "@e[type=player]", "@p", "@r", "A" * 17, "Ste\u00a0ve", "Steve;op",
+             "Steve/op", "Steve[x]"]
+
+
+@pytest.mark.parametrize("desired", ["allowed", "suspended"])
+@pytest.mark.parametrize("kind", [JAVA_KIND, BEDROCK_KIND])
+@pytest.mark.parametrize("value", BAD_NAMES)
+async def test_a_name_that_is_not_a_plain_player_name_is_bad_identity_and_no_change_is_sent(
+        kind: str, value: str, desired: str) -> None:
+    state = server_state(whitelist=["Steve", ".Tim"], online={"Steve", ".Tim"})
+    identity = {"kind": kind, "value": value}
+    hallpass = mc_service(subject("r1", desired, identity, generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
     assert outcomes(hallpass) == [("r1", "error", "bad_identity")]
-    assert not any(cmd.startswith(("whitelist add", "fwhitelist add")) for cmd in state.commands)
+    assert state.commands == LIST_COMMANDS
+    assert state.whitelist == ["Steve", ".Tim"]
+    assert state.online == {"Steve", ".Tim"}
+
+
+@pytest.mark.parametrize("kind", [JAVA_KIND, BEDROCK_KIND])
+async def test_a_sixteen_character_name_is_accepted(kind: str) -> None:
+    name = "A" * 16
+    state = server_state()
+    hallpass = mc_service(subject("r1", "allowed", {"kind": kind, "value": name}, generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+    assert state.whitelist == [name if kind == JAVA_KIND else "." + name]
+
+
+async def test_apply_refuses_a_selector_even_when_called_directly() -> None:
+    state = server_state(whitelist=["Steve"], online={"Steve"})
+    async with rcon_server(state) as port:
+        adapter = make_adapter(port)
+        result = await adapter.apply(
+            Subject(ref="r1", identities=(Identity(kind=JAVA_KIND, value="@a"),), desired="suspended", generation=2),
+            "suspended",
+        )
+    assert result == Observed("error", "bad_identity")
+    assert state.commands == []
+    assert state.whitelist == ["Steve"]
+
+
+@pytest.mark.parametrize("prefix", ["@", "@a", "..", "ab", "a b", "\u00a0"])
+async def test_a_floodgate_prefix_outside_the_allowlist_is_not_configured(
+        tmp_path: Path, caplog: pytest.LogCaptureFixture, prefix: str) -> None:
+    db = Database.open(tmp_path / "hallmonitor.db")
+    try:
+        async with httpx.AsyncClient() as http:
+            ctx = AdapterContext(slug="mc", settings={"host": "mc.invalid", "rcon_password": PASSWORD,
+                                                      "floodgate_prefix": prefix},
+                                 config=Config(hallpass_url=URL, hallpass_token=TOKEN),
+                                 db=db, http=http, clock=lambda: NOW)
+            with caplog.at_level(logging.INFO):
+                assert build_adapter("minecraft", ctx) is None
+    finally:
+        db.close()
+    assert [r.getMessage() for r in caplog.records].count("adapter_not_configured") == 1
+
+
+@pytest.mark.parametrize("prefix", ["", ".", "*", "_"])
+async def test_an_allowed_floodgate_prefix_is_configured(tmp_path: Path, prefix: str) -> None:
+    db = Database.open(tmp_path / "hallmonitor.db")
+    try:
+        async with httpx.AsyncClient() as http:
+            ctx = AdapterContext(slug="mc", settings={"host": "mc.invalid", "rcon_password": PASSWORD,
+                                                      "floodgate_prefix": prefix},
+                                 config=Config(hallpass_url=URL, hallpass_token=TOKEN),
+                                 db=db, http=http, clock=lambda: NOW)
+            assert isinstance(build_adapter("minecraft", ctx), MinecraftAdapter)
+    finally:
+        db.close()
 
 
 # Privacy: no name, password or command text reaches a log ----------------------------------------------
