@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -49,14 +50,21 @@ BAN_PARTS = ("/ban", "/enforcement-decisions", "/flags")
 SEEN: list[FakeFluxerAdminState] = []
 
 
+SESSIONS_DELETE = re.compile(r"/v1/admin/users/[0-9]+/sessions")
+
+
 @pytest.fixture(autouse=True)
 def no_ban_path_ever() -> Iterator[None]:
-    """Every test in this module: no request the adapter sent may reach a ban, decision or flags route."""
+    """Every test in this module: no request the adapter sent may reach a ban, decision or flags route, and the only
+    mutation it may send is the session DELETE."""
     SEEN.clear()
     yield
     for state in SEEN:
         banned = [path for _, path in state.requests if any(part in path for part in BAN_PARTS)]
         assert banned == [], "the Fluxer adapter must never reach a ban, enforcement or flags path"
+        for method, path in mutations(state):
+            assert method == "DELETE" and SESSIONS_DELETE.fullmatch(path), \
+                "the only mutation the Fluxer adapter may send is DELETE .../users/<digits>/sessions"
 
 
 @dataclass
@@ -297,6 +305,81 @@ async def test_the_fake_refuses_a_delete_without_the_audit_reason(env: Env) -> N
     response = await env.http.delete(f"{ADMIN_URL}/v1/admin/users/1001/sessions",
                                      headers={"Authorization": f"Admin {FLUXER_KEY}"})
     assert response.status_code == 400
+
+
+async def test_a_delete_answered_2xx_that_ends_nothing_is_sessions_not_ended(env: Env) -> None:
+    add_user(env.state, "1001")
+    link_sso(env.state, PROVIDER, SUBJECT, "1001")
+    sign_in(env.state, "1001")
+    env.state.keep_sessions = True
+    assert await env.adapter.apply(SSO_SUBJECT, "suspended") == Observed("error", "sessions_not_ended")
+    assert active_sessions(env.state, "1001") == 1
+    reports = await run_cycle(env)
+    assert reports["r1"]["observed"] == "error"
+    assert reports["r1"]["detail"] == "sessions_not_ended"
+    assert session_delete_count(env) >= 1
+
+
+# Errors by route -----------------------------------------------------------------------------------
+
+def _refuse(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+def _linked_user_with_a_session(env: Env) -> None:
+    add_user(env.state, "1001")
+    link_sso(env.state, PROVIDER, SUBJECT, "1001")
+    sign_in(env.state, "1001")
+
+
+@pytest.mark.parametrize("route", ["sso", "user", "sessions"])
+async def test_a_server_error_on_a_route_is_an_http_error_for_that_subject(env: Env, route: str) -> None:
+    _linked_user_with_a_session(env)
+    env.state.fail_next[route] = 500
+    assert await env.adapter.observe([SSO_SUBJECT]) == {"r1": Observed("error", "http")}
+
+
+@pytest.mark.parametrize("route", ["sso", "user", "sessions"])
+async def test_a_forbidden_route_raises_auth_for_the_whole_service(env: Env, route: str) -> None:
+    _linked_user_with_a_session(env)
+    env.state.fail_next[route] = 403
+    with pytest.raises(AdapterError) as info:
+        await env.adapter.observe([SSO_SUBJECT])
+    assert info.value.reason == "auth"
+
+
+async def test_a_transport_failure_raises_unreachable_for_the_whole_service() -> None:
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_refuse))
+    adapter = FluxerAdapter(http=http, base_url=ADMIN_URL, key=FLUXER_KEY, sso_provider_id=PROVIDER)
+    try:
+        with pytest.raises(AdapterError) as info:
+            await adapter.observe([SSO_SUBJECT])
+    finally:
+        await http.aclose()
+    assert info.value.reason == "unreachable"
+
+
+@pytest.mark.parametrize("flags", ["1.5", "abc"])
+async def test_flags_that_are_not_an_integer_are_unexpected_for_that_subject(env: Env, flags: str) -> None:
+    _linked_user_with_a_session(env)
+    env.state.users["1001"]["flags"] = flags
+    assert await env.adapter.observe([SSO_SUBJECT]) == {"r1": Observed("error", "unexpected")}
+
+
+@pytest.mark.parametrize("route", ["sso", "user", "sessions"])
+async def test_a_malformed_body_is_unexpected_for_that_subject(env: Env, route: str) -> None:
+    _linked_user_with_a_session(env)
+    env.state.malformed_next.add(route)
+    assert await env.adapter.observe([SSO_SUBJECT]) == {"r1": Observed("error", "unexpected")}
+
+
+@pytest.mark.parametrize("status", [500, 403])
+async def test_a_delete_that_fails_is_sessions_not_ended_whatever_the_status(env: Env, status: int) -> None:
+    # A 403 raises inside the DELETE and _end_sessions swallows it; a 500 is a non-2xx answer. Both end the same way.
+    _linked_user_with_a_session(env)
+    env.state.fail_next["sessions_delete"] = status
+    assert await env.adapter.apply(SSO_SUBJECT, "suspended") == Observed("error", "sessions_not_ended")
+    assert active_sessions(env.state, "1001") == 1
 
 
 # Registry ----------------------------------------------------------------------------------------

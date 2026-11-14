@@ -37,6 +37,8 @@ class FakeFluxerAdminState:
     sessions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)   # user id -> [{"id", "deleted_at"}]
     requests: list[tuple[str, str]] = field(default_factory=list)             # (method, path with query)
     fail_next: dict[str, int] = field(default_factory=dict)                   # route name -> status, once each
+    malformed_next: set[str] = field(default_factory=set)                     # route names whose next 200 is not JSON
+    keep_sessions: bool = False                                               # DELETE answers 200 but ends nothing
 
 
 def add_user(state: FakeFluxerAdminState, user_id: str, flags: int = HAS_SESSION_STARTED) -> None:
@@ -96,6 +98,10 @@ def make_transport(state: FakeFluxerAdminState) -> httpx.MockTransport:
 
 
 def _take_failure(state: FakeFluxerAdminState, route: str) -> httpx.Response | None:
+    """The fault for the next call on `route`, if one is armed: a non-JSON 200, or the status in fail_next."""
+    if route in state.malformed_next:
+        state.malformed_next.discard(route)
+        return httpx.Response(200, content=b"<html>not json</html>", headers={"content-type": "text/html"})
     if route in state.fail_next:
         return _json(state.fail_next.pop(route), {"message": "failed"})
     return None
@@ -139,6 +145,8 @@ def _end_sessions(state: FakeFluxerAdminState, user_id: str, request: httpx.Requ
     failure = _take_failure(state, "sessions_delete")
     if failure is not None:
         return failure
+    if state.keep_sessions:
+        return _json(200, {"terminated_count": 0})
     terminated = 0
     for session in state.sessions.get(user_id, []):
         if session["deleted_at"] is None:
