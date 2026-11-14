@@ -68,8 +68,9 @@ feeds.example.invalid {
   `forward_auth` sends its own sub-request to hallpass with the `Cookie` header unchanged, so hallpass
   still sees the session.
 - The slug in `uri` is fixed per site. Each protected site names one service slug, and that slug is the
-  one the admin created on the services page. A slug is 1 to 64 lower-case letters, digits or hyphens, with
-  no underscores, because hallmonitor reads it from an environment variable name.
+  one the admin created on the services page. A slug is lower-case letters and digits, with single hyphens
+  only between them, up to 64 characters and no underscores, because hallmonitor reads it from an
+  environment variable name.
 - Feed sites send no session. The feed token travels in the forwarded URI, so `log_skip` keeps the feed
   path out of Caddy's access log.
 - The monitor listener binds `HALLPASS_MONITOR_BIND` (default `127.0.0.1:8081`) and requires

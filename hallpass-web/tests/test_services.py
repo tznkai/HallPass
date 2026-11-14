@@ -116,7 +116,7 @@ async def test_update_changes_the_editable_fields_and_keeps_slug_and_kind(db: Da
 
 
 @pytest.mark.parametrize("slug", ["Calendar", "-calendar", "cal/feed", "cal feed", "cal.feed", "", "the_ship",
-                                  "a" * 65])
+                                  "a" * 65, "a--b", "a-", "-a"])
 async def test_slug_outside_the_allowed_shape_is_refused(db: Database, admin_id: int, slug: str) -> None:
     with pytest.raises(services.ServiceRefused) as info:
         await make_service(db, admin_id, slug=slug)
@@ -124,7 +124,7 @@ async def test_slug_outside_the_allowed_shape_is_refused(db: Database, admin_id:
     assert await db.run(lambda c: services.list_services(c, include_retired=True)) == []
 
 
-@pytest.mark.parametrize("slug", ["the-ship", "a", "1-2", "a" * 64])
+@pytest.mark.parametrize("slug", ["the-ship", "a", "1-2", "a" * 64, "a-" + "b" * 62])
 async def test_slug_in_the_allowed_shape_is_accepted(db: Database, admin_id: int, slug: str) -> None:
     created = await make_service(db, admin_id, slug=slug)
     assert created.slug == slug

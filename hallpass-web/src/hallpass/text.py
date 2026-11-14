@@ -52,8 +52,9 @@ FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading th
 FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. Ask the administrator."
 # The admin service pages.
 SERVICE_TAKEN = "A service with that slug already exists."
-SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters, digits or hyphens, and it starts with a letter or digit. "
-                        "Underscores are not allowed, because hallmonitor cannot configure a slug that has one.")
+SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters and digits, with single hyphens only between them. "
+                        "It starts and ends with a letter or digit. Underscores are not allowed, and neither are "
+                        "doubled hyphens, because hallmonitor cannot configure a slug that has them.")
 SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that hallmonitor runs. "
                                  "Choose an adapter, or untick the box for a service that is suspended by hand.")
 # Shown beside the retire button and the identity section: hallmonitor stops managing the pair, and leaves its last

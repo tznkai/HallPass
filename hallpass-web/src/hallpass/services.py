@@ -21,7 +21,8 @@ SERVICE_KINDS = ("oidc", "forward_auth", "game", "feed")
 SUBJECT_KINDS = ("type", "group", "person")
 EFFECTS = ("grant", "deny")
 DEFAULT_ADAPTER = "manual"
-_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
+_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+SLUG_MAX_LENGTH = 64
 _DIGITS = re.compile(r"[0-9]+")
 
 
@@ -68,9 +69,16 @@ def _service(row: tuple) -> Service:
                    auto_suspendable=bool(row[5]), url=row[6], retired=bool(row[7]), created_at=row[8])
 
 
+def is_valid_slug(slug: str) -> bool:
+    """A slug is hyphen-separated runs of lower-case letters and digits, up to SLUG_MAX_LENGTH characters. Single
+    hyphens only: hallmonitor reads `HM_SERVICE_<SLUG>__<KEY>` at its first `__`, so a doubled or trailing hyphen
+    would give a variable that splits to a different slug."""
+    return len(slug) <= SLUG_MAX_LENGTH and _SLUG.fullmatch(slug) is not None
+
+
 def _checked_slug(slug: str) -> str:
     clean = (slug or "").strip()
-    if not _SLUG.fullmatch(clean):
+    if not is_valid_slug(clean):
         raise ServiceRefused(text.SERVICE_SLUG_INVALID)
     return clean
 

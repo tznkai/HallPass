@@ -8,6 +8,8 @@ test_web_admin.py, which walks all /admin routes, including these.
 
 from __future__ import annotations
 
+import re
+
 import httpx
 import pytest
 
@@ -89,6 +91,35 @@ async def test_a_hyphenated_slug_is_accepted_and_a_65_character_one_is_refused(e
     assert accepted.status_code == 303
     assert (await service_for(env, "the-ship")).slug == "the-ship"
     assert too_long.status_code == 400 and text.SERVICE_SLUG_INVALID in too_long.text
+
+
+@pytest.mark.parametrize("slug", ["a--b", "a-", "-a"])
+async def test_a_slug_with_a_doubled_or_edge_hyphen_is_refused_and_nothing_is_stored(env: Env, slug: str):
+    await admin_client(env)
+
+    refused = await create_service_form(env, slug, "game")
+
+    assert refused.status_code == 400 and text.SERVICE_SLUG_INVALID in refused.text
+    assert await service_for(env, slug) is None
+
+
+# The form's client-side pattern must accept exactly what the server accepts, so an admin is never offered a slug that
+# the server then refuses, and the browser refuses the forms that the server would.
+SLUG_SAMPLES = [("the-ship", True), ("a", True), ("a" * 64, True), ("a-" + "b" * 62, True), ("1-2", True),
+                ("a" * 65, False), ("a--b", False), ("a-", False), ("-a", False), ("the_ship", False), ("A", False)]
+
+
+async def test_the_service_form_pattern_accepts_exactly_the_slugs_the_server_accepts(env: Env):
+    await admin_client(env)
+
+    page = (await env.client.get("/admin/services")).text
+    slug_input = re.search(r'<input name="slug"[^>]*>', page).group(0)
+    pattern = re.search(r'pattern="([^"]*)"', slug_input).group(1)
+
+    assert 'maxlength="64"' in slug_input
+    for slug, accepted in SLUG_SAMPLES:
+        assert bool(re.fullmatch(pattern, slug)) is accepted, slug
+        assert services.is_valid_slug(slug) is accepted, slug
 
 
 async def test_a_retired_service_leaves_the_pages_and_forward_auth_refuses_it(env: Env):
