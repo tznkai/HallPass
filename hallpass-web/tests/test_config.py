@@ -139,6 +139,13 @@ def test_conflict_window_must_be_a_positive_integer(bad: str) -> None:
         Config.from_env({**GOOD_ENV, "HALLPASS_CONFLICT_WINDOW_HOURS": bad})
 
 
+@pytest.mark.parametrize("bad", ["fluxer_game", "a--b", "a-", "-a", "Fluxer", "fluxer game"])
+def test_fluxer_service_slug_the_store_cannot_hold_is_refused_without_echoing_it(bad: str) -> None:
+    with pytest.raises(ConfigError, match="HALLPASS_FLUXER_SERVICE") as info:
+        Config.from_env({**GOOD_ENV, "HALLPASS_FLUXER_SERVICE": bad})
+    assert bad not in str(info.value)
+
+
 def test_smtp_host_needs_a_from_address() -> None:
     with pytest.raises(ConfigError, match="SMTP_FROM"):
         Config.from_env({**GOOD_ENV, "SMTP_FROM": ""})

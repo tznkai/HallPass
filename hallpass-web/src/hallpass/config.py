@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from hallpass import services
+
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MIN_SESSION_SECRET_LENGTH = 32
 MIN_MONITOR_TOKEN_LENGTH = 32
@@ -21,7 +23,6 @@ _COOKIE_DOMAIN = re.compile(r"\.?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 _FLOW_SLUG = re.compile(r"[A-Za-z0-9_-]{1,100}")
 _HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
 _EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
-_SERVICE_SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
 
 class ConfigError(ValueError):
@@ -140,7 +141,8 @@ def _group_uuid(env: Mapping[str, str], name: str) -> str:
 
 def _service_slug(env: Mapping[str, str], name: str) -> str:
     value = _opt(env, name) or "fluxer"
-    if not _SERVICE_SLUG.fullmatch(value):
+    # The service store's own rule: a slug it can never hold is refused here, not left to fail closed later.
+    if not services.is_valid_slug(value):
         raise ConfigError(f"{name} must be a service slug")
     return value
 
