@@ -428,7 +428,7 @@ async def test_admin_bootstrap_drops_control_characters_from_the_username(db, au
 
 async def test_admin_bootstrap_drops_line_and_paragraph_separators_from_the_username(db, authentik, config, state):
     add_user(state, uuid=ADMIN_SUB, username="root")
-    person = await resolve(db, authentik, config, sub=ADMIN_SUB, username="Ann B C")
+    person = await resolve(db, authentik, config, sub=ADMIN_SUB, username="Ann\u2028B\u2029C")
     assert person.display_name == "AnnBC"
 
 

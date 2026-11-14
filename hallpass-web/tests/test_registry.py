@@ -458,7 +458,7 @@ async def test_log_decision_stores_the_row_with_json_columns(db: Database) -> No
 # Display names are one line of plain text: control characters are refused ---------------------------
 
 @pytest.mark.parametrize("name", ["Ann\r\nBcc: x@example.com", "Ann\tB", "Ann\x00B", "Ann\u0085B",
-                                  "Ann B", "Ann B"])
+                                  "Ann\u2028B", "Ann\u2029B"])
 async def test_a_display_name_with_a_control_character_is_refused_and_nothing_is_stored(db: Database, name: str) -> None:
     with pytest.raises(ValueError):
         await db.run(lambda c: registry.create_person(c, display_name=name, account_type="adult", now=NOW))
@@ -466,14 +466,14 @@ async def test_a_display_name_with_a_control_character_is_refused_and_nothing_is
 
 
 def test_every_display_name_the_registry_accepts_is_a_valid_email_subject() -> None:
-    candidates = ["Ann", "Ann B", "Ann B", "Anné", "  Ann  ", "Ann B", "Ann B", "Ann\r\nB"]
+    candidates = ["Ann", "Ann B", "Ann\u00a0B", "Ann\u00e9", "  Ann  ", "Ann\u2028B", "Ann\u2029B", "Ann\r\nB"]
     accepted = []
     for candidate in candidates:
         try:
             accepted.append(registry._display_name(candidate))
         except ValueError:
             continue
-    assert "Ann" in accepted and "Ann B" in accepted  # the check below must cover real names
+    assert "Ann" in accepted and "Ann\u00a0B" in accepted  # the check below must cover real names
     for name in accepted:
         for template in (text.CHANGE_EMAIL_SUBJECT, text.LOCKDOWN_EMAIL_SUBJECT):
             msg = EmailMessage()
