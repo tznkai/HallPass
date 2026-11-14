@@ -180,7 +180,9 @@ async def test_a_lock_survives_an_authentik_outage_with_a_warning(env: Env):
     assert response.status_code == 303
     assert response.headers["location"] == f"/admin/people/{person_id}?warning=authentik"
     assert (await person_row(env, person_id)).status == "locked"
-    assert env.authentik.users[user["pk"]]["is_active"] is True
+    # The first call of the sync (the group removal) is the one refused. The deactivation is a separate step and still
+    # runs, so the lock is enforced in Authentik even though the sync as a whole reports the failure.
+    assert env.authentik.users[user["pk"]]["is_active"] is False
     shown = (await env.client.get(response.headers["location"])).text
     assert text.AUTHENTIK_NOT_UPDATED in shown
 

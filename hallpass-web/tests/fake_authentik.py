@@ -34,7 +34,8 @@ class FakeAuthentikState:
     groups: dict[str, set[int]] = field(default_factory=dict)
     sessions: dict[int, list[str]] = field(default_factory=dict)
     requests: list[tuple[str, str]] = field(default_factory=list)
-    fail_next: int | None = None
+    fail_next: int | None = None        # the status the next request fails with, once fail_skip requests have passed
+    fail_skip: int = 0                  # requests let through before fail_next applies (one-shot, as fail_next is)
 
 
 def add_user(state: FakeAuthentikState, *, uuid: str, username: str, attributes: dict | None = None) -> dict:
@@ -67,8 +68,11 @@ def make_app(state: FakeAuthentikState) -> Starlette:
             if request.headers.get("authorization") != f"Bearer {TOKEN}":
                 return JSONResponse({"detail": "forbidden"}, status_code=403)
             if state.fail_next is not None:
-                status, state.fail_next = state.fail_next, None
-                return JSONResponse({"detail": "injected failure"}, status_code=status)
+                if state.fail_skip > 0:
+                    state.fail_skip -= 1
+                else:
+                    status, state.fail_next = state.fail_next, None
+                    return JSONResponse({"detail": "injected failure"}, status_code=status)
             return await handler(request)
         return wrapped
 

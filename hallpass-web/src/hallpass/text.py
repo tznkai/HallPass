@@ -59,6 +59,7 @@ ACTOR_SYSTEM = "the system"
 STRICT_NOT_YOURS = "{names} placed a hold on this service. In strict mode only the parent who placed a hold can lift it."
 RESTORE_NOT_AUTOMATIC = "This service cannot be restored automatically. Ask the administrator."
 NOT_YOUR_CHILD = "You can only change holds for a child linked to you."
+NOT_CHILD_SERVICE = "This child does not have that service, so a hold cannot be placed on it."
 LOCKDOWN_ADMIN_ONLY = ("Only the administrator can lift an administrator hold or a lockdown. "
                        "A lockdown is lifted by resolving its review.")
 MARK_NO_HOLD = "Only a held service can be marked manually suspended."

@@ -150,6 +150,54 @@ async def test_sync_reports_whether_authentik_now_matches(env: Env) -> None:
     assert await authentik_sync.sync_people(deps(env), [adult.id]) is False
 
 
+async def test_a_failed_attribute_call_still_removes_a_held_adult_from_the_group(
+        env: Env, caplog: pytest.LogCaptureFixture) -> None:
+    fluxer = await make_fluxer(env)
+    adult, _ = await signed_in_person(env, account_type="adult", email="dee@example.com")
+    await sync(env, adult.id)
+    assert in_group(env, adult)
+
+    def hold(conn) -> None:
+        admin = registry.create_person(conn, display_name="Admin", account_type="adult", now=NOW)
+        holds.place(conn, actor=holds.Actor(kind="admin", person_id=admin.id), target_id=adult.id,
+                    service_ids=[fluxer.id], now=NOW, window=timedelta(hours=24), admin_email=None)
+
+    await env.db.run(hold)
+    # A hold sync makes the group removal first, then the attribute read (inside update_attributes), then the
+    # activation. The removal passes; the attribute read is the next request, and it fails.
+    env.authentik.fail_skip = 1
+    env.authentik.fail_next = 500
+    caplog.set_level(logging.INFO)
+
+    assert await authentik_sync.sync_person(deps(env), adult.id) is False
+
+    assert not in_group(env, adult)
+    assert authentik_user(env, adult)["is_active"] is True
+    failures = [record.hallpass_fields for record in caplog.records
+                if record.getMessage() == "authentik_sync_failed"]
+    assert [(f["person_id"], f["action"], f["http_status"]) for f in failures] == [(adult.id, "update_attributes", 500)]
+
+
+async def test_a_lock_whose_sync_fails_still_ends_sessions_and_shows_the_warning(env: Env) -> None:
+    await admin_client(env)
+    await make_fluxer(env)
+    adult, _ = await signed_in_person(env, account_type="adult", email="dee@example.com")
+    await sync(env, adult.id)
+    env.authentik.sessions[adult.authentik_pk] = ["session-1"]
+    csrf = await form(env, f"/admin/people/{adult.id}")
+    # The lock's sync makes the group removal, then the deactivation, then the attribute calls. The removal passes and
+    # the deactivation fails, so the fake never ends the sessions itself: only the route's end_sessions can.
+    env.authentik.fail_skip = 1
+    env.authentik.fail_next = 500
+
+    response = await env.client.post(f"/admin/people/{adult.id}/lock", data=csrf)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/admin/people/{adult.id}?warning=authentik"
+    assert env.authentik.sessions.get(adult.authentik_pk, []) == []
+    assert (await env.db.run(lambda c: registry.get_person(c, adult.id))).status == "locked"
+
+
 @pytest.mark.parametrize("retired", [False, True], ids=["missing", "retired"])
 async def test_without_a_live_fluxer_service_nobody_is_a_member_but_fields_are_written(env: Env,
                                                                                      retired: bool) -> None:

@@ -12,7 +12,7 @@ from datetime import timedelta
 
 import httpx
 
-from hallpass import holds, registry, services, text
+from hallpass import grants, holds, registry, services, text
 from hallpass.registry import Person
 from tests.helpers import (
     ADMIN_SUB,
@@ -336,3 +336,97 @@ async def test_a_parent_does_not_see_the_review_count_in_the_nav(env: Env):
     page = (await family.ann_browser.get("/")).text
 
     assert "Reviews (" not in page
+
+
+# Lifting a lockdown from a resolved review -------------------------------------------------------------
+
+async def make_signed_family(env: Env) -> tuple[Family, httpx.AsyncClient]:
+    """Like make_family, but the child signs in and is approved by Ann, so forward auth can answer for the child."""
+    ann, ann_browser = await signed_in_person(env, account_type="adult", display_name="Ann",
+                                              email="ann@example.com")
+    kid, kid_browser = await signed_in_person(env, account_type="child", display_name="Kid")
+    ben = await store_person(env, display_name="Ben", account_type="adult", email="ben@example.com")
+    fluxer = await create_service(env, "fluxer", auto=True, actor=ann)
+    abiotic = await create_service(env, "abiotic", auto=False, actor=ann)
+
+    def setup(conn) -> None:
+        registry.link_parent(conn, kid.id, ann.id, NOW)
+        registry.link_parent(conn, kid.id, ben.id, NOW)
+        for service in (fluxer, abiotic):
+            services.add_entitlement(conn, service.id, "type", "child", "grant", actor_id=ann.id, now=NOW)
+        grants.grant(conn, child_id=kid.id, parent_id=ann.id, now=NOW)
+
+    await env.db.run(setup)
+    family = Family(kid=kid, ann=ann, ann_browser=ann_browser, ben=ben, fluxer=fluxer, abiotic=abiotic)
+    return family, kid_browser
+
+
+async def resolve_keeping_lockdown(env: Env, review_id: int) -> None:
+    await admin_post(env, f"/admin/reviews/{review_id}", f"/admin/reviews/{review_id}/resolve",
+                     outcome="Talked it through")
+
+
+async def test_lifting_a_resolved_reviews_lockdown_lets_the_child_use_the_services_again(env: Env):
+    await admin_client(env)
+    family, kid_browser = await make_signed_family(env)
+    assert (await check(kid_browser, "fluxer")).status_code == 200
+    await lock_down(env, family)
+    review_id = await open_review_id(env)
+    await resolve_keeping_lockdown(env, review_id)
+    assert (await check(kid_browser, "fluxer")).status_code == 403
+
+    lifted = await admin_post(env, f"/admin/reviews/{review_id}", f"/admin/reviews/{review_id}/lift")
+    assert lifted.status_code == 303
+    assert lifted.headers["location"] == f"/admin/reviews/{review_id}"
+    # Ann's own parent hold is still on the child; the administrator lifts it too, as an admin action.
+    await admin_post(env, f"/admin/people/{family.kid.id}", f"/admin/people/{family.kid.id}/holds/lift",
+                     service_id="all", include_parent="on")
+
+    assert await hold_kinds(env, family.kid.id, family.fluxer.id) == []
+    assert await hold_kinds(env, family.kid.id, family.abiotic.id) == []
+    assert (await check(kid_browser, "fluxer")).status_code == 200
+    logged = await env.db.run(lambda c: c.execute(
+        "SELECT actor_kind, target_person_id FROM decision_log WHERE action = 'lockdown_lifted'").fetchall())
+    assert [tuple(row) for row in logged] == [("admin", family.kid.id)]
+
+
+async def test_a_parent_cannot_lift_a_lockdown_from_a_review(env: Env):
+    await admin_client(env)
+    family, _ = await make_signed_family(env)
+    await lock_down(env, family)
+    review_id = await open_review_id(env)
+    await resolve_keeping_lockdown(env, review_id)
+    csrf = await form(env, "/", client=family.ann_browser)
+
+    response = await family.ann_browser.post(f"/admin/reviews/{review_id}/lift", data=csrf)
+
+    assert response.status_code == 403
+    assert await hold_kinds(env, family.kid.id, family.fluxer.id) == ["parent", "lockdown"]
+
+
+async def test_an_open_review_cannot_have_its_lockdown_lifted(env: Env):
+    await admin_client(env)
+    family, _ = await make_signed_family(env)
+    await lock_down(env, family)
+    review_id = await open_review_id(env)
+
+    response = await admin_post(env, f"/admin/reviews/{review_id}", f"/admin/reviews/{review_id}/lift")
+
+    assert response.status_code == 400
+    assert await hold_kinds(env, family.kid.id, family.fluxer.id) == ["parent", "lockdown"]
+
+
+async def test_the_review_page_offers_the_lift_only_when_resolved_and_a_lockdown_remains(env: Env):
+    await admin_client(env)
+    family, _ = await make_signed_family(env)
+    await lock_down(env, family)
+    review_id = await open_review_id(env)
+    lift_form = f'action="/admin/reviews/{review_id}/lift"'
+
+    assert lift_form not in (await env.client.get(f"/admin/reviews/{review_id}")).text
+
+    await resolve_keeping_lockdown(env, review_id)
+    assert lift_form in (await env.client.get(f"/admin/reviews/{review_id}")).text
+
+    await admin_post(env, f"/admin/reviews/{review_id}", f"/admin/reviews/{review_id}/lift")
+    assert lift_form not in (await env.client.get(f"/admin/reviews/{review_id}")).text

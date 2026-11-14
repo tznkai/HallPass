@@ -263,9 +263,10 @@ async def _set_locked(request: Request, admin: Person, person_id: int, *, locked
 
     person = await deps.db.run(change)
     # The sync sets the active flag. The lock is kept in hallpass either way; the warning tells the admin when
-    # Authentik still needs the change, and the resync loop retries it.
+    # Authentik still needs the change, and the resync loop retries it. Sessions end on a lock even when the sync
+    # failed: a session must not outlive the lock because one of the sync's calls was refused.
     synced = await _sync_affected(deps, person_id)
-    if locked and synced and person.authentik_pk is not None:
+    if locked and person.authentik_pk is not None:
         try:
             await deps.authentik.end_sessions(person.authentik_pk)
         except AuthentikError as error:
@@ -903,6 +904,29 @@ async def resolve_review(request: Request, review_id: int, admin: Admin,
             raise holds.NoSuchReview()
         holds.resolve_review(conn, admin_id=admin.id, review_id=review_id, outcome=outcome,
                              lift_lockdown=lift_lockdown is not None, now=now)
+        return child_id
+
+    try:
+        child_id = await deps.db.run(change)
+    except holds.NoSuchReview:
+        return message_page(request, text.NOT_FOUND, 404)
+    except ValueError:
+        return await _review_page(request, admin, review_id, status=400, error=text.INVALID_INPUT)
+    await authentik_sync.sync_people(deps, [child_id])
+    return _to(f"/admin/reviews/{review_id}")
+
+
+@router.post("/reviews/{review_id}/lift", dependencies=WRITE)
+async def lift_review_lockdown(request: Request, review_id: int, admin: Admin) -> Response:
+    """Lifts the lockdown a resolved review left in force. Only the administrator may lift a lockdown."""
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int:
+        child_id = holds.review_child_id(conn, review_id)
+        if child_id is None:
+            raise holds.NoSuchReview()
+        holds.lift_lockdown(conn, admin_id=admin.id, review_id=review_id, now=now)
         return child_id
 
     try:

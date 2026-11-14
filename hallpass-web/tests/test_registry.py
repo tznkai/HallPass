@@ -452,3 +452,20 @@ async def test_log_decision_stores_the_row_with_json_columns(db: Database) -> No
         "SELECT at, actor_kind, action, services, detail, reversal FROM decision_log WHERE id = ?",
         (row_id,)).fetchone())
     assert row == ("2026-11-13T12:00:00+00:00", "admin", "person_created", '["fluxer"]', '{"k": 1}', 0)
+
+
+# Display names are one line of plain text: control characters are refused ---------------------------
+
+@pytest.mark.parametrize("name", ["Ann\r\nBcc: x@example.com", "Ann\tB", "Ann\x00B", "Ann\u0085B"])
+async def test_a_display_name_with_a_control_character_is_refused_and_nothing_is_stored(db: Database, name: str) -> None:
+    with pytest.raises(ValueError):
+        await db.run(lambda c: registry.create_person(c, display_name=name, account_type="adult", now=NOW))
+    assert await db.run(registry.list_people) == []
+
+
+async def test_an_update_to_a_name_with_a_control_character_is_refused_and_changes_nothing(db: Database) -> None:
+    person = await db.run(lambda c: registry.create_person(c, display_name="Ann", account_type="adult", now=NOW))
+    with pytest.raises(ValueError):
+        await db.run(lambda c: registry.update_person(c, person.id, display_name="Ann\r\nX", account_type="adult",
+                                                       email=None, phone=None, fluxer_email_override=None))
+    assert (await db.run(lambda c: registry.get_person(c, person.id))).display_name == "Ann"

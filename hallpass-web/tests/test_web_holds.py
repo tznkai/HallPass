@@ -18,6 +18,7 @@ from tests.helpers import (
     FLUXER_GROUP,
     NOW,
     Env,
+    admin_client,
     form,
     signed_in_person,
 )
@@ -251,6 +252,18 @@ async def test_the_child_page_names_the_system_during_a_lockdown(env: Env):
     page = (await world.kid_browser.get("/")).text
 
     assert "Suspended by the system" in page
+
+
+async def test_the_child_page_names_the_administrator_for_an_admin_hold(env: Env):
+    world = await build_world(env)
+    await admin_client(env)
+    data = await form(env, f"/admin/people/{world.kid.id}", service_id="all")
+    placed = await env.client.post(f"/admin/people/{world.kid.id}/holds", data=data)
+    assert placed.status_code == 303
+
+    page = (await world.kid_browser.get("/")).text
+
+    assert "Suspended by the administrator" in page
 
 
 # Helpers -----------------------------------------------------------------------------------------------

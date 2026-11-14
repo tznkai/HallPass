@@ -78,6 +78,18 @@ def _resolve_services(conn: sqlite3.Connection, target: Person, service_ids: Seq
     return ids
 
 
+def _place_scope(conn: sqlite3.Connection, child: Person, service_ids: Sequence[int] | None) -> list[int]:
+    """Which services a parent may place a hold on: every service the child has (None), or explicit ids that are all
+    among them. A retired service, or one the child is not entitled to, is refused."""
+    own = [service.id for service, _ in access.services_for(conn, child)]
+    if service_ids is None:
+        return own
+    ids = sorted(set(service_ids))
+    if any(service_id not in own for service_id in ids):
+        raise HoldRefused("not_child_service", text.NOT_CHILD_SERVICE)
+    return ids
+
+
 def _hold_label(conn: sqlite3.Connection, hold: Hold) -> str:
     if hold.kind == "admin":
         return text.ACTOR_ADMIN
@@ -107,13 +119,19 @@ def services_with_holds(conn: sqlite3.Connection, person_id: int) -> dict[int, l
 
 
 def _history(conn: sqlite3.Connection, child_id: int) -> list[conflict.Entry]:
-    """The parents' place and lift actions on this child, for conflict.evaluate. Newest id first: evaluate sorts
-    stably, so actions logged at the same second keep log order and the newest one is found as the previous action."""
+    """The parents' place and lift actions on this child since the child's last resolved review, for
+    conflict.evaluate. A resolution is a fresh start: actions logged at or before its decision_log row are not history.
+    The cut-off is the row id, not the timestamp, so actions logged in the same second are ordered correctly.
+    Newest id first: evaluate sorts stably, so the newest action is found as the previous action."""
+    cutoff = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM decision_log WHERE target_person_id = ? AND action = 'review_resolved'",
+        (child_id,),
+    ).fetchone()[0]
     rows = conn.execute(
         "SELECT at, actor_person_id, action, services, reversal FROM decision_log "
         "WHERE target_person_id = ? AND actor_kind = 'parent' AND action IN ('hold_placed', 'hold_lifted') "
-        "ORDER BY id DESC",
-        (child_id,),
+        "AND id > ? ORDER BY id DESC",
+        (child_id, cutoff),
     ).fetchall()
     return [
         conflict.Entry(at=datetime.fromisoformat(at), actor_id=actor_id,
@@ -167,6 +185,11 @@ def _clear_orphan_marks(conn: sqlite3.Connection, person_id: int, service_ids: S
 
 # Lockdown ----------------------------------------------------------------------------------------------
 
+def _open_review(conn: sqlite3.Connection, child_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM review_item WHERE child_id = ? AND resolved_at IS NULL LIMIT 1",
+                        (child_id,)).fetchone() is not None
+
+
 def _lockdown(conn: sqlite3.Connection, child: Person, now: datetime, admin_email: str | None) -> int:
     """Opens a review, holds every service the child has, logs it, and emails each linked parent and the admin.
     Returns the review id."""
@@ -197,6 +220,16 @@ def _lockdown(conn: sqlite3.Connection, child: Person, now: datetime, admin_emai
     if admin_email:
         mail.enqueue(conn, to_addr=admin_email, subject=subject, body=body, now=now)
     return review_id
+
+
+def _maybe_lockdown(conn: sqlite3.Connection, child: Person, verdict: conflict.Verdict, now: datetime,
+                    admin_email: str | None) -> int | None:
+    """Locks the child down on a verdict that calls for it, unless a review is already open for the child. The
+    triggering action is applied and logged either way; a further reversal while a review is open adds no second
+    review and no second set of lockdown holds."""
+    if not verdict.lockdown or _open_review(conn, child.id):
+        return None
+    return _lockdown(conn, child, now, admin_email)
 
 
 # Placing -----------------------------------------------------------------------------------------------
@@ -246,9 +279,9 @@ def place(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids
     """Places a hold on each service (None means all of the target's services). A parent may do this only for a child
     linked to them. A parent's action is checked for a reversal, and a second reversal in the window locks the child."""
     target = _person(conn, target_id)
-    ids = _resolve_services(conn, target, service_ids)
     if actor.kind == "parent":
         _require_own_child(conn, actor, target)
+        ids = _place_scope(conn, target, service_ids)
         strict = target.conflict_mode == "strict"
         for service_id in ids:
             _place_parent_hold(conn, child_id=target.id, service_id=service_id, parent_id=actor.person_id,
@@ -258,6 +291,7 @@ def place(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids
                                     conflict.Proposed(actor.person_id, "place", frozenset(changed)), now, window)
         label = _person(conn, actor.person_id).display_name
     else:
+        ids = _resolve_services(conn, target, service_ids)
         changed = [service_id for service_id in ids
                    if _place_admin_hold(conn, child_id=target.id, service_id=service_id, admin_id=actor.person_id,
                                         reason=reason, now=now)]
@@ -269,7 +303,7 @@ def place(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids
                           target_person_id=target.id, action="hold_placed", services=changed,
                           reversal=verdict.reversal)
     _queue_change_emails(conn, child=target, actor_id=actor.person_id, label=label, now=now)
-    review_id = _lockdown(conn, target, now, admin_email) if verdict.lockdown else None
+    review_id = _maybe_lockdown(conn, target, verdict, now, admin_email)
     return Outcome(tuple(changed), verdict.reversal, review_id)
 
 
@@ -333,7 +367,7 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
                           target_person_id=target.id, action="hold_lifted", services=changed,
                           reversal=verdict.reversal)
     _queue_change_emails(conn, child=target, actor_id=actor.person_id, label=label, now=now)
-    review_id = _lockdown(conn, target, now, admin_email) if verdict.lockdown else None
+    review_id = _maybe_lockdown(conn, target, verdict, now, admin_email)
     return Outcome(tuple(changed), verdict.reversal, review_id)
 
 
@@ -354,17 +388,39 @@ def resolve_review(conn: sqlite3.Connection, *, admin_id: int, review_id: int, o
         raise ValueError("outcome is required")
     conn.execute("UPDATE review_item SET resolved_at = ?, resolved_by = ?, outcome = ? WHERE id = ?",
                  (_iso(now), admin_id, clean, review_id))
-    lifted: list[int] = []
-    if lift_lockdown:
-        lifted = [service_id for (service_id,) in conn.execute(
-            "SELECT DISTINCT service_id FROM hold WHERE review_id = ? AND kind = 'lockdown' ORDER BY service_id",
-            (review_id,)).fetchall()]
-        conn.execute("DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'", (review_id,))
-        _clear_orphan_marks(conn, child_id, lifted)
+    lifted = _drop_lockdown(conn, review_id, child_id) if lift_lockdown else []
     registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin_id, target_person_id=child_id,
                           action="review_resolved", services=lifted, detail={"outcome": clean})
     if lifted:
         _queue_change_emails(conn, child=_person(conn, child_id), actor_id=admin_id, label=text.ACTOR_ADMIN, now=now)
+
+
+def _drop_lockdown(conn: sqlite3.Connection, review_id: int, child_id: int) -> list[int]:
+    """Deletes the lockdown holds a review opened, and the manual marks they leave without a hold. Returns the services
+    they were on. This is the only place lockdown holds are deleted."""
+    lifted = [service_id for (service_id,) in conn.execute(
+        "SELECT DISTINCT service_id FROM hold WHERE review_id = ? AND kind = 'lockdown' ORDER BY service_id",
+        (review_id,)).fetchall()]
+    conn.execute("DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'", (review_id,))
+    _clear_orphan_marks(conn, child_id, lifted)
+    return lifted
+
+
+def lift_lockdown(conn: sqlite3.Connection, *, admin_id: int, review_id: int, now: datetime) -> None:
+    """Lifts the lockdown holds a resolved review left in force, for a review that was resolved without the lift. Refused
+    while the review is open. Does nothing when no lockdown holds remain. Only the web layer's admin gate calls this."""
+    row = conn.execute("SELECT child_id, resolved_at FROM review_item WHERE id = ?", (review_id,)).fetchone()
+    if row is None:
+        raise NoSuchReview()
+    child_id, resolved_at = row
+    if resolved_at is None:
+        raise ValueError("review is still open")
+    lifted = _drop_lockdown(conn, review_id, child_id)
+    if not lifted:
+        return
+    registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin_id, target_person_id=child_id,
+                          action="lockdown_lifted", services=lifted, detail={"review_id": review_id})
+    _queue_change_emails(conn, child=_person(conn, child_id), actor_id=admin_id, label=text.ACTOR_ADMIN, now=now)
 
 
 def service_scope(raw: str) -> list[int] | None:
@@ -440,6 +496,8 @@ def review_detail(conn: sqlite3.Connection, review_id: int) -> dict | None:
         "resolved_at": resolved_at,
         "outcome": outcome,
         "resolver": None if resolver is None else resolver.display_name,
+        "lockdown_holds": conn.execute("SELECT COUNT(*) FROM hold WHERE review_id = ? AND kind = 'lockdown'",
+                                       (review_id,)).fetchone()[0],
         "decisions": recent_decisions(conn, child_id),
     }
 

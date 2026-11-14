@@ -8,6 +8,7 @@ import hmac
 import logging
 import secrets
 import sqlite3
+import unicodedata
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -197,6 +198,14 @@ async def _enroll(db: Database, authentik: AuthentikClient, identity: Identity, 
     return await db.run(lambda c: _bind_enrolled(c, ref=identity.enrollment_ref, user=user, now=now))
 
 
+def _bootstrap_display_name(username: object) -> str:
+    """The name a bootstrapped admin starts with: the Authentik username without control characters, or
+    "Administrator" when nothing usable is left. A name must never fail the sign-in."""
+    raw = username if isinstance(username, str) else ""
+    cleaned = "".join(ch for ch in raw if unicodedata.category(ch) != "Cc").strip()
+    return cleaned or "Administrator"
+
+
 def _bootstrap_admin(conn: sqlite3.Connection, *, user: AuthentikUser, display_name: str, now: datetime) -> Person:
     existing = registry.get_by_uuid(conn, user.uuid)
     if existing is not None:
@@ -215,7 +224,7 @@ async def resolve_sign_in(db: Database, authentik: AuthentikClient, config: Conf
         person = await _enroll(db, authentik, identity, now)
     if person is None and identity.sub in config.admin_subs:
         user = await _authentik_user(authentik, identity.sub)
-        display_name = identity.username or "Administrator"
+        display_name = _bootstrap_display_name(identity.username)
         person = await db.run(lambda c: _bootstrap_admin(c, user=user, display_name=display_name, now=now))
     if person is None:
         raise SignInError("not_registered")

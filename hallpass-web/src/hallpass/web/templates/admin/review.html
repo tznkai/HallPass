@@ -18,6 +18,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   {% endif %}
 </section>
 
+{% if review.resolved_at and review.lockdown_holds %}
+<section class="stack">
+  <h2>Lockdown</h2>
+  <p>The lockdown from this review is still in force.</p>
+  <form method="post" action="/admin/reviews/{{ review.id }}/lift" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <button type="submit">Lift the lockdown</button>
+  </form>
+</section>
+{% endif %}
+
 <section class="stack">
   <h2>Recent decisions</h2>
   <table>

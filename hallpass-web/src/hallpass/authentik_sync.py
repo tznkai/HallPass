@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Protocol
 
 from hallpass import access, registry, services
@@ -65,26 +65,42 @@ async def _remove_from_group(authentik: AuthentikClient, group: str, pk: int) ->
             raise
 
 
+async def _attempt(person_id: int, step: str, call: Callable[[], Awaitable[None]]) -> bool:
+    """Runs one Authentik call. A failure is logged with the step's name and the status, and reported as False, so
+    the other steps still run."""
+    try:
+        await call()
+    except AuthentikError as error:
+        log_event(log, "authentik_sync_failed", level=logging.WARNING, person_id=person_id, action=step,
+                  reason=error.reason, http_status=error.status)
+        return False
+    return True
+
+
 async def sync_person(deps: SyncDeps, person_id: int) -> bool:
-    """Brings the person's Authentik state in line. Returns True when Authentik now matches hallpass (or there is
-    nothing to keep in step), and False after logging a failed call. Never raises for an Authentik failure."""
+    """Brings the person's Authentik state in line. Returns True when every step succeeded (or there is nothing to keep
+    in step), and False after logging a failed call. Never raises for an Authentik failure.
+
+    Each step runs even when an earlier one fails. The restrictive steps (leaving the Fluxer group, deactivating) come
+    first, so a failed attribute call can never leave a hold or a lock unenforced. The permissive steps come last."""
     snapshot = await deps.db.run(lambda c: _snapshot(c, deps, person_id))
     if snapshot is None:
         return True                 # unbound or missing: nothing in Authentik to keep in step
     pk, member, address, active = snapshot
     group = deps.config.authentik_fluxer_group
-    try:
-        await deps.authentik.update_attributes(pk, {ATTRIBUTE: address})
-        if member:
-            await deps.authentik.add_to_group(group, pk)
-        else:
-            await _remove_from_group(deps.authentik, group, pk)
-        await deps.authentik.set_active(pk, active)
-    except AuthentikError as error:
-        log_event(log, "authentik_sync_failed", level=logging.WARNING, person_id=person_id, reason=error.reason,
-                  http_status=error.status)
-        return False
-    return True
+    authentik = deps.authentik
+    steps: list[tuple[str, Callable[[], Awaitable[None]]]] = []
+    if not member:
+        steps.append(("remove_from_group", lambda: _remove_from_group(authentik, group, pk)))
+    if not active:
+        steps.append(("set_active", lambda: authentik.set_active(pk, False)))
+    steps.append(("update_attributes", lambda: authentik.update_attributes(pk, {ATTRIBUTE: address})))
+    if member:
+        steps.append(("add_to_group", lambda: authentik.add_to_group(group, pk)))
+    if active:
+        steps.append(("set_active", lambda: authentik.set_active(pk, True)))
+    results = [await _attempt(person_id, step, call) for step, call in steps]
+    return all(results)
 
 
 async def sync_people(deps: SyncDeps, person_ids: Iterable[int]) -> bool:

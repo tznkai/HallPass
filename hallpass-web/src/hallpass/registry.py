@@ -12,6 +12,7 @@ import json
 import re
 import secrets
 import sqlite3
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
@@ -99,14 +100,24 @@ def _require_type(account_type: str) -> None:
         raise ValueError("unknown account type")
 
 
+def _display_name(raw: str | None) -> str:
+    """A display name is one line of plain text, because it is written into email subjects. Any control character (CR,
+    LF, TAB and the rest of Unicode category Cc) is refused, as is a blank name."""
+    value = raw or ""
+    if any(unicodedata.category(ch) == "Cc" for ch in value):
+        raise ValueError("display name has a control character")
+    name = value.strip()
+    if not name:
+        raise ValueError("display name is required")
+    return name
+
+
 # People ------------------------------------------------------------------------------------------------
 
 def create_person(conn: sqlite3.Connection, *, display_name: str, account_type: str,
                   email: str | None = None, phone: str | None = None, now: datetime) -> Person:
     _require_type(account_type)
-    name = (display_name or "").strip()
-    if not name:
-        raise ValueError("display name is required")
+    name = _display_name(display_name)
     cursor = conn.execute(
         "INSERT INTO person (ref, display_name, account_type, email, phone, enrollment_ref, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -132,9 +143,7 @@ def update_person(conn: sqlite3.Connection, person_id: int, *, display_name: str
     if current is None:
         raise NoSuchPerson()
     _require_type(account_type)
-    name = (display_name or "").strip()
-    if not name:
-        raise ValueError("display name is required")
+    name = _display_name(display_name)
     if account_type == "child" and _has_children(conn, person_id):
         raise LinkRefused(text.TYPE_CHANGE_REFUSED_IS_PARENT)
     if current.account_type == "child" and account_type != "child" and _has_parents(conn, person_id):

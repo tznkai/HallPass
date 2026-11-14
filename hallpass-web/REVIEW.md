@@ -17,23 +17,23 @@ as the code they cite.
 
 ## Enrollment binding
 
-- `src/hallpass/auth.py:211` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
-- `src/hallpass/registry.py:179` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
+- `src/hallpass/auth.py:220` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
+- `src/hallpass/registry.py:188` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
-- `src/hallpass/auth.py:121` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
-- `src/hallpass/auth.py:125` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
-- `src/hallpass/auth.py:147` `async def require_csrf` — every POST checks the form token and the Origin header
+- `src/hallpass/auth.py:122` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
+- `src/hallpass/auth.py:126` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
+- `src/hallpass/auth.py:148` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:39` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
 
 ## Admin check
 
-- `src/hallpass/auth.py:265` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:274` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:338` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:347` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 
@@ -43,7 +43,7 @@ as the code they cite.
 
 - `src/hallpass/terms.py:100` `def services_blocked(state: TermsState) -> bool:` — the rule for when a person may use services: no version, no acceptance, or an unaccepted blocking version
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
-- `src/hallpass/auth.py:254` `if terms.pages_blocked(state):` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not
+- `src/hallpass/auth.py:263` `if terms.pages_blocked(state):` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not
 
 ## Status transitions
 
@@ -75,12 +75,16 @@ as the code they cite.
 
 - `src/hallpass/conflict.py:47` `previous.actor_id != proposed.actor_id` — the reversal test: the previous overlapping action must be by a different parent and be the opposite kind (place vs lift), and admin and system actions never reach this history
 - `src/hallpass/conflict.py:52` `now - window < e.at <= now` — the window check: a second reversal locks the child down only when an earlier reversal falls in (now - window, now], so an edge exactly at the window is outside
+- `src/hallpass/holds.py:133` `AND id > ?` — the fresh start after a resolved review: only parent actions logged after the child's latest `review_resolved` row (by id) are history, so earlier reversals do not count
+- `src/hallpass/holds.py:230` `if not verdict.lockdown or _open_review(conn, child.id):` — a further reversal while a review is open is logged, but opens no second review and no second set of lockdown holds
 
 ## Hold permissions
 
-- `src/hallpass/holds.py:295` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
-- `src/hallpass/holds.py:298` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
-- `src/hallpass/holds.py:362` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted: lockdown holds go only when their review item is resolved with the lift option
+- `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
+- `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
+- `src/hallpass/holds.py:404` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
+- `src/hallpass/web/routes_admin.py:919` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/holds.py:417` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 
 ## Outbox
 
@@ -91,3 +95,4 @@ as the code they cite.
 
 - `src/hallpass/authentik_sync.py:34` `def wanted(conn` — the single definition of what Authentik should hold for a person: group membership, the fluxer_email attribute and the active flag
 - `src/hallpass/authentik_sync.py:43` `access.evaluate(conn, person, fluxer_service).desired == "allowed"` — the membership rule's entitlement test: a held, unentitled or retired-service person is not a member of the Fluxer group
+- `src/hallpass/authentik_sync.py:94` `steps.append(("remove_from_group"` — the restrictive steps run first, so a failed attribute call can never leave a hold or a lock unenforced; each step's failure is logged and the others still run

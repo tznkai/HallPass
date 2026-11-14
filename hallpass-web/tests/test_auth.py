@@ -418,3 +418,16 @@ async def test_admin_check_admits_the_admin_person(http, db):
     await db.run(lambda c: registry.bind_identity(c, person.id, uuid=ADMIN_SUB, authentik_pk=1, username="root"))
     await http.get(f"/start/{person.id}")
     assert (await http.get("/admin")).json() == {"id": person.id}
+
+
+async def test_admin_bootstrap_drops_control_characters_from_the_username(db, authentik, config, state):
+    add_user(state, uuid=ADMIN_SUB, username="root")
+    person = await resolve(db, authentik, config, sub=ADMIN_SUB, username="root\r\nBcc: x")
+    assert person.display_name == "rootBcc: x"
+
+
+async def test_admin_bootstrap_whose_username_is_only_control_characters_is_named_administrator(
+        db, authentik, config, state):
+    add_user(state, uuid=ADMIN_SUB, username="root")
+    person = await resolve(db, authentik, config, sub=ADMIN_SUB, username="\r\n\t")
+    assert person.display_name == "Administrator"

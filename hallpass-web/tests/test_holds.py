@@ -582,3 +582,138 @@ async def test_services_with_holds_groups_each_service_holds(db: Database) -> No
     assert sorted(grouped) == sorted([w.fluxer, w.abiotic])
     assert [h.kind for h in grouped[w.fluxer]] == ["parent", "admin"]
     assert [h.kind for h in grouped[w.abiotic]] == ["admin"]
+
+
+# Lifting a lockdown after a resolution that kept it --------------------------------------------------
+
+async def test_lifting_a_lockdown_left_by_a_resolution_removes_it_logs_it_and_emails_the_parents(db: Database) -> None:
+    w = await build(db)
+    review_id = await lock_child(w)
+    await w.db.run(lambda c: holds.resolve_review(
+        c, admin_id=w.admin, review_id=review_id, outcome="Talked it through", lift_lockdown=False, now=NOW))
+    assert {h.service_id for h in await lockdown_holds(w, w.child)} == {w.fluxer, w.abiotic}
+    before = await outbox(w)
+
+    await w.db.run(lambda c: holds.lift_lockdown(c, admin_id=w.admin, review_id=review_id,
+                                                 now=NOW + timedelta(hours=1)))
+
+    assert await lockdown_holds(w, w.child) == []
+    logged = await decision_rows(w, "lockdown_lifted")
+    assert len(logged) == 1
+    _, actor_kind, actor_id, target, services_json, _ = logged[0]
+    assert (actor_kind, actor_id, target) == ("admin", w.admin, w.child)
+    assert json.loads(services_json) == sorted([w.fluxer, w.abiotic])
+    new_mail = (await outbox(w))[len(before):]
+    change_subject = text.CHANGE_EMAIL_SUBJECT.format(child="Kid")
+    assert sorted(to for to, subject, _ in new_mail if subject == change_subject) == sorted([ANN_EMAIL, BEN_EMAIL])
+
+
+async def test_lifting_a_lockdown_is_refused_while_the_review_is_open(db: Database) -> None:
+    w = await build(db)
+    review_id = await lock_child(w)
+    with pytest.raises(ValueError):
+        await w.db.run(lambda c: holds.lift_lockdown(c, admin_id=w.admin, review_id=review_id, now=NOW))
+    assert {h.service_id for h in await lockdown_holds(w, w.child)} == {w.fluxer, w.abiotic}
+    assert await decision_rows(w, "lockdown_lifted") == []
+
+
+async def test_lifting_a_lockdown_for_an_unknown_review_is_refused(db: Database) -> None:
+    w = await build(db)
+    with pytest.raises(holds.NoSuchReview):
+        await w.db.run(lambda c: holds.lift_lockdown(c, admin_id=w.admin, review_id=999, now=NOW))
+
+
+async def test_lifting_a_lockdown_twice_changes_nothing_the_second_time(db: Database) -> None:
+    w = await build(db)
+    review_id = await lock_child(w)
+    await w.db.run(lambda c: holds.resolve_review(
+        c, admin_id=w.admin, review_id=review_id, outcome="Done", lift_lockdown=False, now=NOW))
+    await w.db.run(lambda c: holds.lift_lockdown(c, admin_id=w.admin, review_id=review_id, now=NOW))
+    await w.db.run(lambda c: holds.lift_lockdown(c, admin_id=w.admin, review_id=review_id, now=NOW))
+    assert len(await decision_rows(w, "lockdown_lifted")) == 1
+
+
+# A further reversal while a review is open -----------------------------------------------------------
+
+async def test_a_further_reversal_while_a_review_is_open_adds_no_second_review(db: Database) -> None:
+    w = await build(db)
+    await lock_child(w)
+    third = await lift(w, parent(w.ben), w.child, [w.fluxer], at=NOW + timedelta(hours=1))
+
+    assert third.reversal is True
+    assert third.lockdown_review_id is None
+    assert len(await review_rows(w)) == 1
+    assert len(await lockdown_holds(w, w.child)) == 2          # one per service, from the first review only
+    logged = await decision_rows(w, "hold_lifted")
+    assert logged[-1][5] == 1                                   # the action is still logged as a reversal
+
+
+# Parents placing holds: the child link first, then the services ---------------------------------------
+
+async def add_service(w: World, slug: str, *, entitled: bool, retired: bool = False) -> int:
+    def change(conn) -> int:
+        service = services.create_service(conn, slug=slug, name=slug.title(), kind="forward_auth", adapter="manual",
+                                          auto_suspendable=True, url=None, actor_id=w.admin, now=NOW)
+        if entitled:
+            services.add_entitlement(conn, service.id, "type", "child", "grant", actor_id=w.admin, now=NOW)
+        if retired:
+            services.retire_service(conn, service.id, actor_id=w.admin, now=NOW)
+        return service.id
+
+    return await w.db.run(change)
+
+
+async def test_an_unrelated_parent_is_refused_as_not_your_child_even_for_a_missing_service(db: Database) -> None:
+    w = await build(db)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await place(w, parent(w.cy), w.child, [999999])
+    assert refused.value.reason == "not_your_child"
+
+
+async def test_a_linked_parent_is_refused_for_a_service_that_does_not_exist(db: Database) -> None:
+    w = await build(db)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await place(w, parent(w.ann), w.child, [999999])
+    assert refused.value.reason == "not_child_service"
+
+
+async def test_a_linked_parent_cannot_place_on_a_service_the_child_is_not_entitled_to(db: Database) -> None:
+    w = await build(db)
+    walled = await add_service(w, "walled", entitled=False)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await place(w, parent(w.ann), w.child, [w.fluxer, walled])
+    assert refused.value.reason == "not_child_service"
+    assert await hold_kinds(w, w.child, w.fluxer) == []        # refused before anything is written
+    assert await hold_kinds(w, w.child, walled) == []
+
+
+async def test_a_linked_parent_cannot_place_on_a_retired_service(db: Database) -> None:
+    w = await build(db)
+    retired = await add_service(w, "retired", entitled=True, retired=True)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await place(w, parent(w.ben), w.child, [retired])
+    assert refused.value.reason == "not_child_service"
+    assert await hold_kinds(w, w.child, retired) == []
+
+
+# Fresh start after a resolved review ------------------------------------------------------------------
+
+async def test_after_a_resolution_only_reversals_logged_since_then_count(db: Database) -> None:
+    w = await build(db)
+    review_id = await lock_child(w)
+    await w.db.run(lambda c: holds.resolve_review(
+        c, admin_id=w.admin, review_id=review_id, outcome="Talked it through", lift_lockdown=True,
+        now=NOW + timedelta(minutes=30)))
+
+    # Ben lifts first. Nothing before the resolution counts, so there is nothing to reverse against.
+    first = await lift(w, parent(w.ben), w.child, [w.fluxer], at=NOW + timedelta(hours=1))
+    assert first.reversal is False and first.lockdown_review_id is None
+    # Ann places again: a reversal of Ben's lift, but the only one since the resolution, so no lockdown.
+    second = await place(w, parent(w.ann), w.child, [w.fluxer], at=NOW + timedelta(hours=2))
+    assert second.reversal is True and second.lockdown_review_id is None
+    assert len(await review_rows(w)) == 1
+    # Ben lifts within the window: a second reversal since the resolution, so the child is locked down again.
+    third = await lift(w, parent(w.ben), w.child, [w.fluxer], at=NOW + timedelta(hours=3))
+    assert third.reversal is True
+    assert third.lockdown_review_id is not None
+    assert len(await review_rows(w)) == 2
