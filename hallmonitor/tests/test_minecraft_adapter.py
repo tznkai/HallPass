@@ -299,6 +299,48 @@ async def test_a_server_that_ignores_the_whitelist_removal_is_not_applied_and_ne
     assert outcomes(hallpass) == [("r1", "error", "not_applied")]
 
 
+# The kick is checked: a player still listed online after the kick is an error, never a suspension --------
+
+def ignore_kick(state: FakeRconState, cmd: str) -> str:
+    """A server that answers `kick` with success and leaves the player connected."""
+    if cmd.startswith("kick "):
+        return "Kicked the player"
+    return default_minecraft_handler(state, cmd)
+
+
+@pytest.mark.parametrize(("identity", "listed"), [(java_identity("Steve"), "Steve"),
+                                                  (bedrock_identity("Tim"), ".Tim")])
+async def test_a_kick_that_leaves_the_player_online_is_still_connected_and_never_a_suspension(
+        identity: dict[str, str], listed: str) -> None:
+    state = server_state(whitelist=[listed], online={listed}, handler=ignore_kick)
+    hallpass = mc_service(subject("r1", "suspended", identity, generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert listed in state.online
+    assert outcomes(hallpass) == [("r1", "error", "still_connected")]
+
+
+async def test_a_suspended_player_who_is_not_online_is_suspended() -> None:
+    state = server_state(whitelist=["Steve"])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
+async def test_an_online_list_in_an_unknown_format_after_a_hold_is_unexpected_and_never_a_suspension() -> None:
+    def odd_list(state: FakeRconState, cmd: str) -> str:
+        return "Online: Steve" if cmd == "list" else default_minecraft_handler(state, cmd)
+
+    state = server_state(whitelist=["Steve"], online={"Steve"}, handler=odd_list)
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r1", "error", "unexpected")]
+
+
 # A partly listed player is brought fully onto the whitelist --------------------------------------------
 
 async def test_a_player_with_only_one_of_two_names_listed_is_brought_fully_onto_the_whitelist() -> None:

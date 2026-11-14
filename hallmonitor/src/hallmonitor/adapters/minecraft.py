@@ -34,6 +34,7 @@ DEFAULT_FLOODGATE_PREFIX = "."
 DEFAULT_KICK_MESSAGE = "Access paused. Ask a parent or the administrator."
 NO_WHITELISTED = "There are no whitelisted players"
 WHITELIST_LINE = re.compile(r"whitelisted player(?:s|\(s\))?:\s*(.*)$")  # the plan's player(s), or plural or singular
+ONLINE_LINE = re.compile(r"players online:\s*(.*)$")  # the plan's default `list` reply, unconfirmed until the live check
 BAN_HEADER = re.compile(r"There are (?:no bans|\d+ ban\(s\):)")
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
 
@@ -77,6 +78,14 @@ def _parse_whitelist(text: str) -> list[str]:
     if match is None:
         raise AdapterError("unexpected")
     return [name.strip() for name in match.group(1).split(",") if name.strip()]
+
+
+def _online_names(text: str) -> set[str]:
+    """The lower-cased names in the `list` reply, `There are N of a max of M players online: a, b`."""
+    match = ONLINE_LINE.search(text)
+    if match is None:
+        raise AdapterError("unexpected")
+    return {name.strip().lower() for name in match.group(1).split(",") if name.strip()}
 
 
 def _ban_names(text: str) -> str:
@@ -156,10 +165,15 @@ class MinecraftAdapter:
                     await client.command(f"{entry.command} remove {entry.arg}")
                     await client.command(f"kick {entry.listed} {self._kick_message}")
             listed = _parse_whitelist(await client.command("whitelist list"))
+            online = _online_names(await client.command("list")) if desired == "suspended" else set()
         actual = _listed_state(entries, {name.lower() for name in listed})
         if actual != desired:
             log_event(log, "not_applied", service="minecraft", outcome="listing_disagrees", level=logging.WARNING)
             return Observed("error", "not_applied")
+        if any(entry.listed.lower() in online for entry in entries):
+            # The kick did not disconnect the player, so the hold is not in force: report it, never as suspended.
+            log_event(log, "still_connected", service="minecraft", outcome="kick_ignored", level=logging.WARNING)
+            return Observed("error", "still_connected")
         return Observed(desired)
 
     async def unmanaged_count(self, subjects: Sequence[Subject]) -> int | None:
