@@ -44,6 +44,10 @@ TOPICS = [
     "Authentik calls",
     "Terms gate",
     "Status transitions",
+    "Entitlement resolution",
+    "Access decision",
+    "Forward auth",
+    "Feed tokens",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.

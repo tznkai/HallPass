@@ -48,3 +48,24 @@ as the code they cite.
 
 - `src/hallpass/grants.py:69` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
 - `src/hallpass/grants.py:44` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
+
+## Entitlement resolution
+
+- `src/hallpass/entitlements.py:28` `def resolve(rows` — the rule order: a person-level row decides first, then a group grant, then a type grant, and otherwise the person is not entitled
+- `src/hallpass/entitlements.py:33` `return row.effect == "grant"` — a person-level deny returns before any group or type grant is read, so it overrides them
+
+## Access decision
+
+- `src/hallpass/access.py:27` `def evaluate(conn` — the one per-person, per-service decision that forward auth, the personal page and the desired-state computation all share
+- `src/hallpass/access.py:37` `Access(desired=` — the service is suspended whenever any reason applies, so a retired, unentitled, inactive or blocked person is never allowed
+
+## Forward auth
+
+- `src/hallpass/forward_auth.py:107` `if found.kind == "feed":` — the feed-token branch: the token is read from the forwarded URI, and the answer is 200 or 403, never a redirect
+- `src/hallpass/forward_auth.py:117` `status_code=302` — the no-session branch, which sends the person to sign-in and is the only redirect the endpoint returns
+
+## Feed tokens
+
+- `src/hallpass/tokens.py:76` `def hash_token(raw` — the raw token is 192 random bits, and only its SHA-256 hex is ever stored
+- `src/hallpass/tokens.py:77` `hashlib.sha256(raw.encode())` — the hash that feed lookups compare against, so a database read yields no usable token
+- `src/hallpass/tokens.py:86` `UPDATE token SET revoked_at` — issuing a new feed token revokes the person's previous one for the same service, so regenerating cuts off the old URL
