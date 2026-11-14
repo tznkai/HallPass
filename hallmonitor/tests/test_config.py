@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -98,18 +99,34 @@ def test_service_variable_needs_a_slug_and_a_key(name: str) -> None:
         Config.from_env(base_env(**{name: "x"}))
 
 
-# A slug never has a doubled or trailing hyphen, so `a--b` and `a-` have no variable name that splits cleanly at
-# the first `__`. A variable that would name either one is refused, and so is any key that starts or ends with `_`.
+# The name splits at its first `__`, so each of these splits there and the key after it is what fails the key rule:
+# a `__` or a leading or trailing `_` in the key is refused.
 @pytest.mark.parametrize("name", ["HM_SERVICE_A__B__HOST", "HM_SERVICE_A___HOST", "HM_SERVICE_THE_SHIP___HOST",
                                   "HM_SERVICE_A__HOST_"])
-def test_service_variable_that_names_an_invalid_slug_or_key_is_refused(name: str) -> None:
-    with pytest.raises(ConfigError, match=name):
+def test_service_variable_with_an_invalid_key_is_refused(name: str) -> None:
+    with pytest.raises(ConfigError, match=re.escape(f"{name} must be HM_SERVICE_<SLUG>__<KEY>")):
+        Config.from_env(base_env(**{name: "x"}))
+
+
+# The slug is the part before the first `__`, lower-cased with `_` turned into `-`. It must be a valid slug: no
+# leading, trailing or doubled hyphen, only [a-z0-9] and single hyphens, and at most 64 characters.
+@pytest.mark.parametrize("name", ["HM_SERVICE__A__HOST",                    # slug "-a": leading hyphen
+                                  "HM_SERVICE_" + "A" * 65 + "__HOST",      # 65 characters
+                                  "HM_SERVICE_A.B__HOST"])                  # "." is not in [a-z0-9]
+def test_service_variable_with_an_invalid_slug_is_refused(name: str) -> None:
+    with pytest.raises(ConfigError, match=re.escape(f"{name} names a service slug that is not valid")):
         Config.from_env(base_env(**{name: "x"}))
 
 
 def test_service_slug_with_single_hyphens_is_accepted() -> None:
     config = Config.from_env(base_env(**{"HM_SERVICE_A_B_C__HOST": "example"}))
     assert config.service_settings["a-b-c"]["host"] == "example"
+
+
+def test_service_slug_of_64_characters_is_accepted() -> None:
+    slug = "a" * 64
+    config = Config.from_env(base_env(**{f"HM_SERVICE_{slug.upper()}__HOST": "example"}))
+    assert config.service_settings[slug]["host"] == "example"
 
 
 def test_secrets_hold_tokens_and_secret_service_settings_only() -> None:
