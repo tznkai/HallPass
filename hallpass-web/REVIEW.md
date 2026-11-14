@@ -17,23 +17,23 @@ as the code they cite.
 
 ## Enrollment binding
 
-- `src/hallpass/auth.py:220` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
-- `src/hallpass/registry.py:188` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
+- `src/hallpass/auth.py:219` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
+- `src/hallpass/registry.py:187` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
-- `src/hallpass/auth.py:122` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
-- `src/hallpass/auth.py:126` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
-- `src/hallpass/auth.py:148` `async def require_csrf` — every POST checks the form token and the Origin header
+- `src/hallpass/auth.py:121` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
+- `src/hallpass/auth.py:125` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
+- `src/hallpass/auth.py:147` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:39` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
 
 ## Admin check
 
-- `src/hallpass/auth.py:274` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:273` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:347` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:346` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 
@@ -43,7 +43,7 @@ as the code they cite.
 
 - `src/hallpass/terms.py:100` `def services_blocked(state: TermsState) -> bool:` — the rule for when a person may use services: no version, no acceptance, or an unaccepted blocking version
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
-- `src/hallpass/auth.py:263` `if terms.pages_blocked(state):` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not
+- `src/hallpass/auth.py:262` `if terms.pages_blocked(state):` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not
 
 ## Status transitions
 
@@ -82,9 +82,9 @@ as the code they cite.
 
 - `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
 - `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
-- `src/hallpass/holds.py:404` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
+- `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
 - `src/hallpass/web/routes_admin.py:919` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
-- `src/hallpass/holds.py:417` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
+- `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 
 ## Outbox
 

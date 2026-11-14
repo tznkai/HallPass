@@ -12,12 +12,11 @@ import json
 import re
 import secrets
 import sqlite3
-import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 
-from hallpass import text
+from hallpass import display_names, text
 
 ACCOUNT_TYPES = ("adult", "parent", "child")
 IDENTITY_KINDS = ("fluxer_user_id", "java_name", "bedrock_gamertag", "steam_id")
@@ -102,9 +101,9 @@ def _require_type(account_type: str) -> None:
 
 def _display_name(raw: str | None) -> str:
     """A display name is one line of plain text, because it is written into email subjects. Any control character (CR,
-    LF, TAB and the rest of Unicode category Cc) is refused, as is a blank name."""
+    LF, TAB and the rest of Unicode category Cc) or line or paragraph separator (Zl, Zp) is refused, as is a blank name."""
     value = raw or ""
-    if any(unicodedata.category(ch) == "Cc" for ch in value):
+    if any(display_names.is_unsafe(ch) for ch in value):
         raise ValueError("display name has a control character")
     name = value.strip()
     if not name:

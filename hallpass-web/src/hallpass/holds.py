@@ -340,7 +340,8 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
          window: timedelta, admin_email: str | None, include_parent: bool = False) -> Outcome:
     """Lifts holds on the listed services. A parent lifts only parent holds, only on their linked child, and only on
     services the administrator has marked auto-suspendable. The administrator lifts admin holds, and parent holds when
-    include_parent is set. Lockdown holds are never lifted here; they go when their review is resolved."""
+    include_parent is set. Lockdown holds are never lifted here; they go when their review is resolved with the lift,
+    or when the administrator lifts them afterwards (`lift_lockdown`)."""
     target = _person(conn, target_id)
     if actor.kind == "parent":
         _require_own_child(conn, actor, target)

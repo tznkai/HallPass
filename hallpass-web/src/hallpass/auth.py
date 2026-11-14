@@ -8,7 +8,6 @@ import hmac
 import logging
 import secrets
 import sqlite3
-import unicodedata
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,7 +30,7 @@ from joserfc.errors import JoseError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 
-from hallpass import holds, registry, terms, text
+from hallpass import display_names, holds, registry, terms, text
 from hallpass.authentik import AuthentikClient, AuthentikError, AuthentikUser
 from hallpass.config import Config
 from hallpass.db import Database
@@ -202,7 +201,7 @@ def _bootstrap_display_name(username: object) -> str:
     """The name a bootstrapped admin starts with: the Authentik username without control characters, or
     "Administrator" when nothing usable is left. A name must never fail the sign-in."""
     raw = username if isinstance(username, str) else ""
-    cleaned = "".join(ch for ch in raw if unicodedata.category(ch) != "Cc").strip()
+    cleaned = "".join(ch for ch in raw if not display_names.is_unsafe(ch)).strip()
     return cleaned or "Administrator"
 
 
