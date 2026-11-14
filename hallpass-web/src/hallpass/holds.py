@@ -127,6 +127,21 @@ def _names(conn: sqlite3.Connection, holds: Sequence[Hold]) -> str:
     return ", ".join(_hold_label(conn, hold) for hold in holds)
 
 
+def liftable_parent_holds(mode: str, parent_id: int, held: Sequence[Hold]) -> list[Hold]:
+    """The parent holds this parent may lift on one service: every parent hold in the shared modes, and only the
+    parent's own holds in strict mode. Admin and lockdown holds are never liftable by a parent."""
+    parent_holds = [hold for hold in held if hold.kind == "parent"]
+    if mode == "strict":
+        return [hold for hold in parent_holds if hold.placed_by == parent_id]
+    return parent_holds
+
+
+def marked_service_ids(conn: sqlite3.Connection, person_id: int) -> set[int]:
+    """The services the administrator has marked manually suspended for this person."""
+    return {row[0] for row in conn.execute(
+        "SELECT service_id FROM manual_suspension WHERE person_id = ?", (person_id,)).fetchall()}
+
+
 # Notifications -----------------------------------------------------------------------------------------
 
 def _queue_change_emails(conn: sqlite3.Connection, *, child: Person, actor_id: int, label: str,
@@ -272,15 +287,13 @@ def _parent_lift_plan(conn: sqlite3.Connection, target: Person, parent_id: int,
         if not service.auto_suspendable:
             raise HoldRefused("restore_not_automatic", text.RESTORE_NOT_AUTOMATIC)
         held = access.holds_for(conn, target.id, service_id)
-        parent_holds = [hold for hold in held if hold.kind == "parent"]
         if strict:
+            parent_holds = [hold for hold in held if hold.kind == "parent"]
             own = [hold for hold in parent_holds if hold.placed_by == parent_id]
             others = [hold for hold in parent_holds if hold.placed_by != parent_id]
             if others and not own:
                 raise HoldRefused("strict_not_yours", text.STRICT_NOT_YOURS.format(names=_names(conn, others)))
-            liftable = own
-        else:
-            liftable = parent_holds
+        liftable = liftable_parent_holds(target.conflict_mode, parent_id, held)
         if not liftable:
             if any(hold.kind in ("admin", "lockdown") for hold in held):
                 raise HoldRefused("admin_or_lockdown", text.LOCKDOWN_ADMIN_ONLY)
@@ -352,6 +365,73 @@ def resolve_review(conn: sqlite3.Connection, *, admin_id: int, review_id: int, o
                           action="review_resolved", services=lifted, detail={"outcome": clean})
     if lifted:
         _queue_change_emails(conn, child=_person(conn, child_id), actor_id=admin_id, label=text.ACTOR_ADMIN, now=now)
+
+
+def open_review_count(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) FROM review_item WHERE resolved_at IS NULL").fetchone()[0]
+
+
+def review_child_id(conn: sqlite3.Connection, review_id: int) -> int | None:
+    row = conn.execute("SELECT child_id FROM review_item WHERE id = ?", (review_id,)).fetchone()
+    return None if row is None else row[0]
+
+
+def _review_summary(conn: sqlite3.Connection, row: tuple) -> dict:
+    review_id, child_id, opened_at, resolved_at, outcome = row
+    return {"id": review_id, "child_name": _person(conn, child_id).display_name, "opened_at": opened_at,
+            "resolved_at": resolved_at, "outcome": outcome}
+
+
+def list_reviews(conn: sqlite3.Connection, *, resolved_limit: int = 20) -> tuple[list[dict], list[dict]]:
+    """The open review items, oldest first, and the most recently resolved ones."""
+    columns = "SELECT id, child_id, opened_at, resolved_at, outcome FROM review_item"
+    open_rows = conn.execute(f"{columns} WHERE resolved_at IS NULL ORDER BY id").fetchall()
+    resolved_rows = conn.execute(f"{columns} WHERE resolved_at IS NOT NULL ORDER BY resolved_at DESC, id DESC LIMIT ?",
+                                 (resolved_limit,)).fetchall()
+    return ([_review_summary(conn, row) for row in open_rows],
+            [_review_summary(conn, row) for row in resolved_rows])
+
+
+def _actor_label_for_admin(conn: sqlite3.Connection, actor_kind: str, actor_person_id: int | None) -> str:
+    if actor_kind == "admin":
+        return text.ACTOR_ADMIN
+    if actor_kind == "system" or actor_person_id is None:
+        return text.ACTOR_SYSTEM
+    person = registry.get_person(conn, actor_person_id)
+    return person.display_name if person is not None else text.ACTOR_SYSTEM
+
+
+def recent_decisions(conn: sqlite3.Connection, person_id: int, *, limit: int = 20) -> list[dict]:
+    """The newest decision-log rows about this person, for the administrator's review page."""
+    rows = conn.execute(
+        "SELECT at, actor_kind, actor_person_id, action, reversal FROM decision_log WHERE target_person_id = ? "
+        "ORDER BY id DESC LIMIT ?",
+        (person_id, limit),
+    ).fetchall()
+    return [{"at": at, "actor": _actor_label_for_admin(conn, actor_kind, actor_id), "action": action,
+             "reversal": bool(reversal)}
+            for at, actor_kind, actor_id, action, reversal in rows]
+
+
+def review_detail(conn: sqlite3.Connection, review_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT id, child_id, reason, opened_at, resolved_at, resolved_by, outcome FROM review_item WHERE id = ?",
+        (review_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    review_id, child_id, reason, opened_at, resolved_at, resolved_by, outcome = row
+    resolver = registry.get_person(conn, resolved_by) if resolved_by is not None else None
+    return {
+        "id": review_id,
+        "child": _person(conn, child_id),
+        "reason": reason,
+        "opened_at": opened_at,
+        "resolved_at": resolved_at,
+        "outcome": outcome,
+        "resolver": None if resolver is None else resolver.display_name,
+        "decisions": recent_decisions(conn, child_id),
+    }
 
 
 # Conflict modes ----------------------------------------------------------------------------------------

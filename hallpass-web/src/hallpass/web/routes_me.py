@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from hallpass import access, registry, text, tokens
+from hallpass import access, holds, registry, text, tokens
 from hallpass.auth import current_person, require_csrf
 from hallpass.registry import Person
 from hallpass.services import Service
@@ -28,21 +28,33 @@ REASON_TEXT = {
     "not_entitled": text.REASON_NOT_ENTITLED,
     "not_active": text.REASON_NOT_ACTIVE,
     "terms": text.REASON_TERMS,
+    "held": text.REASON_HELD,
 }
 
 
 def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
-    and a note when a game service has no external identity for the person."""
+    who placed each hold, and a note when a game service has no external identity for the person."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
+    marked = holds.marked_service_ids(conn, person.id)
     rows = []
     for service, decision in access.services_for(conn, person):
         missing_identity = service.kind == "game" and service.slug not in identity_slugs
+        holders = holds.hold_labels(conn, person.id, service.id)
+        if service.auto_suspendable:
+            suspendable = text.CAN_AUTO_SUSPEND
+        elif holders and service.id in marked:
+            suspendable = text.MANUALLY_SUSPENDED
+        else:
+            suspendable = text.CANNOT_AUTO_SUSPEND
         rows.append({
+            "service_id": service.id,
             "name": service.name,
             "status": text.STATUS_ALLOWED if decision.desired == "allowed" else text.STATUS_SUSPENDED,
             "reasons": [REASON_TEXT[reason] for reason in decision.reasons],
-            "suspendable": text.CAN_AUTO_SUSPEND if service.auto_suspendable else text.CANNOT_AUTO_SUSPEND,
+            "suspendable": suspendable,
+            "auto_suspendable": service.auto_suspendable,
+            "holders": holders,
             "identity_note": text.NO_GAME_IDENTITY if missing_identity else "",
         })
     return rows

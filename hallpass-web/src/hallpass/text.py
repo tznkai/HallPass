@@ -40,11 +40,13 @@ STATUS_SUSPENDED = "Suspended"
 CAN_AUTO_SUSPEND = "can be automatically suspended"
 CANNOT_AUTO_SUSPEND = "cannot be automatically suspended"
 NO_GAME_IDENTITY = "no game identity on file"
+MANUALLY_SUSPENDED = "manually suspended"
 # One message per access.Access reason, in the order access.evaluate adds them.
 REASON_RETIRED = "The service has been retired."
 REASON_NOT_ENTITLED = "Not entitled to this service."
 REASON_NOT_ACTIVE = "The account is not active yet. A parent must approve it."
 REASON_TERMS = "The current terms must be accepted first."
+REASON_HELD = "A hold is in place."
 FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading the page does not show it again. "
                    "Generating a new link revokes this one.")
 FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. Ask the administrator."

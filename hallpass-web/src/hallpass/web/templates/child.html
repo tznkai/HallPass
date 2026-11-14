@@ -7,8 +7,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 {% block content %}
 <p><a href="/children">All children</a></p>
 <h1>{{ child.display_name }}</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
 <section class="stack">
   <h2>Services</h2>
+  <form method="post" action="/children/{{ child.id }}/holds" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <input type="hidden" name="service_id" value="all">
+    <button type="submit">Revoke everything</button>
+  </form>
   {% include "_service_rows.html" %}
 </section>
 {% endblock %}

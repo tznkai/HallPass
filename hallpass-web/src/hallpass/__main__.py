@@ -15,6 +15,7 @@ from hallpass.authentik import AuthentikClient
 from hallpass.config import Config, ConfigError
 from hallpass.db import Database, DatabaseRefused
 from hallpass.logs import setup_logging
+from hallpass.mail import build_sender
 from hallpass.web import app as web_app
 
 
@@ -26,7 +27,8 @@ async def _serve(config: Config, database: Database) -> None:
     authentik = AuthentikClient(config.authentik_url, config.authentik_token)
     oidc = AuthlibOidc(metadata_url=config.oidc_metadata_url, client_id=config.oidc_client_id,
                        client_secret=config.oidc_client_secret)
-    deps = web_app.AppDeps(config=config, db=database, authentik=authentik, oidc=oidc, clock=_utc_now)
+    deps = web_app.AppDeps(config=config, db=database, authentik=authentik, oidc=oidc, clock=_utc_now,
+                           sender=build_sender(config))
     # The server trusts forwarded headers only from the local reverse proxy.
     server = uvicorn.Server(uvicorn.Config(web_app.create_app(deps), host=config.bind_host, port=config.bind_port, proxy_headers=True,
                                            forwarded_allow_ips="127.0.0.1", log_config=None))

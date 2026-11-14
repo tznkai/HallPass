@@ -103,6 +103,18 @@ def use_oidc_client(env: Env, client: StubOidcClient) -> None:
     env.application.state.deps = dataclasses.replace(env.application.state.deps, oidc=oidc)
 
 
+class RecordingSender:
+    """Stands in for the SMTP sender: records each (to, subject, body) it is asked to send, and never fails."""
+
+    enabled = True
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def send(self, *, to_addr: str, subject: str, body: str) -> None:
+        self.calls.append((to_addr, subject, body))
+
+
 @dataclass
 class Env:
     application: FastAPI
@@ -113,6 +125,7 @@ class Env:
     oidc: FakeOidc
     config: Config
     clock: FixedClock
+    sender: RecordingSender
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -130,11 +143,13 @@ async def make_env(tmp_path: Path, **overrides: str) -> Env:
     db = Database.open(config.data_dir / "hallpass.db")
     oidc = FakeOidc()
     clock = FixedClock(NOW)
+    sender = RecordingSender()
+    # The background loops stay off: tests run mail delivery and the resync by calling them directly.
     app = web_app.create_app(web_app.AppDeps(config=config, db=db, authentik=authentik_client, oidc=oidc,
-                                             clock=clock.now))
+                                             clock=clock.now, sender=sender, background=False))
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE_URL, follow_redirects=False)
     return Env(application=app, client=client, db=db, authentik=state, authentik_client=authentik_client,
-               oidc=oidc, config=config, clock=clock)
+               oidc=oidc, config=config, clock=clock, sender=sender)
 
 
 def api_routes(app: FastAPI) -> list[APIRoute]:

@@ -4,7 +4,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -12,9 +14,11 @@ from fastapi import FastAPI
 
 from hallpass.auth import OidcClient, RedirectToLogin, RedirectToTerms, add_session_middleware, csrf_token
 from hallpass.authentik import AuthentikClient
+from hallpass.authentik_sync import resync_loop
 from hallpass.config import Config
 from hallpass.db import Database
 from hallpass.forward_auth import router as forward_auth_router
+from hallpass.mail import Sender, mail_loop
 from hallpass.registry import NoSuchGroup, NoSuchPerson
 from hallpass.services import NoSuchService
 from hallpass.web.pages import make_templates, not_found, redirect_to_login, redirect_to_terms
@@ -32,11 +36,28 @@ class AppDeps:
     authentik: AuthentikClient
     oidc: OidcClient
     clock: Callable[[], datetime]
+    sender: Sender
+    # When True, the lifespan runs the mail delivery and the Authentik resync loops. Tests turn it off.
+    background: bool = True
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    deps: AppDeps = app.state.deps
+    tasks: list[asyncio.Task] = []
+    if deps.background:
+        tasks = [asyncio.create_task(mail_loop(deps)), asyncio.create_task(resync_loop(deps))]
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def create_app(deps: AppDeps) -> FastAPI:
     # The API docs are not served: hallpass has no JSON API for browsers to explore.
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan)
     app.state.deps = deps
     templates = make_templates()
     templates.env.globals["csrf_token"] = csrf_token

@@ -2,15 +2,33 @@
 SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
+{% set controls = controls_for is defined %}
 {% if rows %}
 <table>
-  <thead><tr><th>Service</th><th>Status</th><th>Suspension</th></tr></thead>
+  <thead><tr><th>Service</th><th>Status</th><th>Suspension</th>{% if controls %}<th></th>{% endif %}</tr></thead>
   <tbody>
     {% for row in rows %}
     <tr>
       <td>{{ row.name }}{% if row.identity_note %}<br><span>{{ row.identity_note }}</span>{% endif %}</td>
-      <td>{{ row.status }}{% if row.reasons %}<ul>{% for reason in row.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}</td>
+      <td>{{ row.status }}{% if row.reasons %}<ul>{% for reason in row.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}{% for label in row.holders %}<br><span>Suspended by {{ label }}</span>{% endfor %}</td>
       <td>{{ row.suspendable }}</td>
+      {% if controls %}
+      <td>
+        {% if row.revoke %}
+        <form method="post" action="/children/{{ controls_for }}/holds" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+          <input type="hidden" name="service_id" value="{{ row.service_id }}">
+          <button type="submit">Revoke</button>
+        </form>
+        {% endif %}
+        {% if row.restore %}
+        <form method="post" action="/children/{{ controls_for }}/holds/{{ row.service_id }}/lift" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+          <button type="submit">Restore</button>
+        </form>
+        {% endif %}
+      </td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>
