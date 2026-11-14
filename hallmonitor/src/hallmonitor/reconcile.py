@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from hallmonitor.adapters.base import Adapter, AdapterError, Observed
+from hallmonitor.adapters.base import SERVICE_WIDE_REASONS, Adapter, AdapterError, Observed
 from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient, MonitorError
@@ -63,26 +63,55 @@ def _bad_state(slug: str, subject: Subject, now: datetime) -> Report:
     return _report(slug, subject, "error", "bad_state", now)
 
 
+def _needs_apply(observed: object, subject: Subject) -> bool:
+    """True when `_decide` would call apply for this observation, the same test `_decide` applies."""
+    return (isinstance(observed, Observed) and _valid(observed)
+            and observed.state not in NEVER_APPLIED and observed.state != subject.desired)
+
+
 async def _decide(adapter: Adapter, slug: str, subject: Subject, observed: Observed | None,
-                  now: datetime) -> Report:
-    """The decision table. Only a difference from the desired state is applied, and an apply failure is an error."""
+                  now: datetime) -> tuple[Report, str | None]:
+    """The decision table. Only a difference from the desired state is applied, and an apply failure is an error.
+    The second item is the reason when the apply raised a service-wide AdapterError, otherwise None."""
     if observed is None:
-        return _report(slug, subject, "error", "not_observed", now)
+        return _report(slug, subject, "error", "not_observed", now), None
     if not _valid(observed):
-        return _bad_state(slug, subject, now)
+        return _bad_state(slug, subject, now), None
     if observed.state in NEVER_APPLIED or observed.state == subject.desired:
-        return _report(slug, subject, observed.state, observed.detail, now)
+        return _report(slug, subject, observed.state, observed.detail, now), None
     try:
         result = await adapter.apply(subject, subject.desired)
     except AdapterError as error:
         log_event(log, "apply_failed", service=slug, reason=error.reason, level=logging.WARNING)
-        return _report(slug, subject, "error", error.reason, now)
+        service_wide = error.reason if error.reason in SERVICE_WIDE_REASONS else None
+        return _report(slug, subject, "error", error.reason, now), service_wide
     except Exception:  # noqa: BLE001 - an adapter bug must not stop the other subjects; it is reported as its class
         log_event(log, "apply_failed", service=slug, level=logging.WARNING)
-        return _report(slug, subject, "error", "apply_failed", now)
+        return _report(slug, subject, "error", "apply_failed", now), None
     if not _valid(result):
-        return _bad_state(slug, subject, now)
-    return _report(slug, subject, result.state, result.detail, now)
+        return _bad_state(slug, subject, now), None
+    return _report(slug, subject, result.state, result.detail, now), None
+
+
+async def _apply_reports(adapter: Adapter, service: ServiceDesired, observed: Mapping[str, object],
+                         now: datetime) -> list[Report]:
+    """One report per subject. After an apply fails for a service-wide reason, the subjects of this service that
+    would need an apply are reported with that reason and not applied, so a hung or refused service costs one wait."""
+    reports: list[Report] = []
+    blocked: str | None = None
+    skip_logged = False
+    for subject in service.subjects:
+        one = observed.get(subject.ref)
+        if blocked is not None and _needs_apply(one, subject):
+            if not skip_logged:
+                log_event(log, "apply_skipped", service=service.slug, reason=blocked, level=logging.WARNING)
+                skip_logged = True
+            reports.append(_report(service.slug, subject, "error", blocked, now))
+            continue
+        report, service_wide = await _decide(adapter, service.slug, subject, one, now)
+        reports.append(report)
+        blocked = blocked or service_wide
+    return reports
 
 
 async def _service_reports(service: ServiceDesired, adapter: Adapter | None, now: datetime,
@@ -102,8 +131,7 @@ async def _service_reports(service: ServiceDesired, adapter: Adapter | None, now
         if not isinstance(observed, Mapping):   # adapters are duck-typed: a non-mapping fails the service, not the cycle
             log_event(log, "bad_state", service=service.slug, level=logging.WARNING)   # the value is never logged
             return [_report(service.slug, subject, "error", "bad_state", now) for subject in subjects]
-        reports = [await _decide(adapter, service.slug, subject, observed.get(subject.ref), now)
-                   for subject in subjects]
+        reports = await _apply_reports(adapter, service, observed, now)
         count = await _count(adapter, service.slug, subjects)
         if count is not None:
             unmanaged[service.slug] = count

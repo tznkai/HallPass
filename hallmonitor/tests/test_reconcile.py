@@ -196,6 +196,99 @@ async def test_an_adapter_error_from_apply_keeps_its_reason_in_the_report_and_th
         ("a", "unreachable", "WARNING")]
 
 
+# A service-wide failure on apply stops the service's remaining applies --------------------------------
+
+class RaisingAdapter(StubAdapter):
+    """Every apply is recorded first; an apply for a ref in `failing` raises AdapterError(reason)."""
+
+    def __init__(self, observed: dict[str, Observed], *, reason: str, failing: set[str]) -> None:
+        super().__init__(observed)
+        self.reason = reason
+        self.failing = failing
+
+    async def apply(self, subject: Subject, desired: str) -> Observed:
+        self.applied.append(subject.ref)
+        if subject.ref in self.failing:
+            raise AdapterError(self.reason)
+        return Observed(desired)
+
+
+SKIP_ROWS = [
+    subject("r1", "Steve", "allowed", 1),     # fails on apply
+    subject("r2", "Alex", "allowed", 2),      # needs an apply: skipped
+    subject("r3", "Sam", "allowed", 3),       # already allowed: reported without an apply
+    subject("r4", "Kai", "suspended", 4),     # needs an apply: skipped
+]
+SKIP_OBSERVED = {"r1": Observed("suspended"), "r2": Observed("suspended"), "r3": Observed("allowed"),
+                 "r4": Observed("allowed")}
+
+
+@pytest.mark.parametrize("reason", ["auth", "timeout", "unreachable"])
+async def test_a_service_wide_apply_failure_reports_the_rest_of_its_applies_without_calling_them(
+        reason: str, caplog: pytest.LogCaptureFixture) -> None:
+    state = FakeHallpassState(services=[service("a", SKIP_ROWS)])
+    adapter = RaisingAdapter(dict(SKIP_OBSERVED), reason=reason, failing={"r1"})
+    with caplog.at_level(logging.WARNING):
+        await run_cycle(state, {"a": adapter})
+    assert adapter.applied == ["r1"]
+    assert state.reports == [
+        entry("a", "r1", "error", 1, reason),
+        entry("a", "r2", "error", 2, reason),
+        entry("a", "r3", "allowed", 3),
+        entry("a", "r4", "error", 4, reason),
+    ]
+    skipped = [json.loads(JsonFormatter().format(record)) for record in caplog.records
+               if record.getMessage() == "apply_skipped"]
+    assert [(event["service"], event["reason"]) for event in skipped] == [("a", reason)]
+
+
+async def test_a_subject_that_needs_no_apply_keeps_its_own_observation_after_a_service_wide_failure() -> None:
+    rows = [subject("r1", "Steve", "allowed", 1), subject("r2", "Alex", "allowed", 2),
+            subject("r3", "Sam", "suspended", 3)]
+    observed = {"r1": Observed("suspended"), "r2": Observed("error", "bad_identity"),
+                "r3": Observed("suspended")}
+    state = FakeHallpassState(services=[service("a", rows)])
+    adapter = RaisingAdapter(observed, reason="unreachable", failing={"r1"})
+    await run_cycle(state, {"a": adapter})
+    assert adapter.applied == ["r1"]
+    assert state.reports == [
+        entry("a", "r1", "error", 1, "unreachable"),
+        entry("a", "r2", "error", 2, "bad_identity"),
+        entry("a", "r3", "suspended", 3),
+    ]
+
+
+async def test_a_failure_that_is_not_service_wide_does_not_stop_the_other_applies() -> None:
+    state = FakeHallpassState(services=[service("a", SKIP_ROWS)])
+    adapter = RaisingAdapter(dict(SKIP_OBSERVED), reason="protocol", failing={"r1"})
+    await run_cycle(state, {"a": adapter})
+    assert adapter.applied == ["r1", "r2", "r4"]
+    assert state.reports == [
+        entry("a", "r1", "error", 1, "protocol"),
+        entry("a", "r2", "allowed", 2),
+        entry("a", "r3", "allowed", 3),
+        entry("a", "r4", "suspended", 4),
+    ]
+
+
+async def test_a_service_wide_failure_does_not_stop_the_next_service() -> None:
+    first = RaisingAdapter({"r1": Observed("suspended"), "r2": Observed("suspended")},
+                           reason="auth", failing={"r1"})
+    second = RaisingAdapter({"r3": Observed("suspended")}, reason="auth", failing=set())
+    state = FakeHallpassState(services=[
+        service("a", [subject("r1", "Steve", "allowed", 1), subject("r2", "Alex", "allowed", 2)]),
+        service("b", [subject("r3", "Sam", "allowed", 3)]),
+    ])
+    await run_cycle(state, {"a": first, "b": second})
+    assert first.applied == ["r1"]
+    assert second.applied == ["r3"]
+    assert state.reports == [
+        entry("a", "r1", "error", 1, "auth"),
+        entry("a", "r2", "error", 2, "auth"),
+        entry("b", "r3", "allowed", 3),
+    ]
+
+
 async def test_a_service_with_no_adapter_reports_every_subject_as_error() -> None:
     state = FakeHallpassState(services=[service("a", [subject("r1", "Steve", "allowed", 1)])])
     await run_cycle(state, {})

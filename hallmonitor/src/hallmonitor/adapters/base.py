@@ -11,6 +11,9 @@ from typing import Literal, Protocol
 from hallmonitor.contract import Subject
 
 ObservedState = Literal["allowed", "suspended", "unsupported", "banned_external", "error"]
+# Reasons that hold for every subject of a service, because they come from the key, the instance or the connection: a
+# failure with one of these stops the service's remaining work, rather than failing each subject in turn.
+SERVICE_WIDE_REASONS = frozenset({"auth", "timeout", "unreachable"})
 
 
 @dataclass(frozen=True)

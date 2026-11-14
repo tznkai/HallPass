@@ -20,7 +20,7 @@ from urllib.parse import quote
 
 import httpx
 
-from hallmonitor.adapters.base import AdapterError, Capabilities, Observed
+from hallmonitor.adapters.base import SERVICE_WIDE_REASONS, AdapterError, Capabilities, Observed
 from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.contract import Subject
 from hallmonitor.logs import log_event
@@ -33,7 +33,6 @@ AUDIT_REASON = "hallmonitor"
 SSO_SUBJECT = "sso_subject"
 FLUXER_USER_ID = "fluxer_user_id"
 REQUEST_TIMEOUT_SECONDS = 30.0
-SERVICE_WIDE_REASONS = frozenset({"auth", "unreachable"})   # the same for every account, so the whole service fails
 
 
 def _first(subject: Subject, kind: str) -> str | None:
