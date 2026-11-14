@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -19,6 +20,7 @@ from hallmonitor.client import MonitorClient
 from hallmonitor.config import Config
 from hallmonitor.contract import ServiceDesired, Subject
 from hallmonitor.db import Database
+from hallmonitor.logs import JsonFormatter
 from hallmonitor.reconcile import AdapterCache, CycleResult, cycle
 from tests.fake_adapter import ListAdapter
 from tests.fake_hallpass import TOKEN, FakeHallpassState, make_transport
@@ -209,6 +211,40 @@ async def test_an_unexpected_exception_from_observe_is_contained_to_its_service(
     ])
     await run_cycle(state, {"a": Broken({}), "b": ListAdapter()})
     assert state.reports == [entry("a", "r1", "error", 1, "adapter_failed"), entry("b", "r2", "allowed", 1)]
+
+
+class BadApply(StubAdapter):
+    """Observes a difference, then answers the apply with a state the contract does not carry."""
+
+    async def apply(self, subject: Subject, desired: str) -> Observed:
+        self.applied.append(subject.ref)
+        return Observed("bogus")  # type: ignore[arg-type]
+
+
+async def test_an_unknown_observed_state_is_bad_state_and_the_other_services_still_post(
+        caplog: pytest.LogCaptureFixture) -> None:
+    state = FakeHallpassState(services=[
+        service("a", [subject("r1", "Steve", "allowed", 2)]),
+        service("b", [subject("r2", "Ann", "allowed", 3)]),
+    ])
+    stub = StubAdapter({"r1": Observed("bogus")})  # type: ignore[arg-type]
+    with caplog.at_level(logging.WARNING):
+        await run_cycle(state, {"a": stub, "b": ListAdapter()})
+    assert stub.applied == []
+    assert state.reports == [entry("a", "r1", "error", 2, "bad_state"), entry("b", "r2", "allowed", 3)]
+    logged = [json.loads(JsonFormatter().format(record)) for record in caplog.records
+              if record.getMessage() == "bad_state"]
+    assert [(event["service"], event["level"]) for event in logged] == [("a", "WARNING")]
+    assert all("bogus" not in JsonFormatter().format(record) for record in caplog.records)
+
+
+async def test_an_unknown_state_from_apply_is_bad_state_and_the_other_services_still_post() -> None:
+    state = FakeHallpassState(services=[
+        service("a", [subject("r1", "Steve", "allowed", 2)]),
+        service("b", [subject("r2", "Ann", "allowed", 3)]),
+    ])
+    await run_cycle(state, {"a": BadApply({"r1": Observed("suspended")}), "b": ListAdapter()})
+    assert state.reports == [entry("a", "r1", "error", 2, "bad_state"), entry("b", "r2", "allowed", 3)]
 
 
 async def test_a_failing_unmanaged_count_does_not_stop_the_reports() -> None:

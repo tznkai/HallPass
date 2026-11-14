@@ -23,7 +23,7 @@ from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient, MonitorError
 from hallmonitor.config import Config
-from hallmonitor.contract import Report, ServiceDesired, Subject
+from hallmonitor.contract import OBSERVED, Report, ServiceDesired, Subject
 from hallmonitor.db import Database
 from hallmonitor.logs import log_event, setup_logging
 
@@ -51,11 +51,24 @@ def _report(slug: str, subject: Subject, observed: str, detail: str | None, now:
     return Report(slug=slug, ref=subject.ref, observed=observed, detail=detail, generation=subject.generation, at=now)
 
 
+def _valid(observed: object) -> bool:
+    """An Observed whose state the contract carries. Adapters are duck-typed, so anything else is refused here: a
+    state outside OBSERVED would make the whole report body unbuildable and lose every service's reports."""
+    return isinstance(observed, Observed) and isinstance(observed.state, str) and observed.state in OBSERVED
+
+
+def _bad_state(slug: str, subject: Subject, now: datetime) -> Report:
+    log_event(log, "bad_state", service=slug, level=logging.WARNING)   # the value itself is never logged
+    return _report(slug, subject, "error", "bad_state", now)
+
+
 async def _decide(adapter: Adapter, slug: str, subject: Subject, observed: Observed | None,
                   now: datetime) -> Report:
     """The decision table. Only a difference from the desired state is applied, and an apply failure is an error."""
     if observed is None:
         return _report(slug, subject, "error", "not_observed", now)
+    if not _valid(observed):
+        return _bad_state(slug, subject, now)
     if observed.state in NEVER_APPLIED or observed.state == subject.desired:
         return _report(slug, subject, observed.state, observed.detail, now)
     try:
@@ -63,6 +76,8 @@ async def _decide(adapter: Adapter, slug: str, subject: Subject, observed: Obser
     except Exception:  # noqa: BLE001 - an adapter bug must not stop the other subjects; it is reported as its class
         log_event(log, "apply_failed", service=slug, level=logging.WARNING)
         return _report(slug, subject, "error", "apply_failed", now)
+    if not _valid(result):
+        return _bad_state(slug, subject, now)
     return _report(slug, subject, result.state, result.detail, now)
 
 
