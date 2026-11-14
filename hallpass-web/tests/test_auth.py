@@ -55,6 +55,7 @@ ENV = {
     "AUTHENTIK_TOKEN": "test-token",
     "AUTHENTIK_INVITE_FLOW": "invite",
     "AUTHENTIK_FLUXER_GROUP": "00000000-0000-4000-8000-0000000000f1",
+    "HALLPASS_MONITOR_TOKEN": "monitor-token-for-tests-0123456789abcdef",
     "OIDC_METADATA_URL": "https://authentik.invalid/application/o/hallpass/.well-known/openid-configuration",
     "OIDC_CLIENT_ID": "hallpass-client",
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",

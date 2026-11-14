@@ -170,6 +170,11 @@ def get_by_uuid(conn: sqlite3.Connection, uuid: str) -> Person | None:
     return _one(conn, "authentik_uuid = ?", (uuid,))
 
 
+def get_by_ref(conn: sqlite3.Connection, ref: str) -> Person | None:
+    """The person with this public ref, the only person id that leaves hallpass on the monitor API."""
+    return _one(conn, "ref = ?", (ref,))
+
+
 def get_by_enrollment_ref(conn: sqlite3.Connection, ref: str) -> Person | None:
     """The unbound person that holds this enrollment ref. A bound person never matches, even with a stale ref."""
     return _one(conn, "enrollment_ref = ? AND authentik_uuid IS NULL", (ref,))

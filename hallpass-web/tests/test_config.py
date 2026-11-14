@@ -18,6 +18,7 @@ SESSION_SECRET = "session-secret-for-tests-only-0123456789"
 AUTHENTIK_TOKEN = "authentik-token-for-tests"
 OIDC_SECRET = "oidc-client-secret-for-tests"
 SMTP_PASSWORD = "smtp-password-for-tests"
+MONITOR_TOKEN = "monitor-token-for-tests-0123456789abcdef"
 
 GOOD_ENV = {
     "HALLPASS_PUBLIC_URL": "https://hallpass.invalid/",
@@ -46,11 +47,14 @@ GOOD_ENV = {
     "AUTHENTIK_FLUXER_GROUP": "00000000-0000-4000-8000-0000000000f1",
     "HALLPASS_FLUXER_SERVICE": "fluxer-game",
     "HALLPASS_RESYNC_SECONDS": "60",
+    "HALLPASS_MONITOR_TOKEN": MONITOR_TOKEN,
+    "HALLPASS_MONITOR_BIND": "127.0.0.1:9091",
 }
 
 REQUIRED = [
     "HALLPASS_PUBLIC_URL", "HALLPASS_SESSION_SECRET", "AUTHENTIK_URL", "AUTHENTIK_TOKEN",
     "AUTHENTIK_INVITE_FLOW", "OIDC_METADATA_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "AUTHENTIK_FLUXER_GROUP",
+    "HALLPASS_MONITOR_TOKEN",
 ]
 
 
@@ -81,6 +85,8 @@ def test_complete_env_parses_with_every_field() -> None:
     assert config.authentik_fluxer_group == "00000000-0000-4000-8000-0000000000f1"
     assert config.fluxer_service_slug == "fluxer-game"
     assert config.resync_seconds == 60
+    assert config.monitor_token == MONITOR_TOKEN
+    assert (config.monitor_host, config.monitor_port) == ("127.0.0.1", 9091)
 
 
 def test_smtp_and_admin_email_are_optional_when_blank() -> None:
@@ -157,8 +163,9 @@ def test_defaults_apply_when_optional_variables_are_blank() -> None:
     env = {**GOOD_ENV, "HALLPASS_SESSION_MAX_AGE_SECONDS": "", "HALLPASS_DATA_DIR": "  ", "HALLPASS_BIND": "",
            "HALLPASS_INVITE_EXPIRY_HOURS": "", "HALLPASS_LOG_LEVEL": "", "HALLPASS_COOKIE_DOMAIN": "",
            "HALLPASS_ADMIN_SUBS": "", "HALLPASS_CONFLICT_WINDOW_HOURS": "", "HALLPASS_FLUXER_SERVICE": "",
-           "HALLPASS_RESYNC_SECONDS": ""}
+           "HALLPASS_RESYNC_SECONDS": "", "HALLPASS_MONITOR_BIND": ""}
     config = Config.from_env(env)
+    assert (config.monitor_host, config.monitor_port) == ("127.0.0.1", 8081)
     assert config.fluxer_service_slug == "fluxer"
     assert config.resync_seconds == 300
     assert config.session_max_age_seconds == 43200
@@ -177,6 +184,24 @@ def test_each_required_variable_missing_names_that_variable(name: str) -> None:
     with pytest.raises(ConfigError) as info:
         Config.from_env(env)
     assert name in str(info.value)
+
+
+def test_monitor_token_is_required_and_named_when_missing() -> None:
+    env = {key: value for key, value in GOOD_ENV.items() if key != "HALLPASS_MONITOR_TOKEN"}
+    with pytest.raises(ConfigError, match="HALLPASS_MONITOR_TOKEN is required"):
+        Config.from_env(env)
+
+
+def test_short_monitor_token_is_refused_without_echoing_it() -> None:
+    short = "monitor-token-too-short"
+    with pytest.raises(ConfigError, match="HALLPASS_MONITOR_TOKEN must be at least 32 characters") as info:
+        Config.from_env({**GOOD_ENV, "HALLPASS_MONITOR_TOKEN": short})
+    assert short not in str(info.value)
+
+
+def test_bad_monitor_bind_is_refused_and_named() -> None:
+    with pytest.raises(ConfigError, match="HALLPASS_MONITOR_BIND"):
+        Config.from_env({**GOOD_ENV, "HALLPASS_MONITOR_BIND": "no-port-here"})
 
 
 def test_short_session_secret_is_refused_without_echoing_it() -> None:
@@ -245,15 +270,17 @@ def test_bad_bind_and_bad_cookie_domain_are_refused() -> None:
 
 def test_repr_contains_none_of_the_secret_values() -> None:
     text = repr(Config.from_env(GOOD_ENV))
-    for secret in (SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET, SMTP_PASSWORD):
+    for secret in (SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET, SMTP_PASSWORD, MONITOR_TOKEN):
         assert secret not in text
 
 
 def test_secrets_lists_every_secret_value_and_skips_empty_ones() -> None:
     config = Config.from_env(GOOD_ENV)
-    assert sorted(config.secrets()) == sorted([SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET, SMTP_PASSWORD])
+    assert sorted(config.secrets()) == sorted([SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET, SMTP_PASSWORD,
+                                               MONITOR_TOKEN])
     without_password = Config.from_env({**GOOD_ENV, "SMTP_PASSWORD": ""})
-    assert sorted(without_password.secrets()) == sorted([SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET])
+    assert sorted(without_password.secrets()) == sorted([SESSION_SECRET, AUTHENTIK_TOKEN, OIDC_SECRET,
+                                                         MONITOR_TOKEN])
 
 
 def test_config_is_frozen() -> None:

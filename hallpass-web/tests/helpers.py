@@ -20,6 +20,7 @@ from hallpass import grants, registry, services, terms
 from hallpass.auth import AuthlibOidc, Identity
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
+from hallpass.monitor_api import create_monitor_app
 from hallpass.db import Database
 from hallpass.registry import Person
 from hallpass.web import app as web_app
@@ -31,6 +32,7 @@ BASE_URL = "https://hallpass.test"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 TERMS_TOS = "Test terms of service text."
 TERMS_PRIVACY = "Test privacy disclosure text."
+MONITOR_TOKEN = "monitor-token-for-tests-0123456789abcdef"
 ENV = {
     "HALLPASS_PUBLIC_URL": BASE_URL,
     "HALLPASS_SESSION_SECRET": "session-secret-for-tests-only-0123456789",
@@ -43,6 +45,7 @@ ENV = {
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",
     "HALLPASS_ADMIN_EMAIL": "admin@example.com",
     "AUTHENTIK_FLUXER_GROUP": FLUXER_GROUP,
+    "HALLPASS_MONITOR_TOKEN": MONITOR_TOKEN,
 }
 CSRF_FIELD = re.compile(r'name="csrf" value="([^"]+)"')
 VERSION_FIELD = re.compile(r'name="version_id" value="(\d+)"')
@@ -126,9 +129,12 @@ class Env:
     config: Config
     clock: FixedClock
     sender: RecordingSender
+    # The monitor API over its own transport, as hallmonitor reaches it. Requests carry no headers unless a test adds them.
+    monitor_client: httpx.AsyncClient
 
     async def close(self) -> None:
         await self.client.aclose()
+        await self.monitor_client.aclose()
         await self.authentik_client.aclose()
         self.db.close()
 
@@ -145,11 +151,14 @@ async def make_env(tmp_path: Path, **overrides: str) -> Env:
     clock = FixedClock(NOW)
     sender = RecordingSender()
     # The background loops stay off: tests run mail delivery and the resync by calling them directly.
-    app = web_app.create_app(web_app.AppDeps(config=config, db=db, authentik=authentik_client, oidc=oidc,
-                                             clock=clock.now, sender=sender, background=False))
+    deps = web_app.AppDeps(config=config, db=db, authentik=authentik_client, oidc=oidc, clock=clock.now,
+                           sender=sender, background=False)
+    app = web_app.create_app(deps)
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE_URL, follow_redirects=False)
+    monitor_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=create_monitor_app(deps)),
+                                       base_url="http://monitor.test")
     return Env(application=app, client=client, db=db, authentik=state, authentik_client=authentik_client,
-               oidc=oidc, config=config, clock=clock, sender=sender)
+               oidc=oidc, config=config, clock=clock, sender=sender, monitor_client=monitor_client)
 
 
 def api_routes(app: FastAPI) -> list[APIRoute]:

@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MIN_SESSION_SECRET_LENGTH = 32
+MIN_MONITOR_TOKEN_LENGTH = 32
 _POSITIVE_INT = re.compile(r"[1-9][0-9]{0,9}")
 _PORT = re.compile(r"[1-9][0-9]{0,4}")
 _COOKIE_DOMAIN = re.compile(r"\.?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
@@ -78,8 +79,8 @@ def _positive_int(env: Mapping[str, str], name: str, default: str) -> int:
     return int(raw)
 
 
-def _bind(env: Mapping[str, str], name: str) -> tuple[str, int]:
-    raw = _opt(env, name) or "127.0.0.1:8080"
+def _bind(env: Mapping[str, str], name: str, default: str = "127.0.0.1:8080") -> tuple[str, int]:
+    raw = _opt(env, name) or default
     host, sep, port = raw.rpartition(":")
     host = host.removeprefix("[").removesuffix("]")
     if not sep or not host or not _PORT.fullmatch(port) or int(port) > 65535:
@@ -156,6 +157,7 @@ class Config:
     oidc_client_id: str
     oidc_client_secret: str = field(repr=False)
     authentik_fluxer_group: str
+    monitor_token: str = field(repr=False)
     cookie_domain: str | None = None
     session_max_age_seconds: int = 43200
     data_dir: Path = Path("data")
@@ -174,10 +176,13 @@ class Config:
     conflict_window_hours: int = 24
     fluxer_service_slug: str = "fluxer"
     resync_seconds: int = 300
+    monitor_host: str = "127.0.0.1"
+    monitor_port: int = 8081
 
     def secrets(self) -> list[str]:
         """Every non-empty secret value, for the log redaction filter. Add each new secret field here."""
-        values = (self.session_secret, self.authentik_token, self.oidc_client_secret, self.smtp_password)
+        values = (self.session_secret, self.authentik_token, self.oidc_client_secret, self.smtp_password,
+                  self.monitor_token)
         return [value for value in values if value]
 
     @classmethod
@@ -201,6 +206,10 @@ class Config:
         smtp_from = _email(env, "SMTP_FROM")
         if smtp_host is not None and smtp_from is None:
             raise ConfigError("SMTP_FROM is required when SMTP_HOST is set")
+        monitor_token = _required(env, "HALLPASS_MONITOR_TOKEN")
+        if len(monitor_token) < MIN_MONITOR_TOKEN_LENGTH:
+            raise ConfigError(f"HALLPASS_MONITOR_TOKEN must be at least {MIN_MONITOR_TOKEN_LENGTH} characters")
+        monitor_host, monitor_port = _bind(env, "HALLPASS_MONITOR_BIND", "127.0.0.1:8081")
         return cls(
             public_url=public_url,
             session_secret=session_secret,
@@ -211,6 +220,7 @@ class Config:
             oidc_client_id=_required(env, "OIDC_CLIENT_ID"),
             oidc_client_secret=_required(env, "OIDC_CLIENT_SECRET"),
             authentik_fluxer_group=_group_uuid(env, "AUTHENTIK_FLUXER_GROUP"),
+            monitor_token=monitor_token,
             cookie_domain=cookie_domain,
             session_max_age_seconds=_positive_int(env, "HALLPASS_SESSION_MAX_AGE_SECONDS", "43200"),
             data_dir=Path(_opt(env, "HALLPASS_DATA_DIR") or "data"),
@@ -229,4 +239,6 @@ class Config:
             conflict_window_hours=_positive_int(env, "HALLPASS_CONFLICT_WINDOW_HOURS", "24"),
             fluxer_service_slug=_service_slug(env, "HALLPASS_FLUXER_SERVICE"),
             resync_seconds=_positive_int(env, "HALLPASS_RESYNC_SECONDS", "300"),
+            monitor_host=monitor_host,
+            monitor_port=monitor_port,
         )

@@ -73,12 +73,17 @@ def _store_generation(conn: sqlite3.Connection, *, person_id: int, service_id: i
     return generation + 1
 
 
+def monitored_services(conn: sqlite3.Connection) -> list[Service]:
+    """The non-retired services hallmonitor reconciles, ordered by slug."""
+    return sorted((service for service in services.list_services(conn) if service.kind in MONITORED_KINDS),
+                  key=lambda service: service.slug)
+
+
 def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
     """Recomputes and stores the desired state of every subject of every monitored service. Returns the rows ordered by
     service slug, then person id."""
     rows: list[DesiredRow] = []
-    monitored = [service for service in services.list_services(conn) if service.kind in MONITORED_KINDS]
-    for service in sorted(monitored, key=lambda s: s.slug):
+    for service in monitored_services(conn):
         for person_id, identities in _subjects(conn, service):
             person = registry.get_person(conn, person_id)
             assert person is not None
