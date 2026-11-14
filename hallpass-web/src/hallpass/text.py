@@ -56,6 +56,14 @@ SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters, digits or hyphens
                         "Underscores are not allowed, because hallmonitor cannot configure a slug that has one.")
 SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that hallmonitor runs. "
                                  "Choose an adapter, or untick the box for a service that is suspended by hand.")
+# Shown beside the retire button and the identity section: hallmonitor stops managing the pair, and leaves its last
+# applied state in place.
+SERVICE_RETIRE_NOTE = ("Retiring a service stops hallmonitor from managing it, and it leaves the last state it applied in "
+                       "place. Before you retire a game service, lift its holds first, and clean up the game server by "
+                       "hand if it needs it: a whitelisted player stays whitelisted, and an own ban stays placed.")
+IDENTITY_REMOVE_NOTE = ("Removing an identity stops hallmonitor from managing this person on that service, and it leaves "
+                        "the last state it applied in place. Before you remove a game identity, lift the holds on that "
+                        "service first, and clean up the game server by hand if it needs it.")
 ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
 # Holds and the conflict rules. Actor labels are what a person sees as "Suspended by ...".
 ACTOR_ADMIN = "the administrator"

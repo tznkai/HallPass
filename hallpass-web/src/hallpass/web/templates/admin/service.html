@@ -22,6 +22,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     <label><input type="checkbox" name="auto_suspendable"{% if service.auto_suspendable %} checked{% endif %}> Can be suspended automatically</label>
     <button type="submit">Save</button>
   </form>
+  <p>{{ retire_note }}</p>
   <form method="post" action="/admin/services/{{ service.id }}/{{ 'unretire' if service.retired else 'retire' }}">
     <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
     <button type="submit">{{ 'Bring back' if service.retired else 'Retire' }}</button>

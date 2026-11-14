@@ -175,6 +175,7 @@ def _person_context(conn, person: Person) -> dict:
         "child_choices": [] if is_child else [p for p in others if p.account_type == "child"],
         "identities": registry.identities_of(conn, person.id),
         "identity_kinds": registry.IDENTITY_KINDS,
+        "identity_note": text.IDENTITY_REMOVE_NOTE,
         "hold_rows": _hold_rows(conn, person.id),
         "modes": holds.MODES,
         "services": services.list_services(conn),
@@ -614,7 +615,8 @@ def _service_context(conn, service_id: int) -> dict:
                        + [{"value": f"group:{gid}", "label": f"Group: {name}"} for gid, name in group_names.items()]
                        + [{"value": f"person:{p.id}", "label": f"Person: {p.display_name}"} for p in people])
     return {"service": service, "entitlements": entitlements, "attached": attached,
-            "subject_choices": subject_choices, "people": people, "attached_kinds": tokens.ATTACHED_KINDS}
+            "subject_choices": subject_choices, "people": people, "attached_kinds": tokens.ATTACHED_KINDS,
+            "retire_note": text.SERVICE_RETIRE_NOTE}
 
 
 async def _service_page(request: Request, admin: Person, service_id: int, *, status: int = 200,

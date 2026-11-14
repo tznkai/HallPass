@@ -189,6 +189,7 @@ async def test_the_identity_form_offers_the_services_as_a_select(env: Env):
 
     assert '<select name="service_slug"' in page
     assert '<option value="calendar">' in page
+    assert text.IDENTITY_REMOVE_NOTE in page
 
 
 # AC5.2: grants through the UI ----------------------------------------------------------------------------------
@@ -381,3 +382,14 @@ async def test_the_service_page_lists_its_entitlements_and_tokens(env: Env):
 
     assert "adult" in page
     assert INVITE in page
+
+
+async def test_the_service_page_says_retiring_leaves_hallmonitor_state_in_place(env: Env):
+    await admin_client(env)
+    await create_service_form(env, "calendar", "forward_auth")
+    calendar = await service_for(env, "calendar")
+
+    page = (await env.client.get(f"/admin/services/{calendar.id}")).text
+
+    assert text.SERVICE_RETIRE_NOTE in page
+    assert page.index(text.SERVICE_RETIRE_NOTE) < page.index(f"/admin/services/{calendar.id}/retire")
