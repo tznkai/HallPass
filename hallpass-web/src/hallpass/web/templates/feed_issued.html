@@ -1,0 +1,12 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: feed link{% endblock %}
+{% block content %}
+<h1>Feed link for {{ service_name }}</h1>
+<p class="notice">{{ shown_once }}</p>
+<p><code>{{ feed_url }}</code></p>
+<p><a href="/">Back to your services</a></p>
+{% endblock %}

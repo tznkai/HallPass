@@ -34,3 +34,17 @@ GRANT_REFUSED = {
     "parent_inactive": "Your account must be active before you can approve a child.",
     "child_not_awaiting": "This child is not waiting for approval.",
 }
+# The personal page and the service rows, shared with a parent's view of a child.
+STATUS_ALLOWED = "Allowed"
+STATUS_SUSPENDED = "Suspended"
+CAN_AUTO_SUSPEND = "can be automatically suspended"
+CANNOT_AUTO_SUSPEND = "cannot be automatically suspended"
+NO_GAME_IDENTITY = "no game identity on file"
+# One message per access.Access reason, in the order access.evaluate adds them.
+REASON_RETIRED = "The service has been retired."
+REASON_NOT_ENTITLED = "You are not entitled to this service."
+REASON_NOT_ACTIVE = "The account is not active yet. A parent must approve it."
+REASON_TERMS = "The current terms must be accepted first."
+FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading the page does not show it again. "
+                   "Generating a new link revokes this one.")
+FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. Ask the administrator."

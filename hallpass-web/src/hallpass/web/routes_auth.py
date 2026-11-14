@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Sign-in, sign-out and the home page. The admin pages live in routes_admin."""
+"""Sign-in and sign-out. The home page is routes_me; the admin pages live in routes_admin."""
 
 from __future__ import annotations
 
@@ -9,14 +9,13 @@ from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response
 
 from hallpass import terms, text
-from hallpass.auth import SignInError, current_person, end_session, require_csrf, resolve_sign_in, start_session
+from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
 from hallpass.logs import log_event
-from hallpass.registry import Person
-from hallpass.web.pages import message_page, page
+from hallpass.web.pages import message_page
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -97,7 +96,3 @@ async def logout(request: Request) -> RedirectResponse:
     end_session(request)
     return RedirectResponse("/", status_code=303)
 
-
-@router.get("/")
-async def home(request: Request, person: Annotated[Person, Depends(current_person)]) -> HTMLResponse:
-    return page(request, "home.html", viewer=person)

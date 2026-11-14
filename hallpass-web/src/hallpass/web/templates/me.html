@@ -1,0 +1,38 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: you{% endblock %}
+{% block content %}
+<h1>Hello, {{ viewer.display_name }}</h1>
+
+<section class="stack">
+  <h2>Your services</h2>
+  {% include "_service_rows.html" %}
+</section>
+
+<section class="stack">
+  <h2>Tokens</h2>
+  <ul>
+    {% for token in visible_tokens %}
+    <li>{{ token.service_name }}: {{ token.label }} <code>{{ token.value }}</code></li>
+    {% else %}
+    <li>No tokens for you.</li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="stack">
+  <h2>Feed links</h2>
+  {% for service in feed_services %}
+  <form method="post" action="/tokens/feed/{{ service.id }}" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <p>{{ service.name }}</p>
+    <button type="submit">Generate feed URL</button>
+  </form>
+  {% else %}
+  <p>No feed services for you.</p>
+  {% endfor %}
+</section>
+{% endblock %}

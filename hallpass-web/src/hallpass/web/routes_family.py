@@ -6,13 +6,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from hallpass import grants, registry, terms, text
 from hallpass.auth import current_person, require_csrf
 from hallpass.registry import Person
 from hallpass.web.pages import page
+from hallpass.web.routes_me import service_rows
 
 router = APIRouter()
 
@@ -46,3 +47,20 @@ async def grant_child(request: Request, child_id: int, person: Annotated[Person,
     except grants.GrantRefused as refused:
         return await _children_page(request, person, status=403, error=text.GRANT_REFUSED[refused.reason])
     return RedirectResponse("/children", status_code=303)
+
+
+def _child_context(conn, parent: Person, child_id: int) -> dict | None:
+    """The child's service rows, or None when the parent is not linked to that child."""
+    if child_id not in {child.id for child in registry.children_of(conn, parent.id)}:
+        return None
+    child = registry.get_person(conn, child_id)
+    return {"child": child, "rows": service_rows(conn, child)}
+
+
+@router.get("/children/{child_id}")
+async def child_page(request: Request, child_id: int, person: Annotated[Person, Depends(current_person)]) -> Response:
+    """A linked parent's view of a child's services. It shows no tokens and no feed forms."""
+    context = await request.app.state.deps.db.run(lambda c: _child_context(c, person, child_id))
+    if context is None:
+        raise HTTPException(403, text.FORBIDDEN)
+    return page(request, "child.html", viewer=person, **context)

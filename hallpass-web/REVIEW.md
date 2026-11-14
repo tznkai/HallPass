@@ -24,7 +24,7 @@ as the code they cite.
 
 - `src/hallpass/auth.py:121` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
 - `src/hallpass/auth.py:147` `async def require_csrf` — every POST checks the form token and the Origin header
-- `src/hallpass/web/routes_auth.py:40` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
+- `src/hallpass/web/routes_auth.py:39` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
 
 ## Admin check
 

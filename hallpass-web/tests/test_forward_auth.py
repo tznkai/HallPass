@@ -28,6 +28,7 @@ from tests.test_web_family import family
 
 SESSION = "hallpass_session"
 FORWARDED_HOST = "calendar.hallpass.test"
+PROTO = "https"
 
 
 async def check(browser: httpx.AsyncClient, service: str, uri: str = "/") -> httpx.Response:
@@ -80,7 +81,7 @@ async def test_a_request_with_no_session_is_sent_to_sign_in(env: Env):
     assert response.status_code == 302
     location = response.headers["location"]
     assert location.startswith(f"{BASE_URL}/login?next=")
-    expected = urlencode({"next": f"https://{FORWARDED_HOST}/events?week=2"})
+    expected = urlencode({"next": f"{PROTO}://{FORWARDED_HOST}/events?week=2"})
     assert location == f"{BASE_URL}/login?{expected}"
 
 

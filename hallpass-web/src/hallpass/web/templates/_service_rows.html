@@ -1,0 +1,20 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% if rows %}
+<table>
+  <thead><tr><th>Service</th><th>Status</th><th>Suspension</th></tr></thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.name }}{% if row.identity_note %}<br><span>{{ row.identity_note }}</span>{% endif %}</td>
+      <td>{{ row.status }}{% if row.reasons %}<ul>{% for reason in row.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}</td>
+      <td>{{ row.suspendable }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No services yet.</p>
+{% endif %}
