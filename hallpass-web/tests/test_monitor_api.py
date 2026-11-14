@@ -9,12 +9,15 @@ Covers hallpass.AC9.1 to AC9.4 and the contract shape in tests/contract/monitor_
 from __future__ import annotations
 
 import json
+import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from hallpass import desired, grants, registry, services, terms
+from hallpass.logs import FIELDS_ATTR
 from hallpass.monitor_api import PROXY_HEADERS
 from hallpass.registry import Person
 from tests.helpers import ADMIN_SUB, MONITOR_TOKEN, NOW, Env, publish_terms
@@ -154,6 +157,45 @@ async def test_an_older_report_does_not_replace_a_newer_one(env: Env) -> None:
 
     assert response.status_code == 204
     assert (await stored_report(env, ann.id, "minecraft")).observed == "allowed"
+
+
+async def test_a_report_dated_ahead_of_the_clock_is_clamped_so_a_later_correct_report_still_replaces_it(
+        env: Env) -> None:
+    ann, _, _ = await seeded(env)
+    ahead = {"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "suspended", "generation": 1,
+                          "at": "2026-11-14T12:00:00Z"}]}
+    assert (await env.monitor_client.post(REPORTS_PATH, json=ahead, headers=authorized())).status_code == 204
+    assert (await stored_report(env, ann.id, "minecraft")).reported_at == "2026-11-13T12:00:00+00:00"
+
+    env.clock.set(NOW + timedelta(minutes=5))
+    later = {"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "allowed", "generation": 1,
+                          "at": "2026-11-13T12:05:00Z"}]}
+    assert (await env.monitor_client.post(REPORTS_PATH, json=later, headers=authorized())).status_code == 204
+
+    report = await stored_report(env, ann.id, "minecraft")
+    assert (report.observed, report.reported_at) == ("allowed", "2026-11-13T12:05:00+00:00")
+
+
+async def test_skipped_items_are_counted_and_logged_by_reason(env: Env, caplog: pytest.LogCaptureFixture) -> None:
+    ann, _, _ = await seeded(env)
+    caplog.set_level(logging.INFO)
+    body = {
+        "reports": [
+            {"slug": "minecraft", "ref": "unknown-ref", "observed": "allowed", "generation": 1,
+             "at": "2026-11-13T12:00:00Z"},
+            {"slug": "no-such-service", "ref": ann.ref, "observed": "allowed", "generation": 1,
+             "at": "2026-11-13T12:00:00Z"},
+        ],
+        "unmanaged": [{"slug": "no-such-service", "count": 4}, {"slug": "also-missing", "count": 1}],
+    }
+
+    response = await env.monitor_client.post(REPORTS_PATH, json=body, headers=authorized())
+
+    assert response.status_code == 204
+    skipped = [getattr(record, FIELDS_ATTR) for record in caplog.records
+               if record.getMessage() == "monitor_reports_skipped"]
+    assert skipped == [{"count": 1, "reason": "unknown_ref"}, {"count": 3, "reason": "unknown_slug"}]
+    assert await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM service_unmanaged").fetchone()) == (0,)
 
 
 async def test_a_report_with_no_timezone_is_refused(env: Env) -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import hmac
 import logging
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -113,27 +114,39 @@ def _desired_response(services_list: list[services.Service], rows: list[desired.
     return DesiredResponse(services=list(grouped.values()))
 
 
-def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> tuple[int, int]:
-    """Stores each report and unmanaged count. Returns (stored, skipped). A report for an unknown slug or ref is skipped.
-    A report older than the stored one for its pair does not replace it."""
-    stored = skipped = 0
+@dataclass
+class _Outcome:
+    """What one reports request stored, and what it skipped by reason."""
+    stored: int = 0
+    unknown_ref: int = 0
+    unknown_slug: int = 0
+
+
+def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> _Outcome:
+    """Stores each report and unmanaged count. A report or count naming an unknown slug is skipped as unknown_slug, and
+    a report for an unknown ref as unknown_ref. A report's time is clamped to now, so a clock running ahead cannot block
+    later reports, since the newest time wins. A report older than the stored one for its pair does not replace it."""
+    outcome = _Outcome()
     for report in body.reports:
         service = services.get_by_slug(conn, report.slug)
+        if service is None:
+            outcome.unknown_slug += 1
+            continue
         person = registry.get_by_ref(conn, report.ref)
-        if service is None or person is None:
-            skipped += 1
+        if person is None:
+            outcome.unknown_ref += 1
             continue
         conn.execute(_UPSERT_REPORT, (person.id, service.id, report.observed, report.detail, report.generation,
-                                      _iso(report.at)))
-        stored += 1
+                                      _iso(min(report.at, now))))
+        outcome.stored += 1
     for item in body.unmanaged:
         service = services.get_by_slug(conn, item.slug)
         if service is None:
-            skipped += 1
+            outcome.unknown_slug += 1
             continue
         conn.execute(_UPSERT_UNMANAGED, (service.id, item.count, _iso(now)))
     _touch_contact(conn, now)
-    return stored, skipped
+    return outcome
 
 
 def create_monitor_app(deps: web_app.AppDeps) -> FastAPI:
@@ -166,10 +179,12 @@ def create_monitor_app(deps: web_app.AppDeps) -> FastAPI:
     @app.post("/api/monitor/v1/reports", status_code=204)
     async def post_reports(body: ReportsIn) -> Response:
         now = deps.clock()
-        stored, skipped = await deps.db.run(lambda conn: _store_reports(conn, body, now))
-        log_event(logger, "monitor_reports", count=stored)
-        if skipped:
-            log_event(logger, "monitor_reports_skipped", count=skipped, reason="unknown_ref")
+        outcome = await deps.db.run(lambda conn: _store_reports(conn, body, now))
+        log_event(logger, "monitor_reports", count=outcome.stored)
+        if outcome.unknown_ref:
+            log_event(logger, "monitor_reports_skipped", count=outcome.unknown_ref, reason="unknown_ref")
+        if outcome.unknown_slug:
+            log_event(logger, "monitor_reports_skipped", count=outcome.unknown_slug, reason="unknown_slug")
         return Response(status_code=204)
 
     return app

@@ -99,8 +99,8 @@ as the code they cite.
 
 ## Monitor API
 
-- `src/hallpass/monitor_api.py:145` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
-- `src/hallpass/monitor_api.py:149` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
+- `src/hallpass/monitor_api.py:158` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
+- `src/hallpass/monitor_api.py:162` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
 
 ## Generations
 
