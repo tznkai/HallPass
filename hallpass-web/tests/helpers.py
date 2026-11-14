@@ -40,6 +40,7 @@ ENV = {
     "OIDC_METADATA_URL": "https://authentik.test/application/o/hallpass/.well-known/openid-configuration",
     "OIDC_CLIENT_ID": "hallpass-client",
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",
+    "HALLPASS_ADMIN_EMAIL": "admin@example.com",
 }
 CSRF_FIELD = re.compile(r'name="csrf" value="([^"]+)"')
 VERSION_FIELD = re.compile(r'name="version_id" value="(\d+)"')

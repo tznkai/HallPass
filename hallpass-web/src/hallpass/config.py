@@ -18,6 +18,8 @@ _POSITIVE_INT = re.compile(r"[1-9][0-9]{0,9}")
 _PORT = re.compile(r"[1-9][0-9]{0,4}")
 _COOKIE_DOMAIN = re.compile(r"\.?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+")
 _FLOW_SLUG = re.compile(r"[A-Za-z0-9_-]{1,100}")
+_HOST = re.compile(r"[A-Za-z0-9.-]{1,253}")
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 
 class ConfigError(ValueError):
@@ -84,6 +86,36 @@ def _bind(env: Mapping[str, str], name: str) -> tuple[str, int]:
     return host, int(port)
 
 
+def _port(env: Mapping[str, str], name: str, default: str) -> int:
+    raw = _opt(env, name) or default
+    if not _PORT.fullmatch(raw) or int(raw) > 65535:
+        raise ConfigError(f"{name} must be a port number from 1 to 65535")
+    return int(raw)
+
+
+def _flag(env: Mapping[str, str], name: str, default: bool) -> bool:
+    raw = _opt(env, name)
+    if raw is None:
+        return default
+    if raw.lower() not in ("true", "false"):
+        raise ConfigError(f"{name} must be true or false")
+    return raw.lower() == "true"
+
+
+def _email(env: Mapping[str, str], name: str) -> str | None:
+    value = _opt(env, name)
+    if value is not None and not _EMAIL.fullmatch(value):
+        raise ConfigError(f"{name} must be an email address")
+    return value
+
+
+def _smtp_host(env: Mapping[str, str], name: str) -> str | None:
+    value = _opt(env, name)
+    if value is not None and not _HOST.fullmatch(value):
+        raise ConfigError(f"{name} must be a host name")
+    return value
+
+
 def _admin_subs(env: Mapping[str, str], name: str) -> frozenset[str]:
     raw = _opt(env, name)
     if raw is None:
@@ -115,10 +147,18 @@ class Config:
     admin_subs: frozenset[str] = frozenset()
     invite_expiry_hours: int = 168
     log_level: str = "INFO"
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = field(default=None, repr=False)
+    smtp_from: str | None = None
+    smtp_starttls: bool = True
+    admin_email: str | None = None
 
     def secrets(self) -> list[str]:
         """Every non-empty secret value, for the log redaction filter. Add each new secret field here."""
-        return [value for value in (self.session_secret, self.authentik_token, self.oidc_client_secret) if value]
+        values = (self.session_secret, self.authentik_token, self.oidc_client_secret, self.smtp_password)
+        return [value for value in values if value]
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Config:
@@ -137,6 +177,10 @@ class Config:
         if log_level not in LOG_LEVELS:
             raise ConfigError(f"HALLPASS_LOG_LEVEL must be one of {', '.join(LOG_LEVELS)}")
         bind_host, bind_port = _bind(env, "HALLPASS_BIND")
+        smtp_host = _smtp_host(env, "SMTP_HOST")
+        smtp_from = _email(env, "SMTP_FROM")
+        if smtp_host is not None and smtp_from is None:
+            raise ConfigError("SMTP_FROM is required when SMTP_HOST is set")
         return cls(
             public_url=public_url,
             session_secret=session_secret,
@@ -154,4 +198,11 @@ class Config:
             admin_subs=_admin_subs(env, "HALLPASS_ADMIN_SUBS"),
             invite_expiry_hours=_positive_int(env, "HALLPASS_INVITE_EXPIRY_HOURS", "168"),
             log_level=log_level,
+            smtp_host=smtp_host,
+            smtp_port=_port(env, "SMTP_PORT", "587"),
+            smtp_username=_opt(env, "SMTP_USERNAME"),
+            smtp_password=_opt(env, "SMTP_PASSWORD"),
+            smtp_from=smtp_from,
+            smtp_starttls=_flag(env, "SMTP_STARTTLS", True),
+            admin_email=_email(env, "HALLPASS_ADMIN_EMAIL"),
         )
