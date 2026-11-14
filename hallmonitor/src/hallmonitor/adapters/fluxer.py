@@ -33,6 +33,7 @@ AUDIT_REASON = "hallmonitor"
 SSO_SUBJECT = "sso_subject"
 FLUXER_USER_ID = "fluxer_user_id"
 REQUEST_TIMEOUT_SECONDS = 30.0
+SERVICE_WIDE_REASONS = frozenset({"auth", "unreachable"})   # the same for every account, so the whole service fails
 
 
 def _first(subject: Subject, kind: str) -> str | None:
@@ -138,7 +139,7 @@ class FluxerAdapter:
             return Observed("error", "no_identity")
         user_id = await self._user_id(subject)
         if user_id is None:
-            return Observed(subject.desired, "no_account")  # type: ignore[arg-type]
+            return Observed("suspended" if subject.desired == "suspended" else "allowed", "no_account")
         found, disabled = await self._user_flags(user_id)
         if not found:
             return Observed("error", "unknown_user")
@@ -149,7 +150,18 @@ class FluxerAdapter:
         return Observed("allowed" if await self._active_session_count(user_id) else "suspended")
 
     async def observe(self, subjects: Sequence[Subject]) -> dict[str, Observed]:
-        return {subject.ref: await self._observe_one(subject) for subject in subjects}
+        """Observed state per subject. A failure that belongs to one account is that subject's `error`, so the other
+        accounts still reconcile. `auth` and `unreachable` are raised: they mean the key or the instance, so the whole
+        service fails with the same reason."""
+        observed: dict[str, Observed] = {}
+        for subject in subjects:
+            try:
+                observed[subject.ref] = await self._observe_one(subject)
+            except AdapterError as error:
+                if error.reason in SERVICE_WIDE_REASONS:
+                    raise
+                observed[subject.ref] = Observed("error", error.reason)
+        return observed
 
     async def _end_sessions(self, user_id: str) -> bool:
         """The only mutating call. True when the server answered 2xx."""

@@ -246,6 +246,30 @@ async def test_a_wrong_key_is_reported_as_an_error_in_the_cycle(env: Env) -> Non
     assert _reports(env)[0]["detail"] == "auth"
 
 
+async def test_one_accounts_failed_lookup_does_not_block_another_held_account(env: Env) -> None:
+    other = "00000000-0000-4000-8000-00000000beef"
+    add_user(env.state, "1001")
+    add_user(env.state, "1002")
+    link_sso(env.state, PROVIDER, SUBJECT, "1001")
+    link_sso(env.state, PROVIDER, other, "1002")
+    sign_in(env.state, "1001")
+    sign_in(env.state, "1002")
+    env.hallpass.services[0]["subjects"] = [
+        fluxer_subject(ref="r1"),
+        fluxer_subject(ref="r2", identities=[{"kind": "sso_subject", "value": other}]),
+    ]
+    env.state.fail_next["user"] = 500   # the first user lookup is r1's, so only r1 fails
+
+    reports = await run_cycle(env)
+
+    assert reports["r1"]["observed"] == "error"
+    assert reports["r1"]["detail"] == "http"
+    assert reports["r2"]["observed"] == "suspended"
+    assert active_sessions(env.state, "1002") == 0
+    assert active_sessions(env.state, "1001") == 1
+    assert session_delete_count(env) == 1
+
+
 async def test_a_failed_session_delete_is_an_error_and_the_sessions_stay_active(env: Env) -> None:
     add_user(env.state, "1001")
     link_sso(env.state, PROVIDER, SUBJECT, "1001")

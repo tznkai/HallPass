@@ -84,6 +84,9 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
   reports `suspended` once the sessions are ended and `allowed` when no hold applies; it never sets or reads the
   DISABLED bit as its own state. The key drops `user:temp_ban` and `enforcement:view`, and keeps
   `user:update_flags` only because session termination requires it.
+- **Per-account failures stay per account.** An `http` or `unexpected` failure on one Fluxer account reports only that
+  subject as `error`; `auth` and `unreachable` still fail every Fluxer subject, since the key or the instance is the
+  cause.
 - **Fluxer account lookup by SSO subject.** Hallmonitor finds a person's Fluxer account from their Authentik uuid
   with `GET /v1/admin/sso-identities?provider_id=&subject=`. The provider id is configuration (read once from any
   bound account's identity list); a null result means the person has not signed in to Fluxer yet.
