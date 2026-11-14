@@ -53,3 +53,27 @@ as the code they cite.
 - `src/hallmonitor/adapters/minecraft.py:69` `safe = BEDROCK_NAME.fullmatch(identity.value)` — a Bedrock name is safe only when it matches the pattern and the configured prefix is allowlisted
 - `src/hallmonitor/adapters/minecraft.py:158` `if not all(entry.safe for entry in entries):` — the gate in apply: an unsafe name is `bad_identity` before any add, remove or kick is sent
 - `src/hallmonitor/adapters/minecraft.py:198` `prefix in FLOODGATE_PREFIXES):` — the adapter is not configured when the prefix is outside the allowlist, so no Bedrock command is ever built with a bad prefix
+
+## Ban ownership
+
+- `src/hallmonitor/adapters/palworld.py:90` `own.own_ref(c, self._slug, steam_id)` — the ownership lookup for a Palworld ban: a ban counts as ours only when its steam id has an own record
+- `src/hallmonitor/adapters/palworld.py:118` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — a listed Palworld ban without an own record is `banned_external`, so the reconcile loop never applies to it
+- `src/hallmonitor/adapters/palworld.py:135` `if not await self._owned(steam_id):` — the unban gate: a restore sends no unban unless hallmonitor recorded the ban, so a moderator's ban is never lifted
+- `src/hallmonitor/adapters/source_rcon.py:133` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — the re-check before a Source ban: a moderator ban that appeared after observe is never taken over, because apply reads the list before it runs `banid`
+- `src/hallmonitor/adapters/source_rcon.py:145` `if not await self._owned(steam_id):` — the removeid gate: a restore runs no `removeid` unless the ban is recorded as ours
+- `src/hallmonitor/adapters/valheim.py:134` `if record is not None and record[0] == OWN_BAN:` — the Valheim ownership check: a listed id counts as ours only with a `ban` record, so a `restore` record never makes a line ours
+- `src/hallmonitor/adapters/valheim.py:168` `if record is None or record[0] != OWN_BAN:` — the Valheim restore gate: a line with no `ban` record is never removed from the ban-list file
+
+## Restart detection
+
+- `src/hallmonitor/adapters/valheim.py:77` `if uptime is None:` — a stopped server counts as not yet restarted, so a change is reported `pending_restart` until the server runs again
+- `src/hallmonitor/adapters/valheim.py:79` `return uptime > (now - placed_at).total_seconds()` — the restart test: the server has run continuously since the change when its uptime is longer than the time since the change
+- `src/hallmonitor/adapters/valheim.py:112` `uptime = await self._files.uptime_seconds()` — the uptime is read once per observe or apply call, and not at all with live reload, so every change in one call is compared with the same reading
+- `src/hallmonitor/adapters/valheim.py:135` `return Observed("suspended", PENDING if pending(record[1]) else None)` — the detail rule: `pending_restart` shows only while the change is pending, and a restart since the change clears it
+
+## Pterodactyl client
+
+- `src/hallmonitor/pterodactyl.py:34` `if status in (401, 403):` — a wrong or under-permissioned key is `auth`, which fails every subject of the service
+- `src/hallmonitor/pterodactyl.py:36` `if status == 404:` — a missing ban-list file is `not_found`, an error and never an empty ban list
+- `src/hallmonitor/pterodactyl.py:38` `if not 200 <= status < 300:` — any other non-2xx status is `http`, so an error body is never read as a file's text
+- `src/hallmonitor/pterodactyl.py:70` `raise PteroError("unreachable") from None` — a transport failure is `unreachable`, the service-wide reason that stops the service's remaining applies

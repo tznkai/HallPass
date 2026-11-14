@@ -43,6 +43,9 @@ TOPICS = [
     "RCON framing",
     "Minecraft never pardons",
     "Console command arguments",
+    "Ban ownership",
+    "Restart detection",
+    "Pterodactyl client",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.
