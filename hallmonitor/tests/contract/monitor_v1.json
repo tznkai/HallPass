@@ -1,0 +1,58 @@
+{
+  "desired": {
+    "services": [
+      {
+        "slug": "minecraft",
+        "adapter": "manual",
+        "subjects": [
+          {
+            "ref": "ref-a",
+            "identities": [
+              {
+                "kind": "java_name",
+                "value": "Steve"
+              }
+            ],
+            "desired": "allowed",
+            "generation": 3
+          }
+        ]
+      },
+      {
+        "slug": "fluxer",
+        "adapter": "fluxer",
+        "subjects": [
+          {
+            "ref": "ref-a",
+            "identities": [
+              {
+                "kind": "sso_subject",
+                "value": "00000000-0000-4000-8000-000000000001"
+              }
+            ],
+            "desired": "suspended",
+            "generation": 2
+          }
+        ]
+      }
+    ]
+  },
+  "reports": {
+    "reports": [
+      {
+        "slug": "minecraft",
+        "ref": "ref-a",
+        "observed": "allowed",
+        "detail": null,
+        "generation": 3,
+        "at": "2026-11-13T12:00:00Z"
+      }
+    ],
+    "unmanaged": [
+      {
+        "slug": "minecraft",
+        "count": 1
+      }
+    ]
+  }
+}
