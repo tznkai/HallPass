@@ -44,7 +44,9 @@ calendar.example.invalid {
         uri /forward-auth?service=calendar
         copy_headers X-Hallpass-Person X-Hallpass-Type
     }
-    reverse_proxy 127.0.0.1:9000
+    reverse_proxy 127.0.0.1:9000 {
+        header_up Cookie "hallpass_session=[^;]*;? *" ""
+    }
 }
 
 feeds.example.invalid {
@@ -52,12 +54,19 @@ feeds.example.invalid {
     forward_auth 127.0.0.1:8080 {
         uri /forward-auth?service=cal-feed
     }
-    reverse_proxy 127.0.0.1:9001
+    reverse_proxy 127.0.0.1:9001 {
+        header_up Cookie "hallpass_session=[^;]*;? *" ""
+    }
 }
 ```
 
 - `HALLPASS_COOKIE_DOMAIN` must be the shared parent domain of these hosts. The browser then sends the
   session cookie to every sibling host, and Caddy forwards its `Cookie` header to hallpass.
+- Each service site strips the `hallpass_session` cookie from the request it sends upstream. The cookie
+  is scoped to the parent domain, so without the strip `reverse_proxy` would hand every service a live,
+  replayable hallpass session, admins included. The strip changes only that upstream request:
+  `forward_auth` sends its own sub-request to hallpass with the `Cookie` header unchanged, so hallpass
+  still sees the session.
 - The slug in `uri` is fixed per site. Each protected site names one service slug, and that slug is the
   one the admin created on the services page.
 - Feed sites send no session. The feed token travels in the forwarded URI, so `log_skip` keeps the feed

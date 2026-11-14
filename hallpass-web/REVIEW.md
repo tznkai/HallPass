@@ -23,6 +23,7 @@ as the code they cite.
 ## Sessions and CSRF
 
 - `src/hallpass/auth.py:121` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
+- `src/hallpass/auth.py:125` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
 - `src/hallpass/auth.py:147` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:39` `def safe_next` — the only check on where a sign-in returns the person to, so it must refuse off-site URLs
 
