@@ -16,10 +16,13 @@ from tests.fake_authentik import enrol
 from tests.helpers import (
     Env,
     StubOidcClient,
+    accept_current,
+    accept_for,
     admin_client,
     form,
     invite_person,
     make_env,
+    publish_terms,
     sign_in,
     store_person,
     use_oidc_client,
@@ -59,6 +62,7 @@ async def test_session_cookie_carries_the_configured_domain(tmp_path: Path):
     {"account_type": "adult", "email": "ana@parent.invalid"},        # AC1.2 with an address on file
 ], ids=["child-without-email", "adult-with-email"])
 async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields):
+    await publish_terms(env)
     person = await store_person(env, display_name="Kid", **fields)
     invitation_pk = await invite_person(env, person)
     user = enrol(env.authentik, invitation_pk, "kid1")
@@ -66,7 +70,8 @@ async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields):
 
     first = await sign_in(env, sub=user["uuid"], username="kid1", enrollment_ref=ref)
     assert first.status_code == 303
-    assert first.headers["location"] == "/"
+    assert first.headers["location"] == "/terms?next=%2F"
+    assert (await accept_current(env)).headers["location"] == "/"
     assert "Kid" in (await env.client.get("/")).text
     stored = await env.db.run(lambda c: registry.get_person(c, person.id))
     assert (stored.authentik_uuid, stored.authentik_pk) == (user["uuid"], user["pk"])
@@ -75,6 +80,7 @@ async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields):
     assert (await env.client.post("/logout", data={"csrf": token})).status_code == 303
     again = await sign_in(env, sub=user["uuid"], username="kid1")
     assert again.status_code == 303
+    assert again.headers["location"] == "/"
     assert "Kid" in (await env.client.get("/")).text
 
 
@@ -120,15 +126,19 @@ async def test_authentik_outage_gives_503_and_leaves_the_person_unbound(env: Env
     "http://hallpass.test/",
 ])
 async def test_unsafe_next_values_are_ignored(env: Env, bad: str):
+    await publish_terms(env)
     person = await store_person(env, account_type="adult")
     await env.db.run(lambda c: registry.bind_identity(c, person.id, uuid=KID_SUB, authentik_pk=7, username="kid1"))
+    await accept_for(env, person.id)
     response = await sign_in(env, sub=KID_SUB, username="kid1", next_path=bad)
     assert response.headers["location"] == "/"
 
 
 async def test_a_safe_next_value_is_kept(env: Env):
+    await publish_terms(env)
     person = await store_person(env, account_type="adult")
     await env.db.run(lambda c: registry.bind_identity(c, person.id, uuid=KID_SUB, authentik_pk=7, username="kid1"))
+    await accept_for(env, person.id)
     response = await sign_in(env, sub=KID_SUB, username="kid1", next_path="/children")
     assert response.headers["location"] == "/children"
 

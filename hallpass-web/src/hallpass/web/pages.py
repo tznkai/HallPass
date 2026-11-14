@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.templating import Jinja2Templates
 
 from hallpass import text
-from hallpass.auth import RedirectToLogin
+from hallpass.auth import RedirectToLogin, RedirectToTerms
 from hallpass.registry import NoSuchGroup, NoSuchPerson, Person
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -37,6 +37,10 @@ def message_page(request: Request, message: str, status_code: int) -> HTMLRespon
 
 async def redirect_to_login(request: Request, exc: RedirectToLogin) -> RedirectResponse:
     return RedirectResponse(f"/login?{urlencode({'next': exc.next_path})}", status_code=303)
+
+
+async def redirect_to_terms(request: Request, exc: RedirectToTerms) -> RedirectResponse:
+    return RedirectResponse(f"/terms?{urlencode({'next': exc.next_path})}", status_code=303)
 
 
 async def not_found(request: Request, exc: NoSuchPerson | NoSuchGroup) -> HTMLResponse:

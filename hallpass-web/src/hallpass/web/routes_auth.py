@@ -6,12 +6,12 @@ from __future__ import annotations
 
 import logging
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from hallpass import text
+from hallpass import terms, text
 from hallpass.auth import SignInError, current_person, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
 from hallpass.logs import log_event
@@ -84,8 +84,11 @@ async def callback(request: Request) -> Response:
     except SignInError as error:
         return _refused(request, error)
     destination = request.session.get("next") or "/"
+    state = await deps.db.run(lambda c: terms.state_for(c, person.id))
     start_session(request, person.id)
     log_event(logger, "sign_in", outcome="ok", person_id=person.id)
+    if not state.accepted_current:
+        return RedirectResponse(f"/terms?{urlencode({'next': destination})}", status_code=303)
     return RedirectResponse(destination, status_code=303)
 
 

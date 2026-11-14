@@ -14,7 +14,7 @@ import pytest
 
 from hallpass import registry, text
 from tests.fake_authentik import InvitationUsed, add_user, enrol
-from tests.helpers import BASE_URL, Env, admin_client, api_routes, form, sign_in
+from tests.helpers import BASE_URL, Env, admin_client, api_routes, form, sign_in, signed_in_person
 
 OTHER_SUB = "00000000-0000-4000-8000-0000000000c2"
 INVITE_MARK = "/if/flow/invite/?itoken="
@@ -438,18 +438,16 @@ def admin_routes(env: Env) -> list[tuple[str, str]]:
 
 async def test_a_non_admin_gets_403_on_every_admin_path_and_method(env: Env):
     await admin_client(env)
-    child = await create_person(env, "Kid", account_type="child")
-    user = await bind_child(env, child, "kid1")
-    assert user["username"] == "kid1"
-    token = (await form(env, "/"))["csrf"]
+    _, browser = await signed_in_person(env, account_type="adult", display_name="Ana")
+    token = (await form(env, "/terms", client=browser))["csrf"]
 
     routes = admin_routes(env)
     assert routes, "no admin routes were found"
     for method, path in routes:
         if method == "GET":
-            response = await env.client.get(path)
+            response = await browser.get(path)
         else:
-            response = await env.client.post(path, data={"csrf": token})
+            response = await browser.post(path, data={"csrf": token})
         assert response.status_code == 403, (method, path, response.status_code)
 
 

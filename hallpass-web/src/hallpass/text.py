@@ -22,3 +22,13 @@ IDENTITY_TAKEN = "That identity is already recorded for this service."
 GROUP_TAKEN = "A group with that name already exists."
 AUTHENTIK_NOT_UPDATED = "The change is saved in hallpass, but Authentik could not be updated yet."
 INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."
+TERMS_NOT_PUBLISHED = "No terms have been published yet. Hallpass cannot be used until the administrator publishes them."
+TERMS_CHANGED = "The terms changed while this page was open. Read the current version and accept it."
+TERMS_NOT_NOW = "Not now"
+# One message per grants.GrantRefused reason.
+GRANT_REFUSED = {
+    "not_linked_parent": "Only a parent linked to this child can approve them.",
+    "parent_terms": "You must accept the current terms before you can approve a child.",
+    "parent_inactive": "Your account must be active before you can approve a child.",
+    "child_not_awaiting": "This child is not waiting for approval.",
+}

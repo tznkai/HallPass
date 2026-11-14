@@ -18,7 +18,7 @@ from authlib.integrations.base_client.errors import MismatchingStateError
 from fastapi import Depends, FastAPI, Request
 from joserfc.errors import BadSignatureError, ExpiredTokenError, InvalidClaimError
 
-from hallpass import registry
+from hallpass import grants, registry, terms
 from hallpass.auth import (
     AuthlibOidc,
     Identity,
@@ -92,6 +92,23 @@ async def authentik(state: FakeAuthentikState) -> AsyncIterator[AuthentikClient]
 async def make_child(db: Database, **fields) -> Person:
     kwargs = {"display_name": "Kid", "account_type": "child", "now": NOW, **fields}
     return await db.run(lambda c: registry.create_person(c, **kwargs))
+
+
+async def make_accepted(db: Database, **fields) -> Person:
+    """A person who has accepted the current terms, so the page gate lets them through. v1 is published by an unbound
+    publisher when no version exists."""
+    person = await make_child(db, **fields)
+
+    def accept(conn) -> None:
+        version = terms.current(conn)
+        if version is None:
+            publisher = registry.create_person(conn, display_name="Publisher", account_type="adult", now=NOW)
+            version = terms.publish(conn, tos_text="Terms", privacy_text="Privacy", blocking=True,
+                                    actor_id=publisher.id, now=NOW)
+        grants.accept_terms(conn, person.id, version.id, NOW)
+
+    await db.run(accept)
+    return person
 
 
 async def invite_for(authentik: AuthentikClient, person: Person) -> str:
@@ -371,7 +388,7 @@ async def test_signed_out_request_is_redirected_to_login(http):
 
 
 async def test_signed_in_then_stopped_request_is_redirected_again(http, db):
-    person = await make_child(db)
+    person = await make_accepted(db)
     await http.get(f"/start/{person.id}")
     assert (await http.get("/me")).json() == {"id": person.id}
     await http.get("/stop")
@@ -389,14 +406,14 @@ async def test_locked_person_gets_403_and_the_session_is_cleared(http, db):
 
 
 async def test_admin_check_refuses_a_non_admin_person(http, db):
-    person = await make_child(db, account_type="adult")
+    person = await make_accepted(db, account_type="adult")
     await db.run(lambda c: registry.bind_identity(c, person.id, uuid=KID_SUB, authentik_pk=7, username="kid1"))
     await http.get(f"/start/{person.id}")
     assert (await http.get("/admin")).status_code == 403
 
 
 async def test_admin_check_admits_the_admin_person(http, db):
-    person = await make_child(db, account_type="adult")
+    person = await make_accepted(db, account_type="adult")
     await db.run(lambda c: registry.bind_identity(c, person.id, uuid=ADMIN_SUB, authentik_pk=1, username="root"))
     await http.get(f"/start/{person.id}")
     assert (await http.get("/admin")).json() == {"id": person.id}

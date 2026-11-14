@@ -1,0 +1,26 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: terms{% endblock %}
+{% block content %}
+<h1>Terms and privacy</h1>
+{% if current %}
+<section class="stack">
+  <h2>Terms of service (version {{ current.version }})</h2>
+  <div class="prewrap">{{ current.tos_text }}</div>
+  <h2>Privacy disclosure</h2>
+  <div class="prewrap">{{ current.privacy_text }}</div>
+</section>
+<form method="post" action="/terms/accept" class="stack">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <input type="hidden" name="version_id" value="{{ current.id }}">
+  <input type="hidden" name="next" value="{{ target }}">
+  <button type="submit">I accept</button>
+  {% if show_not_now %}<a href="{{ target }}">{{ not_now }}</a>{% endif %}
+</form>
+{% else %}
+<p class="notice error">{{ not_published }}</p>
+{% endif %}
+{% endblock %}

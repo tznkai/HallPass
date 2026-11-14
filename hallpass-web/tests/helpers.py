@@ -16,17 +16,20 @@ from fastapi.responses import RedirectResponse
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 
-from hallpass import registry
+from hallpass import grants, registry, terms
 from hallpass.auth import AuthlibOidc, Identity
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
+from hallpass.registry import Person
 from hallpass.web import app as web_app
-from tests.fake_authentik import FakeAuthentikState, add_user, make_app
+from tests.fake_authentik import FakeAuthentikState, add_user, enrol, make_app
 
 ADMIN_SUB = "00000000-0000-4000-8000-000000000001"
 BASE_URL = "https://hallpass.test"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+TERMS_TOS = "Test terms of service text."
+TERMS_PRIVACY = "Test privacy disclosure text."
 ENV = {
     "HALLPASS_PUBLIC_URL": BASE_URL,
     "HALLPASS_SESSION_SECRET": "session-secret-for-tests-only-0123456789",
@@ -39,6 +42,7 @@ ENV = {
     "OIDC_CLIENT_SECRET": "oidc-secret-for-tests-only",
 }
 CSRF_FIELD = re.compile(r'name="csrf" value="([^"]+)"')
+VERSION_FIELD = re.compile(r'name="version_id" value="(\d+)"')
 
 
 class FixedClock:
@@ -142,26 +146,90 @@ def api_routes(app: FastAPI) -> list[APIRoute]:
     return found
 
 
+def new_client(env: Env) -> httpx.AsyncClient:
+    """A browser of its own: a fresh cookie jar on the same app."""
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=env.application), base_url=BASE_URL,
+                             follow_redirects=False)
+
+
 async def sign_in(env: Env, *, sub: str, username: str | None = None, enrollment_ref: str | None = None,
-                  next_path: str | None = None) -> httpx.Response:
+                  next_path: str | None = None, client: httpx.AsyncClient | None = None) -> httpx.Response:
     """Runs /login and the callback as the browser would. Returns the callback response."""
+    browser = client or env.client
     env.oidc.next_identity = Identity(sub=sub, username=username, enrollment_ref=enrollment_ref)
     params = None if next_path is None else {"next": next_path}
-    start = await env.client.get("/login", params=params)
+    start = await browser.get("/login", params=params)
     assert start.status_code == 302, start.status_code
-    return await env.client.get(start.headers["location"])
+    return await browser.get(start.headers["location"])
+
+
+async def publish_terms(env: Env, *, blocking: bool = True) -> int:
+    """Publishes a terms version with fixed texts and returns its id. The actor is the admin when one exists, else an
+    unbound publisher, since publishing needs an actor and tests may publish before anyone has signed in."""
+    def change(conn) -> int:
+        actor = registry.get_by_uuid(conn, ADMIN_SUB) or registry.create_person(
+            conn, display_name="Publisher", account_type="adult", now=env.clock.now())
+        version = terms.publish(conn, tos_text=TERMS_TOS, privacy_text=TERMS_PRIVACY, blocking=blocking,
+                                actor_id=actor.id, now=env.clock.now())
+        return version.id
+
+    return await env.db.run(change)
+
+
+async def accept_current(env: Env, client: httpx.AsyncClient | None = None) -> httpx.Response:
+    """Reads /terms as the browser would, then posts the acceptance of the version shown. Returns the POST response."""
+    browser = client or env.client
+    page = await browser.get("/terms")
+    csrf, version = CSRF_FIELD.search(page.text), VERSION_FIELD.search(page.text)
+    assert csrf is not None and version is not None, f"terms form missing on /terms ({page.status_code})"
+    return await browser.post("/terms/accept", data={"csrf": csrf.group(1), "version_id": version.group(1)})
+
+
+async def accept_for(env: Env, person_id: int) -> None:
+    """Records the current version's acceptance directly in the database, for tests that need it in place."""
+    def change(conn) -> None:
+        version = terms.current(conn)
+        assert version is not None, "no terms version is published"
+        grants.accept_terms(conn, person_id, version.id, env.clock.now())
+
+    await env.db.run(change)
+
+
+async def signed_in_person(env: Env, *, account_type: str = "adult", accepted: bool = True,
+                           display_name: str = "Test Person", email: str | None = None) -> tuple[Person, httpx.AsyncClient]:
+    """Creates and enrols a person through the store and Authentik fake, and signs them in on a browser of their own.
+    With `accepted`, publishes v1 if no version exists and accepts the current version. Returns the person, re-read
+    after the status transition, and the browser."""
+    person = await store_person(env, display_name=display_name, account_type=account_type, email=email)
+    user = enrol(env.authentik, await invite_person(env, person), f"person{person.id}")
+    browser = new_client(env)
+    await sign_in(env, sub=user["uuid"], username=user["username"],
+                  enrollment_ref=user["attributes"]["hallpass_enrollment"], client=browser)
+    if accepted:
+        if await env.db.run(terms.current) is None:
+            await publish_terms(env)
+        await accept_current(env, browser)
+    return await env.db.run(lambda c: registry.get_person(c, person.id)), browser
 
 
 async def admin_client(env: Env) -> httpx.Response:
-    """Signs the admin in, adding the admin's Authentik user first if it is missing. Returns the callback response."""
+    """Signs the admin in, adding the admin's Authentik user first if it is missing. Publishes v1 when no version
+    exists, and accepts the current version. Returns the callback response."""
     if not any(user["uuid"] == ADMIN_SUB for user in env.authentik.users.values()):
         add_user(env.authentik, uuid=ADMIN_SUB, username="root")
-    return await sign_in(env, sub=ADMIN_SUB, username="root")
+    response = await sign_in(env, sub=ADMIN_SUB, username="root")
+    if await env.db.run(terms.current) is None:
+        await publish_terms(env)
+    admin = await env.db.run(lambda c: registry.get_by_uuid(c, ADMIN_SUB))
+    state = await env.db.run(lambda c: terms.state_for(c, admin.id))
+    if not state.accepted_current:
+        await accept_for(env, admin.id)
+    return response
 
 
-async def form(env: Env, page: str, **fields: str) -> dict[str, str]:
+async def form(env: Env, page: str, *, client: httpx.AsyncClient | None = None, **fields: str) -> dict[str, str]:
     """GETs `page`, reads its hidden csrf field and returns the form data with that token."""
-    response = await env.client.get(page)
+    response = await (client or env.client).get(page)
     match = CSRF_FIELD.search(response.text)
     assert match is not None, f"no csrf field on {page}"
     return {"csrf": match.group(1), **fields}

@@ -10,14 +10,15 @@ from datetime import datetime
 
 from fastapi import FastAPI
 
-from hallpass.auth import OidcClient, RedirectToLogin, add_session_middleware, csrf_token
+from hallpass.auth import OidcClient, RedirectToLogin, RedirectToTerms, add_session_middleware, csrf_token
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
 from hallpass.db import Database
 from hallpass.registry import NoSuchGroup, NoSuchPerson
-from hallpass.web.pages import make_templates, not_found, redirect_to_login
+from hallpass.web.pages import make_templates, not_found, redirect_to_login, redirect_to_terms
 from hallpass.web.routes_admin import router as admin_router
 from hallpass.web.routes_auth import router as auth_router
+from hallpass.web.routes_terms import router as terms_router
 
 
 @dataclass(frozen=True)
@@ -38,8 +39,10 @@ def create_app(deps: AppDeps) -> FastAPI:
     app.state.templates = templates
     add_session_middleware(app, deps.config)
     app.add_exception_handler(RedirectToLogin, redirect_to_login)
+    app.add_exception_handler(RedirectToTerms, redirect_to_terms)
     app.add_exception_handler(NoSuchPerson, not_found)
     app.add_exception_handler(NoSuchGroup, not_found)
     app.include_router(auth_router)
+    app.include_router(terms_router)
     app.include_router(admin_router)
     return app

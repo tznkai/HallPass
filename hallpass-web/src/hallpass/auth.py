@@ -30,7 +30,7 @@ from joserfc.errors import JoseError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 
-from hallpass import registry, text
+from hallpass import registry, terms, text
 from hallpass.authentik import AuthentikClient, AuthentikError, AuthentikUser
 from hallpass.config import Config
 from hallpass.db import Database
@@ -108,6 +108,14 @@ class RedirectToLogin(Exception):
     def __init__(self, next_path: str) -> None:
         self.next_path = next_path
         super().__init__("sign-in required")
+
+
+class RedirectToTerms(Exception):
+    """The app's handler turns this into a 303 to /terms?next=<next_path>."""
+
+    def __init__(self, next_path: str) -> None:
+        self.next_path = next_path
+        super().__init__("terms acceptance required")
 
 
 def add_session_middleware(app: FastAPI, config: Config) -> None:
@@ -218,7 +226,8 @@ async def resolve_sign_in(db: Database, authentik: AuthentikClient, config: Conf
 
 # Request dependencies --------------------------------------------------------------------------------
 
-async def current_person(request: Request) -> Person:
+async def current_person_any_terms(request: Request) -> Person:
+    """The signed-in, unlocked person, whatever their terms state. Only the terms routes and sign-out use it directly."""
     deps = _deps(request)
     person_id = request.session.get("person_id")
     if person_id is None:
@@ -233,7 +242,26 @@ async def current_person(request: Request) -> Person:
     return person
 
 
-async def require_admin(request: Request, person: Annotated[Person, Depends(current_person)]) -> Person:
+async def current_person(request: Request) -> Person:
+    """The page gate: as current_person_any_terms, and a person who must still accept the terms is sent to /terms."""
+    person = await current_person_any_terms(request)
+    state = await _deps(request).db.run(lambda c: terms.state_for(c, person.id))
+    if terms.pages_blocked(state):
+        raise RedirectToTerms(request.url.path)
+    return person
+
+
+def _require_admin_person(request: Request, person: Person) -> Person:
     if person.authentik_uuid is None or person.authentik_uuid not in _deps(request).config.admin_subs:
         raise HTTPException(403, text.FORBIDDEN)
     return person
+
+
+async def require_admin(request: Request, person: Annotated[Person, Depends(current_person)]) -> Person:
+    return _require_admin_person(request, person)
+
+
+async def require_admin_any_terms(request: Request,
+                                  person: Annotated[Person, Depends(current_person_any_terms)]) -> Person:
+    """The admin check without the page gate. Only the admin terms pages use it, so the first version can be published."""
+    return _require_admin_person(request, person)
