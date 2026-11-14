@@ -48,6 +48,10 @@ TOPICS = [
     "Access decision",
     "Forward auth",
     "Feed tokens",
+    "Conflict engine",
+    "Hold permissions",
+    "Outbox",
+    "Authentik sync",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.

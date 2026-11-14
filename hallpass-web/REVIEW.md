@@ -70,3 +70,24 @@ as the code they cite.
 - `src/hallpass/tokens.py:76` `def hash_token(raw` — the raw token is 192 random bits, and only its SHA-256 hex is ever stored
 - `src/hallpass/tokens.py:77` `hashlib.sha256(raw.encode())` — the hash that feed lookups compare against, so a database read yields no usable token
 - `src/hallpass/tokens.py:86` `UPDATE token SET revoked_at` — issuing a new feed token revokes the person's previous one for the same service, so regenerating cuts off the old URL
+
+## Conflict engine
+
+- `src/hallpass/conflict.py:47` `previous.actor_id != proposed.actor_id` — the reversal test: the previous overlapping action must be by a different parent and be the opposite kind (place vs lift), and admin and system actions never reach this history
+- `src/hallpass/conflict.py:52` `now - window < e.at <= now` — the window check: a second reversal locks the child down only when an earlier reversal falls in (now - window, now], so an edge exactly at the window is outside
+
+## Hold permissions
+
+- `src/hallpass/holds.py:295` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
+- `src/hallpass/holds.py:298` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
+- `src/hallpass/holds.py:362` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted: lockdown holds go only when their review item is resolved with the lift option
+
+## Outbox
+
+- `src/hallpass/mail.py:106` `except Exception as exc:` — the failure branch of `deliver_due`: a failed send is caught here, so it never reaches the decision that queued the mail
+- `src/hallpass/mail.py:108` `next_attempt = _iso(now + _backoff(attempts))` — the retry schedule: each failure pushes the next attempt out by the capped backoff, and the row stays in the outbox
+
+## Authentik sync
+
+- `src/hallpass/authentik_sync.py:34` `def wanted(conn` — the single definition of what Authentik should hold for a person: group membership, the fluxer_email attribute and the active flag
+- `src/hallpass/authentik_sync.py:43` `access.evaluate(conn, person, fluxer_service).desired == "allowed"` — the membership rule's entitlement test: a held, unentitled or retired-service person is not a member of the Fluxer group
