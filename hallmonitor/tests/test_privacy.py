@@ -16,18 +16,15 @@ import dataclasses
 import io
 import logging
 import re
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
-import pytest
 
 from hallmonitor.adapters.fluxer import FluxerAdapter
 from hallmonitor.client import MonitorClient
 from hallmonitor.config import Config
 from hallmonitor.contract import Subject
-from hallmonitor.db import Database
 from hallmonitor.logs import PINNED_LOGGERS, JsonFormatter, log_event
 from hallmonitor.reconcile import cycle
 from tests.fake_adapter import ListAdapter
@@ -73,30 +70,25 @@ def test_a_subject_carries_only_the_wire_fields_and_no_personal_data() -> None:
 
 # AC13.2 (behavioural) -------------------------------------------------------------------------------
 
-@pytest.fixture
-def database(tmp_path: Path) -> Iterator[Database]:
-    db = Database.open(tmp_path / "hallmonitor.db")
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 def subject(ref: str, identities: list[tuple[str, str]], desired: str, generation: int) -> dict[str, object]:
     return {"ref": ref, "identities": [{"kind": kind, "value": value} for kind, value in identities],
             "desired": desired, "generation": generation}
 
 
-async def test_a_full_cycle_logs_no_identity_value_and_no_credential(database: Database) -> None:
+async def test_a_full_cycle_logs_no_identity_value_and_no_credential() -> None:
     fluxer_state = FakeFluxerAdminState(key=FLUXER_KEY)
     add_user(fluxer_state, FLUXER_USER_ID)
     add_user(fluxer_state, "1002")
     link_sso(fluxer_state, PROVIDER, SSO_SUBJECT, "1002")
     sign_in(fluxer_state, FLUXER_USER_ID)
     sign_in(fluxer_state, "1002")
+    fluxer_state.fail_next["sessions_delete"] = 500   # the first held account's session delete fails
     hallpass_state = FakeHallpassState(token=HALLPASS_TOKEN, services=[
         {"slug": "minecraft", "adapter": "list", "subjects": [
             subject("m1", [("java_name", STEVE)], "suspended", 4),
+        ]},
+        {"slug": "valheim", "adapter": "list", "subjects": [
+            subject("v1", [("java_name", STEVE)], "allowed", 1),
         ]},
         {"slug": "fluxer", "adapter": "fluxer", "subjects": [
             subject("f1", [("fluxer_user_id", FLUXER_USER_ID)], "suspended", 2),
@@ -107,6 +99,7 @@ async def test_a_full_cycle_logs_no_identity_value_and_no_credential(database: D
     client = MonitorClient(HALLPASS_URL, HALLPASS_TOKEN, transport=make_hallpass_transport(hallpass_state))
     adapters = {
         "minecraft": ListAdapter(allow={STEVE}),
+        "valheim": ListAdapter(unreachable=True),
         "fluxer": FluxerAdapter(http=http, base_url=FLUXER_ADMIN_URL, key=FLUXER_KEY, sso_provider_id=PROVIDER),
     }
     captured = io.StringIO()
@@ -132,6 +125,10 @@ async def test_a_full_cycle_logs_no_identity_value_and_no_credential(database: D
 
     logged = captured.getvalue()
     assert '"event": "cycle_done"' in logged, "the cycle logged, so the check below is not vacuous"
-    assert [report["observed"] for report in hallpass_state.reports] == ["suspended", "suspended", "suspended"]
+    assert '"event": "observe_failed"' in logged, "the failure path of an unreachable service was logged"
+    assert '"event": "sessions_not_ended"' in logged, "the failure path of a session delete was logged"
+    assert [report["observed"] for report in hallpass_state.reports] == [
+        "suspended", "error", "error", "suspended",   # m1 applied, v1 unreachable, f1 delete failed, f2 applied
+    ]
     for value in (*IDENTITY_VALUES, HALLPASS_TOKEN, FLUXER_KEY):
         assert value not in logged
