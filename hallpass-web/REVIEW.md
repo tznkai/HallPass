@@ -96,3 +96,13 @@ as the code they cite.
 - `src/hallpass/authentik_sync.py:34` `def wanted(conn` — the single definition of what Authentik should hold for a person: group membership, the fluxer_email attribute and the active flag
 - `src/hallpass/authentik_sync.py:43` `access.evaluate(conn, person, fluxer_service).desired == "allowed"` — the membership rule's entitlement test: a held, unentitled or retired-service person is not a member of the Fluxer group
 - `src/hallpass/authentik_sync.py:94` `steps.append(("remove_from_group"` — the restrictive steps run first, so a failed attribute call can never leave a hold or a lock unenforced; each step's failure is logged and the others still run
+
+## Monitor API
+
+- `src/hallpass/monitor_api.py:145` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
+- `src/hallpass/monitor_api.py:149` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
+
+## Generations
+
+- `src/hallpass/desired.py:91` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject of every monitored service passes through it on each refresh
+- `src/hallpass/desired.py:71` `UPDATE desired_state SET desired` — the bump: a generation goes up by one only when the recomputed value differs from the stored one, so an unchanged value keeps its generation

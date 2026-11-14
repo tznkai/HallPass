@@ -14,3 +14,18 @@ as the code they cite.
 ## Project layout
 
 - `src/hallmonitor/__init__.py:3` `"""Hallmonitor:` — the package docstring names the project's role
+
+## Reconcile decisions
+
+- `src/hallmonitor/reconcile.py:59` `if observed.state in NEVER_APPLIED` — the branch that never applies: an observation of `unsupported`, `banned_external` or `error` is reported as it is, so a ban that hallmonitor did not place is never lifted
+- `src/hallmonitor/reconcile.py:62` `result = await adapter.apply(subject, subject.desired)` — the only apply call in a cycle, reached only when the observation differs from the desired value
+
+## Fluxer never bans
+
+- `src/hallmonitor/adapters/fluxer.py:146` `return Observed("banned_external")` — a disabled Fluxer account is reported and left alone whatever the desired value, because hallmonitor places no bans and lifts none
+- `src/hallmonitor/adapters/fluxer.py:157` `await self._send("DELETE"` — the adapter's only mutating call: it ends the person's sessions, and no ban, enforcement or flags route is ever reached
+
+## Adapter registry
+
+- `src/hallmonitor/adapters/registry.py:23` `ADAPTERS: dict[str, AdapterPlugin] = {` — the one map from adapter name to plugin; an adapter name that is not in this map builds no adapter
+- `src/hallmonitor/adapters/registry.py:29` `def build_adapter(name: str, ctx: AdapterContext)` — the single entry point; a plugin that returns None leaves its service without an adapter, so every subject of that service is reported as `no_adapter`

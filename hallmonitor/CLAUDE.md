@@ -35,6 +35,13 @@ CI runs exactly these three checks.
 - Monitor API types are duplicated, never shared. Each project keeps its own copy of any type that crosses the
   boundary.
 
+## Monitor API contract
+
+`tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example
+of the monitor API bodies. It is byte-identical in hallmonitor and hallpass. A change to it must land in both projects
+in the same commit, together with the matching change to each project's wire types, so the two copies never drift.
+`tests/test_contract.py` reads it here, and hallpass's `tests/test_monitor_api.py` reads its copy.
+
 ## Logging
 
 Log only through `log_event`, with ids, event types and outcomes. Never log names, contacts, addresses, hosts,

@@ -52,6 +52,8 @@ TOPICS = [
     "Hold permissions",
     "Outbox",
     "Authentik sync",
+    "Monitor API",
+    "Generations",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.

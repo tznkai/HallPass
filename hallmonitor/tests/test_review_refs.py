@@ -37,6 +37,9 @@ MIN_ANCHOR = 4
 
 TOPICS = [
     "Project layout",
+    "Reconcile decisions",
+    "Fluxer never bans",
+    "Adapter registry",
 ]
 
 # Prose sections state findings in words and cite no code. Every other topic must hold a reference.
