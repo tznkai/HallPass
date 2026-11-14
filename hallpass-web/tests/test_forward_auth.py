@@ -316,18 +316,25 @@ async def test_forward_auth_logs_leave_out_the_token_the_uri_the_host_and_the_un
 
 # AC5.5: a person locked after sign-in ------------------------------------------------------------------------------
 
-async def test_a_person_locked_after_sign_in_gets_403_on_the_same_browser_with_no_redirect(env: Env):
+async def test_a_person_locked_after_sign_in_gets_403_on_the_same_browser_with_no_redirect(env: Env, caplog):
     await publish_terms(env)
     person, browser = await signed_in_person(env, account_type="adult")
     calendar = await make_service(env.db, "calendar")
     await grant_type(env, calendar, "adult", person)
     assert (await check(browser, "calendar")).status_code == 200
     await env.db.run(lambda c: registry.set_locked(c, person.id, True))
+    caplog.set_level(logging.INFO)
+    caplog.clear()
 
     response = await check(browser, "calendar")
 
     assert response.status_code == 403
     assert "location" not in response.headers
+    # The lock check in forward auth, not the general access check, is what refuses here: the reason is "locked".
+    events = [record for record in caplog.records if record.getMessage() == "forward_auth"]
+    last = getattr(events[-1], FIELDS_ATTR)
+    assert last["outcome"] == "deny"
+    assert last["reason"] == "locked"
 
 
 # AC5.5 with the login route: a hostile forwarded host is not kept as the place to return to ------------------------
