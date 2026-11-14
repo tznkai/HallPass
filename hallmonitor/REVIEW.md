@@ -17,8 +17,8 @@ as the code they cite.
 
 ## Reconcile decisions
 
-- `src/hallmonitor/reconcile.py:72` `if observed.state in NEVER_APPLIED` — the branch that never applies: an observation of `unsupported`, `banned_external` or `error` is reported as it is, so a ban that hallmonitor did not place is never lifted
-- `src/hallmonitor/reconcile.py:75` `result = await adapter.apply(subject, subject.desired)` — the only apply call in a cycle, reached only when the observation differs from the desired value
+- `src/hallmonitor/reconcile.py:73` `if observed.state in NEVER_APPLIED` — the branch that never applies: an observation of `unsupported`, `banned_external` or `error` is reported as it is, so a ban that hallmonitor did not place is never lifted
+- `src/hallmonitor/reconcile.py:76` `result = await adapter.apply(subject, subject.desired)` — the only apply call in a cycle, reached only when the observation differs from the desired value
 - `src/hallmonitor/adapters/fluxer.py:161` `if error.reason in SERVICE_WIDE_REASONS` — the per-subject containment in Fluxer's observe: an account's `http` or `unexpected` failure is that subject's error, and only `auth` or `unreachable` fail every Fluxer subject
 
 ## Fluxer never bans

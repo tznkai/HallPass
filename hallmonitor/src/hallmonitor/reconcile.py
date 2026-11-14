@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -22,7 +23,7 @@ from hallmonitor.adapters.base import Adapter, AdapterError, Observed
 from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient, MonitorError
-from hallmonitor.config import Config
+from hallmonitor.config import LOOPBACK_HOSTS, Config
 from hallmonitor.contract import OBSERVED, Report, ServiceDesired, Subject
 from hallmonitor.db import Database
 from hallmonitor.logs import log_event, setup_logging
@@ -167,9 +168,18 @@ class AdapterCache:
         return adapter
 
 
+def warn_if_insecure_transport(hallpass_url: str) -> None:
+    """Warns once at startup when the bearer token travels over plain http to a host that is not loopback. The URL and
+    the host are never logged; the event and its outcome say what the operator should check."""
+    parts = urlsplit(hallpass_url)
+    if parts.scheme == "http" and parts.hostname not in LOOPBACK_HOSTS:
+        log_event(log, "insecure_transport", outcome="plain_http_non_loopback", level=logging.WARNING)
+
+
 async def run(config: Config, *, clock: Callable[[], datetime] = _utc_now) -> None:
     """The loop: a cycle, then a wait of the configured interval. A cycle that raises is logged and the loop goes on."""
     setup_logging(config.log_level, config.secrets())
+    warn_if_insecure_transport(config.hallpass_url)
     db = Database.open(config.data_dir / "hallmonitor.db")
     http = httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS)
     client = MonitorClient(config.hallpass_url, config.hallpass_token)

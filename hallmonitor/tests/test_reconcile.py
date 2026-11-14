@@ -21,7 +21,7 @@ from hallmonitor.config import Config
 from hallmonitor.contract import ServiceDesired, Subject
 from hallmonitor.db import Database
 from hallmonitor.logs import JsonFormatter
-from hallmonitor.reconcile import AdapterCache, CycleResult, cycle
+from hallmonitor.reconcile import AdapterCache, CycleResult, cycle, warn_if_insecure_transport
 from tests.fake_adapter import ListAdapter
 from tests.fake_hallpass import TOKEN, FakeHallpassState, make_transport
 
@@ -305,6 +305,26 @@ async def test_adapter_cache_builds_once_and_rebuilds_when_the_name_changes(data
         assert cache.for_service(ServiceDesired(slug="abiotic", adapter="manual", subjects=())) is first
 
         assert cache.for_service(ServiceDesired(slug="abiotic", adapter="no-such", subjects=())) is None
+
+
+# Plain http to a remote host is logged once; https and loopback are not --------------------------------
+
+@pytest.mark.parametrize("url", ["http://hallpass.invalid", "http://hallpass.invalid:8080/base"])
+def test_plain_http_to_a_remote_host_logs_one_warning_and_no_host(url: str, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        warn_if_insecure_transport(url)
+    events = [json.loads(JsonFormatter().format(record)) for record in caplog.records]
+    assert [event["event"] for event in events] == ["insecure_transport"]
+    assert events[0]["level"] == "WARNING"
+    assert events[0]["outcome"] == "plain_http_non_loopback"
+    assert "hallpass.invalid" not in json.dumps(events)
+
+
+@pytest.mark.parametrize("url", ["https://hallpass.invalid", "http://127.0.0.1:8080", "http://[::1]:8080"])
+def test_https_or_loopback_logs_nothing(url: str, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        warn_if_insecure_transport(url)
+    assert caplog.records == []
 
 
 async def test_adapter_cache_gives_each_slug_its_own_adapter(database: Database) -> None:
