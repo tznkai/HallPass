@@ -26,6 +26,7 @@ class FakeHallpassState:
     unmanaged: list[dict[str, Any]] = field(default_factory=list)  # every received unmanaged entry, in order
     token: str = TOKEN
     fail_desired: bool = False                                     # True makes the desired route unreachable
+    fail_reports: bool = False                                     # True makes the reports route answer 500
 
 
 def make_transport(state: FakeHallpassState) -> httpx.MockTransport:
@@ -37,6 +38,8 @@ def make_transport(state: FakeHallpassState) -> httpx.MockTransport:
                 raise httpx.ConnectError("connection refused", request=request)
             return httpx.Response(200, json={"services": state.services})
         if request.method == "POST" and request.url.path == REPORTS_PATH:
+            if state.fail_reports:
+                return httpx.Response(500, json={"detail": "internal"})
             body = json.loads(request.content)
             state.reports.extend(body["reports"])
             state.unmanaged.extend(body["unmanaged"])
