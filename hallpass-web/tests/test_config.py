@@ -204,6 +204,29 @@ def test_bad_monitor_bind_is_refused_and_named() -> None:
         Config.from_env({**GOOD_ENV, "HALLPASS_MONITOR_BIND": "no-port-here"})
 
 
+@pytest.mark.parametrize(("public", "monitor"), [
+    pytest.param("127.0.0.1:9090", "127.0.0.1:9090", id="same-address"),
+    pytest.param("0.0.0.0:9090", "127.0.0.1:9090", id="public-wildcard"),
+    pytest.param("127.0.0.1:9090", "[::]:9090", id="monitor-wildcard"),
+    pytest.param("localhost:9090", "127.0.0.1:9090", id="localhost-is-loopback"),
+])
+def test_monitor_bind_may_not_share_the_public_port_on_an_overlapping_address(public: str, monitor: str) -> None:
+    with pytest.raises(ConfigError, match="HALLPASS_MONITOR_BIND") as refused:
+        Config.from_env({**GOOD_ENV, "HALLPASS_BIND": public, "HALLPASS_MONITOR_BIND": monitor})
+    assert "9090" not in str(refused.value)
+
+
+@pytest.mark.parametrize(("public", "monitor"), [
+    pytest.param("127.0.0.1:9090", "127.0.0.1:9091", id="another-port"),
+    pytest.param("127.0.0.1:9090", "[::1]:9090", id="another-address-on-the-same-port"),
+])
+def test_monitor_bind_on_another_port_or_a_separate_address_is_accepted(public: str, monitor: str) -> None:
+    config = Config.from_env({**GOOD_ENV, "HALLPASS_BIND": public, "HALLPASS_MONITOR_BIND": monitor})
+    assert (config.bind_host, config.bind_port) == ("127.0.0.1", 9090)
+    monitor_host, _, monitor_port = monitor.rpartition(":")
+    assert (config.monitor_host, config.monitor_port) == (monitor_host.strip("[]"), int(monitor_port))
+
+
 def test_short_session_secret_is_refused_without_echoing_it() -> None:
     short = "too-short-secret"
     with pytest.raises(ConfigError, match="HALLPASS_SESSION_SECRET") as info:

@@ -88,6 +88,18 @@ def _bind(env: Mapping[str, str], name: str, default: str = "127.0.0.1:8080") ->
     return host, int(port)
 
 
+WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
+_SAME_ADDRESS = {"localhost": "127.0.0.1"}   # the names that resolve to the same loopback address
+
+
+def _overlapping(first: str, second: str) -> bool:
+    """Whether two listeners on the same port would collide: a wildcard address takes every address, and otherwise the
+    two addresses must be the same once `localhost` is read as 127.0.0.1."""
+    if first in WILDCARD_HOSTS or second in WILDCARD_HOSTS:
+        return True
+    return _SAME_ADDRESS.get(first, first) == _SAME_ADDRESS.get(second, second)
+
+
 def _port(env: Mapping[str, str], name: str, default: str) -> int:
     raw = _opt(env, name) or default
     if not _PORT.fullmatch(raw) or int(raw) > 65535:
@@ -210,6 +222,9 @@ class Config:
         if len(monitor_token) < MIN_MONITOR_TOKEN_LENGTH:
             raise ConfigError(f"HALLPASS_MONITOR_TOKEN must be at least {MIN_MONITOR_TOKEN_LENGTH} characters")
         monitor_host, monitor_port = _bind(env, "HALLPASS_MONITOR_BIND", "127.0.0.1:8081")
+        if monitor_port == bind_port and _overlapping(bind_host, monitor_host):
+            raise ConfigError("HALLPASS_MONITOR_BIND must use a different port from HALLPASS_BIND, or an address "
+                              "that does not overlap it")
         return cls(
             public_url=public_url,
             session_secret=session_secret,
