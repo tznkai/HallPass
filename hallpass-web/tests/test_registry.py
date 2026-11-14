@@ -15,6 +15,7 @@ import pytest
 from hallpass import registry, text
 from hallpass.db import Database
 from hallpass.registry import LinkRefused, NoSuchPerson
+from tests.helpers import make_service
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 # Built from parts so no tracked file holds a 15+ digit run. A SteamID64 shape, not a real account.
@@ -203,6 +204,8 @@ async def test_delete_group_removes_it_from_the_list(db: Database) -> None:
 
 async def test_identities_of_all_four_kinds_then_remove_one(db: Database) -> None:
     person = await make(db, display_name="Player", account_type="child")
+    for slug in ("fluxer", "minecraft", "minecraft-bedrock", "steam"):
+        await make_service(db, slug)
 
     def add_all(c: sqlite3.Connection) -> list[int]:
         return [
@@ -224,13 +227,22 @@ async def test_identities_of_all_four_kinds_then_remove_one(db: Database) -> Non
 async def test_duplicate_identity_for_same_service_kind_value_raises_integrity_error(db: Database) -> None:
     first = await make(db, display_name="First", account_type="child")
     second = await make(db, display_name="Second", account_type="child")
+    await make_service(db, "minecraft")
     await db.run(lambda c: registry.add_identity(c, first.id, "minecraft", "java_name", "kidplayer"))
     with pytest.raises(sqlite3.IntegrityError):
         await db.run(lambda c: registry.add_identity(c, second.id, "minecraft", "java_name", "kidplayer"))
 
 
+async def test_identity_for_an_unknown_service_is_refused_and_stores_nothing(db: Database) -> None:
+    person = await make(db, account_type="child")
+    with pytest.raises(ValueError, match="unknown service"):
+        await db.run(lambda c: registry.add_identity(c, person.id, "fluxer", "fluxer_user_id", "1001"))
+    assert await db.run(lambda c: registry.identities_of(c, person.id)) == []
+
+
 async def test_non_digit_steam_id_is_refused(db: Database) -> None:
     person = await make(db, account_type="child")
+    await make_service(db, "steam")
     with pytest.raises(ValueError, match="steam_id must be digits"):
         await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", "not-digits"))
     assert await db.run(lambda c: registry.identities_of(c, person.id)) == []

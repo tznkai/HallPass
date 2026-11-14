@@ -20,6 +20,8 @@ NOT_FOUND = "That page does not exist."
 INVALID_INPUT = "Check the values and try again."
 IDENTITY_TAKEN = "That identity is already recorded for this service."
 GROUP_TAKEN = "A group with that name already exists."
+ENTITLEMENT_DENY_NOT_PERSON = ("A deny applies only to one person. For an account type or a group, "
+                               "remove the grant instead.")
 AUTHENTIK_NOT_UPDATED = "The change is saved in hallpass, but Authentik could not be updated yet."
 INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."
 TERMS_NOT_PUBLISHED = "No terms have been published yet. Hallpass cannot be used until the administrator publishes them."

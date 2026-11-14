@@ -16,7 +16,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 
-from hallpass import grants, registry, terms
+from hallpass import grants, registry, services, terms
 from hallpass.auth import AuthlibOidc, Identity
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
@@ -183,6 +183,18 @@ async def accept_current(env: Env, client: httpx.AsyncClient | None = None) -> h
     csrf, version = CSRF_FIELD.search(page.text), VERSION_FIELD.search(page.text)
     assert csrf is not None and version is not None, f"terms form missing on /terms ({page.status_code})"
     return await browser.post("/terms/accept", data={"csrf": csrf.group(1), "version_id": version.group(1)})
+
+
+async def make_service(db: Database, slug: str, kind: str = "forward_auth") -> services.Service:
+    """Creates an active service through the store, so identity and entitlement tests can name it. The actor is the
+    admin when one exists, else an unbound publisher, as publish_terms does."""
+    def change(conn) -> services.Service:
+        actor = registry.get_by_uuid(conn, ADMIN_SUB) or registry.create_person(
+            conn, display_name="Publisher", account_type="adult", now=NOW)
+        return services.create_service(conn, slug=slug, name=slug.title(), kind=kind, adapter="manual",
+                                       auto_suspendable=False, url=None, actor_id=actor.id, now=NOW)
+
+    return await db.run(change)
 
 
 async def accept_for(env: Env, person_id: int) -> None:

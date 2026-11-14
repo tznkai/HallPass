@@ -32,7 +32,7 @@ as the code they cite.
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:336` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:338` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 

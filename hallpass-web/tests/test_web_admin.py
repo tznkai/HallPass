@@ -14,7 +14,7 @@ import pytest
 
 from hallpass import registry, text
 from tests.fake_authentik import InvitationUsed, add_user, enrol
-from tests.helpers import BASE_URL, Env, admin_client, api_routes, form, sign_in, signed_in_person
+from tests.helpers import BASE_URL, Env, admin_client, api_routes, form, make_service, sign_in, signed_in_person
 
 OTHER_SUB = "00000000-0000-4000-8000-0000000000c2"
 INVITE_MARK = "/if/flow/invite/?itoken="
@@ -368,6 +368,8 @@ async def test_a_duplicate_group_name_is_refused(env: Env):
 async def test_the_admin_records_and_removes_external_identities(env: Env):
     await admin_client(env)
     person_id = await create_person(env, "Kid", account_type="child")
+    for slug in ("fluxer", "minecraft", "bedrock", "steam"):
+        await make_service(env.db, slug)
     entries = [("fluxer", "fluxer_user_id", "1001"), ("minecraft", "java_name", "BuilderSeven"),
                ("bedrock", "bedrock_gamertag", "GamerOne"), ("steam", "steam_id", "10010")]
     for slug, kind, value in entries:
@@ -388,6 +390,7 @@ async def test_the_admin_records_and_removes_external_identities(env: Env):
 async def test_a_duplicate_identity_is_refused(env: Env):
     await admin_client(env)
     person_id = await create_person(env, "Kid", account_type="child")
+    await make_service(env.db, "fluxer")
     assert (await post(env, f"/admin/people/{person_id}/identities", service_slug="fluxer",
                        kind="fluxer_user_id", value="1001")).status_code == 303
     response = await post(env, f"/admin/people/{person_id}/identities", service_slug="fluxer",

@@ -305,6 +305,8 @@ def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, ki
     clean = (value or "").strip()
     if not slug or not clean:
         raise ValueError("service and value are required")
+    if conn.execute("SELECT 1 FROM service WHERE slug = ?", (slug,)).fetchone() is None:
+        raise ValueError("unknown service")
     if kind == "steam_id" and not _DIGITS.fullmatch(clean):
         raise ValueError("steam_id must be digits")
     return conn.execute(
