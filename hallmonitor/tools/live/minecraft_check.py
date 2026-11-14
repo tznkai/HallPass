@@ -25,6 +25,10 @@ PACKET_RESPONSE = 0
 PACKET_COMMAND = 2
 PACKET_AUTH = 3
 PACKET_SENTINEL = 200  # an invalid type; a Minecraft server answers it with "Unknown request c8"
+MAX_COMMAND_BYTES = 1446  # the most a client may send in one command packet
+MIN_PACKET_LENGTH = 10  # request id, type and two trailing nulls
+# The largest reply: a server splits its output per 4096 characters, and a character is at most 4 UTF-8 bytes.
+MAX_PACKET_LENGTH = 4096 * 4 + 10
 CONNECT_TIMEOUT = 5.0
 REMOVE_WAIT_SECONDS = 5
 KICK_MESSAGE = "hallmonitor test"
@@ -60,10 +64,14 @@ class RconLink:
                 return
 
     def command(self, cmd: str) -> str:
+        if len(cmd.encode("utf-8")) > MAX_COMMAND_BYTES:
+            raise LinkError("overlong")
         req_id = self._next_id
         self._next_id += 2
         self._send(req_id, PACKET_COMMAND, cmd)
-        self._send(req_id + 1, PACKET_SENTINEL, "")
+        # The sentinel goes out after the first response packet, never in the same read as the command: a vanilla
+        # server may drop the connection on that, as the adapter's RCON client also avoids.
+        sentinel_sent = False
         parts: list[bytes] = []
         while True:
             got_id, ptype, body = self._recv()
@@ -71,6 +79,9 @@ class RconLink:
                 break
             if got_id == req_id and ptype == PACKET_RESPONSE:
                 parts.append(body)
+                if not sentinel_sent:
+                    self._send(req_id + 1, PACKET_SENTINEL, "")
+                    sentinel_sent = True
         return b"".join(parts).decode("utf-8", "replace")
 
     def close(self) -> None:
@@ -82,6 +93,8 @@ class RconLink:
 
     def _recv(self) -> tuple[int, int, bytes]:
         (length,) = struct.unpack("<i", self._recv_exact(4))
+        if not MIN_PACKET_LENGTH <= length <= MAX_PACKET_LENGTH:
+            raise LinkError("protocol")
         req_id, ptype = struct.unpack("<ii", self._recv_exact(8))
         rest = self._recv_exact(length - 8)  # body, then two null bytes
         return req_id, ptype, rest[:-2]
