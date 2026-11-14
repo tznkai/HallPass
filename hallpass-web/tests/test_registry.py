@@ -20,7 +20,7 @@ from tests.helpers import make_service
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 # Built from parts so no tracked file holds a 15+ digit run. A SteamID64 shape, not a real account.
-STEAM_ID = "".join(["7656", "1198", "0000", "0001"])
+STEAM_ID = str(registry.STEAM64_BASE + 1001)  # a canonical SteamID64 built from the base, never written out
 CHILD_UUID = "00000000-0000-4000-8000-0000000000c1"
 
 
@@ -247,6 +247,32 @@ async def test_non_digit_steam_id_is_refused(db: Database) -> None:
     with pytest.raises(ValueError, match="steam_id must be digits"):
         await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", "not-digits"))
     assert await db.run(lambda c: registry.identities_of(c, person.id)) == []
+
+
+@pytest.mark.parametrize("value", [
+    "0" + STEAM_ID,                       # a leading zero: the game never matches this form
+    "00" + STEAM_ID,
+    str(registry.STEAM64_BASE - 1),       # one below the individual range
+    str(registry.STEAM64_LIMIT),          # one past the individual range
+    "9" * 25,                             # too long to be an id
+    "1" * 5000,                           # far too long, and refused without converting it
+])
+async def test_a_non_canonical_steam_id_is_refused_and_stores_nothing(db: Database, value: str) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    with pytest.raises(ValueError, match="steam_id must be a SteamID64"):
+        await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", value))
+    assert await db.run(lambda c: registry.identities_of(c, person.id)) == []
+
+
+@pytest.mark.parametrize("offset", [0, (1 << 32) - 1])
+async def test_steam_ids_at_both_ends_of_the_individual_range_are_stored(db: Database, offset: int) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    value = str(registry.STEAM64_BASE + offset)
+    await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", value))
+    stored = await db.run(lambda c: registry.identities_of(c, person.id))
+    assert [(i.kind, i.value) for i in stored] == [("steam_id", value)]
 
 
 async def test_unknown_identity_kind_is_refused(db: Database) -> None:

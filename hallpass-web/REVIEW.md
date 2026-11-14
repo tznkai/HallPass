@@ -18,7 +18,7 @@ as the code they cite.
 ## Enrollment binding
 
 - `src/hallpass/auth.py:219` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
-- `src/hallpass/registry.py:196` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
+- `src/hallpass/registry.py:201` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
@@ -33,7 +33,7 @@ as the code they cite.
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:359` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:376` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 

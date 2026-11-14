@@ -27,7 +27,7 @@ from tests.test_web_family import family
 
 TOKEN_IN_URL = re.compile(r"token=([A-Za-z0-9_-]+)")
 FEED_URL = "https://feeds.hallpass.test/feed.ics"
-STEAM_ID = "".join(["7656", "1190", "00001"])   # a SteamID64 built from parts; the store wants digits
+STEAM_ID = str(registry.STEAM64_BASE + 1001)   # a canonical SteamID64 built from the base; the store wants one
 
 
 async def create_service(env: Env, slug: str, kind: str, *, actor: Person, auto: bool = False,

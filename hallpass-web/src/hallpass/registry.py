@@ -21,6 +21,11 @@ from hallpass import display_names, text
 ACCOUNT_TYPES = ("adult", "parent", "child")
 IDENTITY_KINDS = ("fluxer_user_id", "java_name", "bedrock_gamertag", "steam_id")
 _DIGITS = re.compile(r"[0-9]+")
+# The SteamID64 base: universe public (1 << 56), account type individual (1 << 52), instance 1 (1 << 32). The individual
+# account range is the base plus a 32-bit account number, so its limit is exclusive. Computed, never written out.
+STEAM64_BASE = (1 << 56) | (1 << 52) | (1 << 32)
+STEAM64_LIMIT = STEAM64_BASE + (1 << 32)
+MAX_STEAM64_DIGITS = 20  # a 64-bit integer has at most 20 decimal digits
 # A Minecraft name reaches a console command in hallmonitor, so it must match in full. A selector such as @a is refused.
 # A Bedrock gamertag uses the Java class for now: spaces stay refused until the live check shows how Floodgate passes them.
 JAVA_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
@@ -315,6 +320,15 @@ def groups_of(conn: sqlite3.Connection, person_id: int) -> list[Group]:
 
 # External identities ----------------------------------------------------------------------------------
 
+def _canonical_steam64(value: str) -> bool:
+    """True for a SteamID64 in the individual range, written without a leading zero. Anything else, including a value too
+    long to be an id, is False and never raises."""
+    if len(value) > MAX_STEAM64_DIGITS or _DIGITS.fullmatch(value) is None:
+        return False
+    number = int(value)
+    return str(number) == value and STEAM64_BASE <= number < STEAM64_LIMIT
+
+
 def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, kind: str, value: str) -> int:
     if kind not in IDENTITY_KINDS:
         raise ValueError("unknown identity kind")
@@ -324,8 +338,11 @@ def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, ki
         raise ValueError("service and value are required")
     if conn.execute("SELECT 1 FROM service WHERE slug = ?", (slug,)).fetchone() is None:
         raise ValueError("unknown service")
-    if kind == "steam_id" and not _DIGITS.fullmatch(clean):
-        raise ValueError("steam_id must be digits")
+    if kind == "steam_id":
+        if not _DIGITS.fullmatch(clean):
+            raise ValueError("steam_id must be digits")
+        if not _canonical_steam64(clean):
+            raise ValueError("steam_id must be a SteamID64 in the individual range, without a leading zero")
     if kind == "java_name" and not JAVA_NAME.fullmatch(clean):
         raise ValueError("java_name must be 1 to 16 letters, digits or underscores")
     if kind == "bedrock_gamertag" and not BEDROCK_GAMERTAG.fullmatch(clean):

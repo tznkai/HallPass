@@ -373,7 +373,7 @@ async def test_the_admin_records_and_removes_external_identities(env: Env):
     for slug in ("fluxer", "minecraft", "bedrock", "steam"):
         await make_service(env.db, slug)
     entries = [("fluxer", "fluxer_user_id", "1001"), ("minecraft", "java_name", "BuilderSeven"),
-               ("bedrock", "bedrock_gamertag", "GamerOne"), ("steam", "steam_id", "10010")]
+               ("bedrock", "bedrock_gamertag", "GamerOne"), ("steam", "steam_id", str(registry.STEAM64_BASE + 1001))]
     for slug, kind, value in entries:
         response = await post(env, f"/admin/people/{person_id}/identities", service_slug=slug, kind=kind, value=value)
         assert response.status_code == 303
@@ -397,6 +397,17 @@ async def test_a_minecraft_identity_outside_the_pattern_is_refused_and_stores_no
     await make_service(env.db, "minecraft")
     response = await post(env, f"/admin/people/{person_id}/identities", service_slug="minecraft", kind=kind,
                           value=value)
+    assert response.status_code == 400
+    assert text.INVALID_INPUT in response.text
+    assert await env.db.run(lambda c: registry.identities_of(c, person_id)) == []
+
+
+async def test_a_non_canonical_steam_id_is_refused_by_the_admin_route_and_stores_nothing(env: Env):
+    await admin_client(env)
+    person_id = await create_person(env, "Kid", account_type="child")
+    await make_service(env.db, "steam")
+    response = await post(env, f"/admin/people/{person_id}/identities", service_slug="steam", kind="steam_id",
+                          value="0" + str(registry.STEAM64_BASE + 1001))
     assert response.status_code == 400
     assert text.INVALID_INPUT in response.text
     assert await env.db.run(lambda c: registry.identities_of(c, person_id)) == []
