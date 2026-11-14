@@ -85,9 +85,11 @@ class RconClient:
         cmd_id = self._take_id()
         sentinel_id = self._take_id()
         await self._send(cmd_id, PACKET_COMMAND, body)
-        if self._dialect == "minecraft":
-            await self._send(sentinel_id, PACKET_MC_SENTINEL, b"")
-        else:
+        # Source keeps its sentinel pipelined: the Source protocol defines the empty-packet sentinel for exactly that.
+        # Minecraft is different. A vanilla server may drop the connection when the command and the sentinel arrive in
+        # one read, so its sentinel goes out only after the first response packet for this command has arrived.
+        sentinel_sent = self._dialect == "source"
+        if sentinel_sent:
             await self._send(sentinel_id, PACKET_RESPONSE, b"")
         parts: list[bytes] = []
         while True:
@@ -99,6 +101,9 @@ class RconClient:
                 continue
             if got_id == cmd_id and ptype == PACKET_RESPONSE:
                 parts.append(data)
+                if not sentinel_sent:
+                    await self._send(sentinel_id, PACKET_MC_SENTINEL, b"")
+                    sentinel_sent = True
         text = b"".join(parts).decode("utf-8", errors="replace")
         return COLOUR_CODE.sub("", text)
 

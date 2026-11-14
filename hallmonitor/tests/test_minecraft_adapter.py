@@ -251,6 +251,15 @@ async def test_a_managed_name_on_its_own_ban_line_is_banned_whatever_the_case() 
     assert outcomes(hallpass) == [("r1", "banned_external", None)]
 
 
+async def test_a_hold_is_applied_against_a_server_that_rejects_pipelined_packets() -> None:
+    state = server_state(whitelist=["Steve"], online={"Steve"}, strict_no_pipeline=True)
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
 # AC11.5: RCON refusing the connection or the password is error, never a partial success -------------------
 
 async def test_a_wrong_rcon_password_reports_auth_for_every_minecraft_subject() -> None:

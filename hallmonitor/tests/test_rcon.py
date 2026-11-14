@@ -4,12 +4,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
+import struct
 
 import pytest
 
 from hallmonitor.rcon import RconClient, RconError
-from tests.fake_rcon import LOOPBACK, FakeRconState, rcon_server
+from tests.fake_rcon import LOOPBACK, PACKET_AUTH, PACKET_COMMAND, PACKET_MC_SENTINEL, FakeRconState, rcon_server
 
 PASSWORD = "test-pass"
 DIALECTS = ["minecraft", "source"]
@@ -98,3 +100,42 @@ async def test_command_at_the_limit_is_sent():
 
 def test_repr_never_shows_the_password():
     assert PASSWORD not in repr(RconClient(LOOPBACK, 1, PASSWORD))
+
+
+# Pipelining: a Minecraft server may drop a connection that receives the sentinel in the same read as the command ----
+
+def raw_packet(req_id: int, ptype: int, body: bytes) -> bytes:
+    payload = struct.pack("<ii", req_id, ptype) + body + b"\x00\x00"
+    return struct.pack("<i", len(payload)) + payload
+
+
+async def test_the_strict_fake_closes_on_a_pipelined_command_and_sentinel() -> None:
+    """The fake is checked against a raw pipelining client: the command and the sentinel go out together, and the
+    fake must close the connection without answering."""
+    state = FakeRconState(strict_no_pipeline=True)
+    async with rcon_server(state) as port:
+        reader, writer = await asyncio.open_connection(LOOPBACK, port)
+        try:
+            writer.write(raw_packet(1, PACKET_AUTH, PASSWORD.encode()))
+            await writer.drain()
+            await reader.readexactly(14)  # the empty auth reply: a length field and a 10-byte payload
+            writer.write(raw_packet(2, PACKET_COMMAND, b"whitelist list") + raw_packet(3, PACKET_MC_SENTINEL, b""))
+            await writer.drain()
+            leftover = await asyncio.wait_for(reader.read(), 5)
+        finally:
+            writer.close()
+    assert leftover == b""
+    assert state.commands == ["whitelist list"]
+
+
+@pytest.mark.parametrize(("fragment", "text"), [(False, "There are 1 whitelisted player(s): Steve"),
+                                                (True, LONG_TEXT)])
+async def test_the_minecraft_client_passes_a_server_that_rejects_pipelining(fragment: bool, text: str) -> None:
+    state = FakeRconState(strict_no_pipeline=True, fragment=fragment, handler=lambda _state, _cmd: text)
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD) as client:
+            first = await client.command("whitelist list")
+            second = await client.command("whitelist list")
+    assert first == text
+    assert second == text
+    assert state.commands == ["whitelist list", "whitelist list"]

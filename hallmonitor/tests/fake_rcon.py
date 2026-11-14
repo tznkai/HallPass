@@ -23,7 +23,8 @@ PACKET_AUTH = 3
 PACKET_MC_SENTINEL = 200
 MC_SENTINEL_REPLY = "Unknown request c8"
 SOURCE_TERMINATOR = b"\x00\x00\x00\x01"
-FRAGMENT_BYTES = 4096
+FRAGMENT_CHARS = 4096
+PIPELINE_GRACE_SECONDS = 0.05
 UNKNOWN_COMMAND = "Unknown or incomplete command"
 MAX_ONLINE = 20
 
@@ -41,7 +42,11 @@ class FakeRconState:
     commands: list[str] = field(default_factory=list)
     drop_after: int | None = None  # close the connection once this many commands have arrived on it
     drop_on: str | None = None  # close without replying when a command starts with this
-    fragment: bool = False  # split each response into 4096-byte packets
+    fragment: bool = False  # split each response into packets of 4096 characters, each encoded to UTF-8 on its own
+    strict_no_pipeline: bool = False  # close when a packet is already waiting behind a command (minecraft dialect)
+    swallow_sentinel: bool = False  # never answer the end-of-response sentinel
+    silent_auth: bool = False  # never answer the password
+    close_after_first_fragment: bool = False  # send the first response packet, then close the connection
     handler: Handler | None = None
 
 
@@ -132,12 +137,12 @@ def _packet(req_id: int, ptype: int, body: bytes) -> bytes:
     return struct.pack("<i", len(payload)) + payload
 
 
-def _response_packets(state: FakeRconState, req_id: int, text: str) -> bytes:
-    data = text.encode("utf-8")
+def _response_packets(state: FakeRconState, req_id: int, text: str) -> list[bytes]:
+    """One packet, or with `fragment` one packet per 4096 characters, as a Minecraft server splits its output."""
     if not state.fragment:
-        return _packet(req_id, PACKET_RESPONSE, data)
-    chunks = [data[i:i + FRAGMENT_BYTES] for i in range(0, len(data), FRAGMENT_BYTES)] or [b""]
-    return b"".join(_packet(req_id, PACKET_RESPONSE, chunk) for chunk in chunks)
+        return [_packet(req_id, PACKET_RESPONSE, text.encode("utf-8"))]
+    chunks = [text[i:i + FRAGMENT_CHARS] for i in range(0, len(text), FRAGMENT_CHARS)] or [""]
+    return [_packet(req_id, PACKET_RESPONSE, chunk.encode("utf-8")) for chunk in chunks]
 
 
 async def _read_packet(reader: asyncio.StreamReader) -> tuple[int, int, bytes]:
@@ -147,11 +152,20 @@ async def _read_packet(reader: asyncio.StreamReader) -> tuple[int, int, bytes]:
     return req_id, ptype, rest[:-2]
 
 
+async def _packet_waiting(reader: asyncio.StreamReader) -> bool:
+    """True when a packet is already buffered behind the one just read. A pipelining client writes its next packet
+    straight after the command, so a short grace period lets that packet reach the buffer before it is checked."""
+    await asyncio.sleep(PIPELINE_GRACE_SECONDS)
+    return len(reader._buffer) > 0  # noqa: SLF001 - CPython's StreamReader buffer; the fake has no other view of it
+
+
 async def _serve(state: FakeRconState, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     handled = 0
     while True:
         req_id, ptype, body = await _read_packet(reader)
         if ptype == PACKET_AUTH:
+            if state.silent_auth:
+                continue
             if body.decode("utf-8", "replace") == state.password:
                 writer.write(_packet(req_id, PACKET_COMMAND, b""))
             else:
@@ -165,14 +179,23 @@ async def _serve(state: FakeRconState, reader: asyncio.StreamReader, writer: asy
             state.commands.append(cmd)
             if state.drop_on is not None and cmd.startswith(state.drop_on):
                 return
-            writer.write(_response_packets(state, req_id, _dispatch(state, cmd)))
+            if state.strict_no_pipeline and state.dialect == "minecraft" and await _packet_waiting(reader):
+                return  # a second packet arrived before this command was answered: close, as a strict server does
+            packets = _response_packets(state, req_id, _dispatch(state, cmd))
+            if state.close_after_first_fragment and len(packets) > 1:
+                writer.write(packets[0])
+                await writer.drain()
+                return
+            writer.write(b"".join(packets))
             await writer.drain()
         elif ptype == PACKET_MC_SENTINEL and state.dialect == "minecraft":
-            writer.write(_packet(req_id, PACKET_RESPONSE, MC_SENTINEL_REPLY.encode("utf-8")))
-            await writer.drain()
+            if not state.swallow_sentinel:
+                writer.write(_packet(req_id, PACKET_RESPONSE, MC_SENTINEL_REPLY.encode("utf-8")))
+                await writer.drain()
         elif ptype == PACKET_RESPONSE and body == b"" and state.dialect == "source":
-            writer.write(_packet(req_id, PACKET_RESPONSE, b"") + _packet(req_id, PACKET_RESPONSE, SOURCE_TERMINATOR))
-            await writer.drain()
+            if not state.swallow_sentinel:
+                writer.write(_packet(req_id, PACKET_RESPONSE, b"") + _packet(req_id, PACKET_RESPONSE, SOURCE_TERMINATOR))
+                await writer.drain()
 
 
 @asynccontextmanager
