@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -74,6 +74,9 @@ async def _decide(adapter: Adapter, slug: str, subject: Subject, observed: Obser
         return _report(slug, subject, observed.state, observed.detail, now)
     try:
         result = await adapter.apply(subject, subject.desired)
+    except AdapterError as error:
+        log_event(log, "apply_failed", service=slug, reason=error.reason, level=logging.WARNING)
+        return _report(slug, subject, "error", error.reason, now)
     except Exception:  # noqa: BLE001 - an adapter bug must not stop the other subjects; it is reported as its class
         log_event(log, "apply_failed", service=slug, level=logging.WARNING)
         return _report(slug, subject, "error", "apply_failed", now)
@@ -96,6 +99,9 @@ async def _service_reports(service: ServiceDesired, adapter: Adapter | None, now
     except Exception:  # noqa: BLE001 - contain an adapter bug to its own service
         reason = "adapter_failed"
     else:
+        if not isinstance(observed, Mapping):   # adapters are duck-typed: a non-mapping fails the service, not the cycle
+            log_event(log, "bad_state", service=service.slug, level=logging.WARNING)   # the value is never logged
+            return [_report(service.slug, subject, "error", "bad_state", now) for subject in subjects]
         reports = [await _decide(adapter, service.slug, subject, observed.get(subject.ref), now)
                    for subject in subjects]
         count = await _count(adapter, service.slug, subjects)

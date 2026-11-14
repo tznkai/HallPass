@@ -180,6 +180,22 @@ async def test_an_exception_during_apply_is_reported_as_apply_failed() -> None:
     assert state.reports == [entry("a", "r1", "error", 1, "apply_failed")]
 
 
+async def test_an_adapter_error_from_apply_keeps_its_reason_in_the_report_and_the_log(
+        caplog: pytest.LogCaptureFixture) -> None:
+    class Unreachable(StubAdapter):
+        async def apply(self, subject: Subject, desired: str) -> Observed:
+            raise AdapterError("unreachable")
+
+    state = FakeHallpassState(services=[service("a", [subject("r1", "Steve", "allowed", 1)])])
+    with caplog.at_level(logging.WARNING):
+        await run_cycle(state, {"a": Unreachable({"r1": Observed("suspended")})})
+    assert state.reports == [entry("a", "r1", "error", 1, "unreachable")]
+    logged = [json.loads(JsonFormatter().format(record)) for record in caplog.records
+              if record.getMessage() == "apply_failed"]
+    assert [(event["service"], event["reason"], event["level"]) for event in logged] == [
+        ("a", "unreachable", "WARNING")]
+
+
 async def test_a_service_with_no_adapter_reports_every_subject_as_error() -> None:
     state = FakeHallpassState(services=[service("a", [subject("r1", "Steve", "allowed", 1)])])
     await run_cycle(state, {})
@@ -245,6 +261,42 @@ async def test_an_unknown_state_from_apply_is_bad_state_and_the_other_services_s
     ])
     await run_cycle(state, {"a": BadApply({"r1": Observed("suspended")}), "b": ListAdapter()})
     assert state.reports == [entry("a", "r1", "error", 2, "bad_state"), entry("b", "r2", "allowed", 3)]
+
+
+class NotAMapping(StubAdapter):
+    """Observes with whatever it was given, so an observe that returns something other than a mapping can be set up."""
+
+    def __init__(self, returned: object) -> None:
+        super().__init__({})
+        self.returned = returned
+
+    async def observe(self, subjects: Sequence[Subject]) -> Any:
+        return self.returned
+
+
+@pytest.mark.parametrize("returned", [["r1"], "allowed", None])
+async def test_an_observe_that_is_not_a_mapping_is_bad_state_for_its_service_only(
+        returned: object, caplog: pytest.LogCaptureFixture) -> None:
+    state = FakeHallpassState(services=[
+        service("a", [subject("r1", "Steve", "allowed", 2), subject("r2", "Ann", "allowed", 2)]),
+        service("b", [subject("r3", "Cy", "allowed", 3)]),
+    ])
+    stub = NotAMapping(returned)
+    with caplog.at_level(logging.WARNING):
+        await run_cycle(state, {"a": stub, "b": ListAdapter()})
+    assert stub.applied == []
+    assert state.reports == [
+        entry("a", "r1", "error", 2, "bad_state"),
+        entry("a", "r2", "error", 2, "bad_state"),
+        entry("b", "r3", "allowed", 3),
+    ]
+    logged = [json.loads(JsonFormatter().format(record)) for record in caplog.records
+              if record.getMessage() == "bad_state"]
+    assert len(logged) == 1
+    assert logged[0]["service"] == "a"
+    assert logged[0]["level"] == "WARNING"
+    assert {key: value for key, value in logged[0].items() if key not in ("ts", "level", "logger", "event")} == {
+        "service": "a"}
 
 
 async def test_a_failing_unmanaged_count_does_not_stop_the_reports() -> None:
