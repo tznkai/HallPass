@@ -68,11 +68,32 @@ feeds.example.invalid {
   `forward_auth` sends its own sub-request to hallpass with the `Cookie` header unchanged, so hallpass
   still sees the session.
 - The slug in `uri` is fixed per site. Each protected site names one service slug, and that slug is the
-  one the admin created on the services page.
+  one the admin created on the services page. A slug is 1 to 64 lower-case letters, digits or hyphens, with
+  no underscores, because hallmonitor reads it from an environment variable name.
 - Feed sites send no session. The feed token travels in the forwarded URI, so `log_skip` keeps the feed
   path out of Caddy's access log.
-- The monitor API listener (added in a later phase) must never be proxied. Only the hallpass web listener
-  and the services themselves appear in a Caddy site.
+- The monitor listener binds `HALLPASS_MONITOR_BIND` (default `127.0.0.1:8081`) and requires
+  `HALLPASS_MONITOR_TOKEN`, a secret of 32 characters or more. hallmonitor's `HALLPASS_MONITOR_TOKEN` must be
+  the same value. The monitor listener must never appear in any Caddy site: only the hallpass web listener
+  and the services themselves do. It answers 403 to any request that carries a forwarding header
+  (`X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `Forwarded` or `Via`). Run hallmonitor on the
+  same host as hallpass, and let it reach the monitor listener over loopback.
+
+## Running
+
+`python -m hallpass` starts both listeners, the public web app on `HALLPASS_BIND` and the monitor API on
+`HALLPASS_MONITOR_BIND`, in one process. The first SIGINT or SIGTERM stops both cleanly, and a second one
+forces them to exit. The exit codes are:
+
+- 0: a clean stop on SIGINT or SIGTERM.
+- 1: any other uncaught error.
+- 2: a bad environment, such as a missing or invalid setting.
+- 3: the database was refused (quarantined or unreadable).
+- 4: a listener failed to start, and the other listener is stopped too.
+
+Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
+by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied
+state in place.
 
 ## Publication
 
