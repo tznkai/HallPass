@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallmonitor
 
-Last verified: 2026-11-13
+Last verified: 2026-11-14
 
 ## Purpose
 
@@ -34,6 +34,32 @@ CI runs exactly these three checks.
 - Hallpass holds no service credentials. Hallmonitor is where they live.
 - Monitor API types are duplicated, never shared. Each project keeps its own copy of any type that crosses the
   boundary.
+
+## Process
+
+`python -m hallmonitor` runs the reconcile loop (`src/hallmonitor/reconcile.py`). Exit 2 for a bad environment, 3
+for a refused database. Each cycle fetches desired state, observes each service, applies only where the observation
+differs from the desired value, and posts reports back. Migrations in `src/hallmonitor/migrations/` follow hallpass's
+rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
+
+## Adapters
+
+- `src/hallmonitor/adapters/registry.py` is the one adapter-name-to-plugin map (`manual`, `fluxer`, `minecraft`,
+  `palworld`, `valheim`, `source_rcon`). Adding an adapter is one module plus one line there. A plugin returns None
+  when its service is unconfigured, and its subjects report `no_adapter`.
+- The protocol is `adapters/base.py`: `observe`, `apply`, `unmanaged_count`, observed states `allowed`, `suspended`,
+  `unsupported`, `banned_external`, `error`. The loop never applies to `unsupported`, `banned_external` or `error`.
+- A failure with a service-wide reason (`auth`, `timeout`, `unreachable`) stops that service's remaining applies; any
+  other failure stays with its subject.
+- **Ban ownership.** Hallmonitor lifts only bans it placed. Every ban it places is recorded in `own.py`
+  (`own_suspension`); a listed ban with no own record is `banned_external`, and restore never unbans, `removeid`s or
+  removes a ban-list line without that record. Fluxer places and lifts no bans at all: its only mutation is ending
+  sessions, and a disabled account is `banned_external`.
+- **Identity allowlists.** Every identity passes an allowlist before any command or file line is built from it:
+  Minecraft Java/Bedrock name patterns and the Floodgate prefix set, and a canonical SteamID64 (`adapters/steam.py`)
+  for Palworld, Valheim and Source. An unsafe value is `bad_identity`. Never widen these without a live check.
+- Valheim edits the ban-list file through `pterodactyl.py`, which has no compare-and-swap (the race is accepted in
+  `REVIEW.md`). Unless `live_reload` is on, a change is `pending_restart` until the server's uptime covers it.
 
 ## Monitor API contract
 
@@ -67,5 +93,9 @@ code updates `REVIEW.md` in the same change.
 
 ## Live work
 
-Live scripts live in `tools/live/`. They are hand-run only, never run by CI. Results are recorded in
-`docs/<name>-notes.md`, with placeholders in place of real hosts and ids.
+Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run
+only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
+ids. Only Fluxer is recorded so far. The Minecraft section lists the adapter's assumptions as pending, and the
+Palworld, Valheim, The Ship and Abiotic Factor sections are still empty. Until a service's check is recorded, that
+adapter's framing and parsing, and the Palworld grace window with its accepted costs (see `REVIEW.md`), are
+unconfirmed.
