@@ -28,7 +28,8 @@ WINDOW = timedelta(hours=24)
 
 async def new_service(env: Env, slug: str, *, auto: bool, publisher: Person) -> services.Service:
     def change(conn) -> services.Service:
-        return services.create_service(conn, slug=slug, name=slug.title(), kind="forward_auth", adapter="manual",
+        return services.create_service(conn, slug=slug, name=slug.title(), kind="forward_auth",
+                                       adapter="minecraft" if auto else "manual",
                                        auto_suspendable=auto, url=None, actor_id=publisher.id, now=NOW)
 
     service = await env.db.run(change)

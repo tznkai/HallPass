@@ -33,7 +33,8 @@ STEAM_ID = str(registry.STEAM64_BASE + 1001)   # a canonical SteamID64 built fro
 async def create_service(env: Env, slug: str, kind: str, *, actor: Person, auto: bool = False,
                          url: str | None = None) -> services.Service:
     return await env.db.run(lambda c: services.create_service(
-        c, slug=slug, name=slug.title(), kind=kind, adapter="manual", auto_suspendable=auto, url=url,
+        c, slug=slug, name=slug.title(), kind=kind, adapter="minecraft" if auto else "manual",
+        auto_suspendable=auto, url=url,
         actor_id=actor.id, now=NOW))
 
 

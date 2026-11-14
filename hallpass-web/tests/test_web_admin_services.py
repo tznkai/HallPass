@@ -17,9 +17,9 @@ from tests.helpers import Env, admin_client, form, signed_in_person
 INVITE = "https://invite.hallpass.test/abc"
 
 
-async def create_service_form(env: Env, slug: str, kind: str, *, auto: bool = False,
-                              url: str = "") -> httpx.Response:
-    fields = {"slug": slug, "name": slug.title(), "kind": kind, "adapter": "", "url": url}
+async def create_service_form(env: Env, slug: str, kind: str, *, auto: bool = False, url: str = "",
+                              adapter: str = "") -> httpx.Response:
+    fields = {"slug": slug, "name": slug.title(), "kind": kind, "adapter": adapter, "url": url}
     if auto:
         fields["auto_suspendable"] = "on"
     data = await form(env, "/admin/services", **fields)
@@ -49,7 +49,7 @@ async def test_the_admin_adds_a_service_of_each_kind_with_the_flag(env: Env, kin
     await admin_client(env)
 
     response = await create_service_form(env, f"svc-{kind.replace('_', '-')}", kind, auto=True,
-                                         url="https://svc.hallpass.test/")
+                                         url="https://svc.hallpass.test/", adapter="minecraft")
 
     assert response.status_code == 303
     service = await service_for(env, f"svc-{kind.replace('_', '-')}")
@@ -93,7 +93,7 @@ async def test_a_hyphenated_slug_is_accepted_and_a_65_character_one_is_refused(e
 
 async def test_a_retired_service_leaves_the_pages_and_forward_auth_refuses_it(env: Env):
     await admin_client(env)
-    await create_service_form(env, "calendar", "forward_auth", auto=True)
+    await create_service_form(env, "calendar", "forward_auth", auto=True, adapter="minecraft")
     calendar = await service_for(env, "calendar")
     person, browser = await signed_in_person(env, account_type="adult")
     await post_as_admin(env, f"/admin/services/{calendar.id}/entitlements", subject="type:adult", effect="grant")
@@ -125,7 +125,7 @@ async def test_the_admin_edits_a_service_but_not_its_slug(env: Env):
     await create_service_form(env, "calendar", "forward_auth")
     calendar = await service_for(env, "calendar")
 
-    edited = await post_as_admin(env, f"/admin/services/{calendar.id}", name="Family calendar", adapter="manual",
+    edited = await post_as_admin(env, f"/admin/services/{calendar.id}", name="Family calendar", adapter="minecraft",
                                  url="https://cal.hallpass.test/", auto_suspendable="on")
 
     assert edited.status_code == 303
@@ -133,6 +133,42 @@ async def test_the_admin_edits_a_service_but_not_its_slug(env: Env):
     assert after.name == "Family calendar" and after.url == "https://cal.hallpass.test/"
     assert after.auto_suspendable is True
     assert after.slug == "calendar"
+
+
+async def test_automatic_suspension_on_the_manual_adapter_is_refused_on_create(env: Env):
+    await admin_client(env)
+
+    explicit = await create_service_form(env, "calendar", "forward_auth", auto=True, adapter="manual")
+    blank = await create_service_form(env, "feeds", "feed", auto=True, adapter="")
+
+    assert explicit.status_code == 400 and text.SERVICE_SUSPEND_NEEDS_ADAPTER in explicit.text
+    assert blank.status_code == 400 and text.SERVICE_SUSPEND_NEEDS_ADAPTER in blank.text
+    assert await env.db.run(services.list_services) == []
+
+
+async def test_automatic_suspension_on_the_manual_adapter_is_refused_on_edit(env: Env):
+    await admin_client(env)
+    await create_service_form(env, "calendar", "forward_auth", adapter="minecraft")
+    calendar = await service_for(env, "calendar")
+
+    refused = await post_as_admin(env, f"/admin/services/{calendar.id}", name="Calendar", adapter="manual",
+                                  url="", auto_suspendable="on")
+
+    assert refused.status_code == 400 and text.SERVICE_SUSPEND_NEEDS_ADAPTER in refused.text
+    after = await service_for(env, "calendar")
+    assert after.adapter == "minecraft" and after.auto_suspendable is False
+
+
+async def test_the_service_form_suggests_the_known_adapter_names_without_enforcing_them(env: Env):
+    await admin_client(env)
+
+    page = (await env.client.get("/admin/services")).text
+
+    assert '<datalist id="adapter-names">' in page
+    assert '<option value="source_rcon"></option>' in page
+    assert 'list="adapter-names"' in page
+    await create_service_form(env, "unknown-game", "game", adapter="not-a-known-adapter")
+    assert await service_for(env, "unknown-game") is not None
 
 
 async def test_an_unknown_service_id_is_not_found(env: Env):

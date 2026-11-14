@@ -34,7 +34,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         {% for kind in service_kinds %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
       </select>
     </label>
-    <label>Adapter <input name="adapter" maxlength="60" placeholder="manual"></label>
+    <label>Adapter <input name="adapter" maxlength="60" placeholder="manual" list="adapter-names"></label>
+    {% include "admin/_adapter_names.html" %}
     <label>Address <input name="url" maxlength="300"></label>
     <label><input type="checkbox" name="auto_suspendable"> Can be suspended automatically</label>
     <button type="submit">Add service</button>

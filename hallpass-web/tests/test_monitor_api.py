@@ -39,7 +39,7 @@ async def publisher(env: Env) -> Person:
         c, display_name="Publisher", account_type="adult", now=NOW))
 
 
-async def service(env: Env, slug: str, *, kind: str, adapter: str = "manual") -> services.Service:
+async def service(env: Env, slug: str, *, kind: str, adapter: str = "minecraft") -> services.Service:
     """A service that adults may use, so their desired value is allowed."""
     actor = await publisher(env)
 

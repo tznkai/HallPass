@@ -75,6 +75,15 @@ def _checked_slug(slug: str) -> str:
     return clean
 
 
+def _checked_adapter(adapter: str, auto_suspendable: bool) -> str:
+    """The stored adapter. A service that hallpass can suspend automatically needs an adapter that hallmonitor runs,
+    and the `manual` adapter is the one that never does, so that pair is refused."""
+    clean = _clean_adapter(adapter)
+    if auto_suspendable and clean == "manual":
+        raise ServiceRefused(text.SERVICE_SUSPEND_NEEDS_ADAPTER)
+    return clean
+
+
 def _clean_url(url: str | None) -> str | None:
     clean = (url or "").strip()
     return clean or None
@@ -102,7 +111,8 @@ def create_service(conn: sqlite3.Connection, *, slug: str, name: str, kind: str,
     cursor = conn.execute(
         "INSERT INTO service (slug, name, kind, adapter, auto_suspendable, url, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (clean_slug, clean_name, kind, _clean_adapter(adapter), int(auto_suspendable), _clean_url(url), _iso(now)),
+        (clean_slug, clean_name, kind, _checked_adapter(adapter, auto_suspendable), int(auto_suspendable),
+         _clean_url(url), _iso(now)),
     )
     log_decision(conn, at=now, actor_kind="admin", actor_person_id=actor_id, target_person_id=None,
                  action="service_created", services=[clean_slug], detail={"kind": kind})
@@ -115,7 +125,8 @@ def update_service(conn: sqlite3.Connection, service_id: int, *, name: str, adap
     current = _required(conn, service_id)
     conn.execute(
         "UPDATE service SET name = ?, adapter = ?, auto_suspendable = ?, url = ? WHERE id = ?",
-        (_clean_name(name), _clean_adapter(adapter), int(auto_suspendable), _clean_url(url), service_id),
+        (_clean_name(name), _checked_adapter(adapter, auto_suspendable), int(auto_suspendable), _clean_url(url),
+         service_id),
     )
     log_decision(conn, at=now, actor_kind="admin", actor_person_id=actor_id, target_person_id=None,
                  action="service_updated", services=[current.slug])

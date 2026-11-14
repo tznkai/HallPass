@@ -652,7 +652,7 @@ async def test_a_further_reversal_while_a_review_is_open_adds_no_second_review(d
 
 async def add_service(w: World, slug: str, *, entitled: bool, retired: bool = False) -> int:
     def change(conn) -> int:
-        service = services.create_service(conn, slug=slug, name=slug.title(), kind="forward_auth", adapter="manual",
+        service = services.create_service(conn, slug=slug, name=slug.title(), kind="forward_auth", adapter="minecraft",
                                           auto_suspendable=True, url=None, actor_id=w.admin, now=NOW)
         if entitled:
             services.add_entitlement(conn, service.id, "type", "child", "grant", actor_id=w.admin, now=NOW)

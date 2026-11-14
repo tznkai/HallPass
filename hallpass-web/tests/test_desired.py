@@ -50,11 +50,11 @@ async def make_person(db: Database, admin: Person, *, name: str, account_type: s
     return await db.run(change)
 
 
-async def make_service(db: Database, admin: Person, *, slug: str, kind: str = "game", adapter: str = "manual",
-                       subject: str = "adult") -> Service:
+async def make_service(db: Database, admin: Person, *, slug: str, kind: str = "game", adapter: str = "minecraft",
+                       subject: str = "adult", auto_suspendable: bool = True) -> Service:
     def change(conn) -> Service:
         service = services.create_service(conn, slug=slug, name=slug.title(), kind=kind, adapter=adapter,
-                                          auto_suspendable=True, url=None, actor_id=admin.id, now=NOW)
+                                          auto_suspendable=auto_suspendable, url=None, actor_id=admin.id, now=NOW)
         services.add_entitlement(conn, service.id, "type", subject, "grant", actor_id=admin.id, now=NOW)
         return service
 
@@ -187,7 +187,7 @@ async def test_a_bound_person_with_a_fluxer_user_id_row_gets_sso_subject_first(d
 
 async def test_an_oidc_service_on_the_manual_adapter_lists_only_people_with_identity_rows(
         db: Database, admin: Person) -> None:
-    await make_service(db, admin, slug="wiki", kind="oidc", adapter="manual")
+    await make_service(db, admin, slug="wiki", kind="oidc", adapter="manual", auto_suspendable=False)
     ann = await make_person(db, admin, name="Ann")
     await bind(db, ann, SSO_SUBJECT)
     bo = await make_person(db, admin, name="Bo")

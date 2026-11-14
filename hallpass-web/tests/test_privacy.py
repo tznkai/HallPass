@@ -60,7 +60,7 @@ def test_the_migrations_define_no_credential_column() -> None:
 async def service(env: Env, admin_id: int, slug: str, kind: str, *, url: str | None = None) -> services.Service:
     """A service the child is entitled to, created through the store."""
     def change(conn) -> services.Service:
-        created = services.create_service(conn, slug=slug, name=slug.title(), kind=kind, adapter="manual",
+        created = services.create_service(conn, slug=slug, name=slug.title(), kind=kind, adapter="minecraft",
                                           auto_suspendable=True, url=url, actor_id=admin_id, now=NOW)
         services.add_entitlement(conn, created.id, "type", "child", "grant", actor_id=admin_id, now=NOW)
         return created

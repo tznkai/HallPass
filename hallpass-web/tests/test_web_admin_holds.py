@@ -36,7 +36,8 @@ async def grant_to_adults(env: Env, service: services.Service, actor: Person) ->
 
 async def create_service(env: Env, slug: str, *, auto: bool, actor: Person) -> services.Service:
     return await env.db.run(lambda c: services.create_service(
-        c, slug=slug, name=slug.title(), kind="forward_auth", adapter="manual", auto_suspendable=auto, url=None,
+        c, slug=slug, name=slug.title(), kind="forward_auth", adapter="minecraft" if auto else "manual",
+        auto_suspendable=auto, url=None,
         actor_id=actor.id, now=NOW))
 
 

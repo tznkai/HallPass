@@ -130,6 +130,34 @@ async def test_slug_in_the_allowed_shape_is_accepted(db: Database, admin_id: int
     assert created.slug == slug
 
 
+@pytest.mark.parametrize("adapter", ["manual", "", "  manual  "])
+async def test_automatic_suspension_on_the_manual_adapter_is_refused(db: Database, admin_id: int,
+                                                                    adapter: str) -> None:
+    with pytest.raises(services.ServiceRefused) as info:
+        await make_service(db, admin_id, slug="calendar", adapter=adapter, auto_suspendable=True)
+    assert str(info.value) == text.SERVICE_SUSPEND_NEEDS_ADAPTER
+    assert await db.run(lambda c: services.list_services(c, include_retired=True)) == []
+
+
+async def test_manual_adapter_without_automatic_suspension_is_allowed(db: Database, admin_id: int) -> None:
+    created = await make_service(db, admin_id, slug="abiotic", adapter="manual", auto_suspendable=False)
+    assert (created.adapter, created.auto_suspendable) == ("manual", False)
+
+
+async def test_an_update_cannot_move_an_automatic_service_to_manual(db: Database, admin_id: int,
+                                                                    calendar: services.Service) -> None:
+    await db.run(lambda c: services.update_service(c, calendar.id, name="Calendar", adapter="minecraft",
+                                                  auto_suspendable=True, url=None, actor_id=admin_id, now=NOW))
+
+    with pytest.raises(services.ServiceRefused) as info:
+        await db.run(lambda c: services.update_service(c, calendar.id, name="Calendar", adapter="manual",
+                                                      auto_suspendable=True, url=None, actor_id=admin_id, now=NOW))
+
+    assert str(info.value) == text.SERVICE_SUSPEND_NEEDS_ADAPTER
+    stored = await db.run(lambda c: services.get(c, calendar.id))
+    assert (stored.adapter, stored.auto_suspendable) == ("minecraft", True)
+
+
 async def test_duplicate_slug_is_refused(db: Database, admin_id: int) -> None:
     await make_service(db, admin_id, slug="calendar")
     with pytest.raises(sqlite3.IntegrityError):
