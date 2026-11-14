@@ -173,12 +173,22 @@ async def test_a_restore_removes_only_that_line_and_keeps_every_other_line(db: D
     assert await record_of(db, OWN_ID) == ("restore", T0)
 
 
-async def test_a_restore_removes_every_line_that_carries_our_id(db: Database) -> None:
-    fake = ptero_state(OWN_ID + "\n" + COMMENT + OWN_ID + "\n")
-    await record_own(db, OWN_ID, "ban", T0)
-    await run(db, valheim_service(subject("r1", "allowed", steam(OWN_ID))), fake, T0)
-    assert OWN_ID not in [line.strip() for line in file_text(fake).splitlines()]
-    assert file_text(fake) == COMMENT
+async def test_a_restore_removes_one_of_two_lines_for_the_id_and_leaves_a_moderators_line_standing(db: Database) -> None:
+    """Our ban and a moderator's ban for the same id are two identical lines. The restore removes one of them, and the
+    line that remains is not ours, so the next cycle reports it as banned_external and removes nothing more."""
+    fake = ptero_state(COMMENT)
+    await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)
+    moderator_line(fake, OWN_ID)
+    await run(db, valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=2)), fake, T0)
+    assert file_text(fake) == COMMENT + OWN_ID + "\n"
+    assert await record_of(db, OWN_ID) == ("restore", T0)
+
+    hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=3))
+    writes_before = len(writes(fake))
+    await run(db, hallpass, fake, T0)
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+    assert len(writes(fake)) == writes_before
+    assert file_text(fake) == COMMENT + OWN_ID + "\n"
 
 
 async def test_a_restore_keeps_a_file_that_has_no_trailing_newline_without_one(db: Database) -> None:

@@ -4,7 +4,7 @@
 is the only mechanism.
 
 A line that is all digits is a SteamID64. Every other line is a comment or a blank, and is kept as it is. A suspension
-appends the id; a restore removes the lines that carry that id. Only a line with our own `ban` record is ours, so a line
+appends the id; a restore removes one line that carries that id. Only a line with our own `ban` record is ours, so a line
 someone else placed is `banned_external` and is never removed.
 
 The server reads the file at start, so unless `live_reload` is on, a change is `pending_restart` until the server's
@@ -66,9 +66,16 @@ def _with_id(text: str, steam_id: str) -> str:
 
 
 def _without_id(text: str, steam_id: str) -> str:
-    """The file with every line that carries the id removed. Splitting on `\\n` and joining back keeps the trailing
+    """The file with one line that carries the id removed: the last such line, since `_with_id` appends at the end.
+    When a moderator has added the same id, the file holds two identical lines, and removing one leaves the other,
+    which is then not ours and is reported banned_external. Splitting on `\\n` and joining back keeps the trailing
     newline, or its absence, and every other line byte for byte."""
-    return "\n".join(part for part in text.split("\n") if part.strip() != steam_id)
+    parts = text.split("\n")
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index].strip() == steam_id:
+            del parts[index]
+            break
+    return "\n".join(parts)
 
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
