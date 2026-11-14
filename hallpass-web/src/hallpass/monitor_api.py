@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 from hallpass import desired, registry, services
 from hallpass.logs import log_event
 from hallpass.registry import _iso
-from hallpass.web.app import AppDeps
+from hallpass.web import app as web_app
 
 logger = logging.getLogger(__name__)
 # A request carrying any of these came through a proxy. The monitor listener is never reached through one.
@@ -136,7 +136,7 @@ def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> 
     return stored, skipped
 
 
-def create_monitor_app(deps: AppDeps) -> FastAPI:
+def create_monitor_app(deps: web_app.AppDeps) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.deps = deps
 
