@@ -11,7 +11,7 @@ from datetime import timedelta
 
 import httpx
 
-from hallpass import desired, holds, registry, services
+from hallpass import desired, holds, registry, services, text
 from hallpass.registry import Person
 from tests.helpers import ADMIN_SUB, MONITOR_TOKEN, NOW, Env, admin_client, make_service, signed_in_person
 
@@ -129,3 +129,58 @@ async def test_an_unsupported_report_on_a_held_abiotic_row_reads_cannot_be_autom
     page = await browser.get("/")
 
     assert f'{REPORT_LINE}cannot be automatically suspended<' in page.text
+
+
+# Pruning on the pages: a pair that stops being a subject shows and counts nothing ----------------------------
+
+ERROR_COUNT = "<td>Minecraft</td><td>1</td>"
+
+
+def unbind_minecraft(env: Env, person: Person):
+    def change(conn) -> None:
+        (identity,) = [found for found in registry.identities_of(conn, person.id) if found.service_slug == "minecraft"]
+        registry.remove_identity(conn, identity.id)
+
+    return env.db.run(change)
+
+
+async def test_a_removed_identity_shows_no_report_line_and_no_error_count(env: Env) -> None:
+    person, browser = await signed_in_person(env)
+    await entitle(env, person, "minecraft", "game")
+    await admin_client(env)
+    await post_report(env, slug="minecraft", ref=person.ref, observed="error", generation=1, detail="unreachable")
+    before_page = await browser.get("/")
+    before_monitor = await env.client.get("/admin/monitor")
+    assert f"{REPORT_LINE}{text.SERVICE_ERROR}<" in before_page.text
+    assert ERROR_COUNT in before_monitor.text
+
+    await unbind_minecraft(env, person)
+
+    after_page = await browser.get("/")
+    after_monitor = await env.client.get("/admin/monitor")
+    assert REPORT_LINE not in after_page.text
+    assert ERROR_COUNT not in after_monitor.text
+
+
+async def test_a_retired_service_is_not_counted_on_the_monitor_page(env: Env) -> None:
+    person, _ = await signed_in_person(env)
+    await entitle(env, person, "minecraft", "game")
+    await admin_client(env)
+    await post_report(env, slug="minecraft", ref=person.ref, observed="error", generation=1, detail="unreachable")
+    assert ERROR_COUNT in (await env.client.get("/admin/monitor")).text
+
+    admin = await env.db.run(lambda c: registry.get_by_uuid(c, ADMIN_SUB))
+    minecraft = await env.db.run(lambda c: services.get_by_slug(c, "minecraft"))
+    await env.db.run(lambda c: services.retire_service(c, minecraft.id, actor_id=admin.id, now=NOW))
+
+    assert ERROR_COUNT not in (await env.client.get("/admin/monitor")).text
+
+
+async def test_a_service_that_becomes_forward_auth_shows_no_report_line(env: Env) -> None:
+    person, browser = await signed_in_person(env)
+    await entitle(env, person, "minecraft", "game")
+    await post_report(env, slug="minecraft", ref=person.ref, observed="error", generation=1, detail="unreachable")
+    assert REPORT_LINE in (await browser.get("/")).text
+    await env.db.run(lambda c: c.execute("UPDATE service SET kind = 'forward_auth' WHERE slug = 'minecraft'"))
+
+    assert REPORT_LINE not in (await browser.get("/")).text

@@ -870,7 +870,9 @@ async def set_conflict_mode(request: Request, person_id: int, admin: Admin,
 
 @router.get("/monitor")
 async def monitor_page(request: Request, admin: Admin) -> Response:
-    health = await _deps(request).db.run(desired.monitor_health)
+    deps = _deps(request)
+    now = deps.clock()
+    health = await deps.db.run(lambda c: desired.monitor_health(c, now))
     return page(request, "admin/monitor.html", viewer=admin, **health)
 
 

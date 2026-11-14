@@ -79,18 +79,43 @@ def monitored_services(conn: sqlite3.Connection) -> list[Service]:
                   key=lambda service: service.slug)
 
 
+_PRUNED_TABLES = ("desired_state", "service_report")
+
+
+def _prune(conn: sqlite3.Connection, subjects: set[tuple[int, int]], monitored_ids: set[int]) -> None:
+    """Deletes the rows that no longer belong: desired and report rows for (person, service) pairs that are not
+    subjects any more, and unmanaged counts for services that are not monitored. A pair that returns starts again at
+    generation 1 with no report, because its old report was deleted with it."""
+    for table in _PRUNED_TABLES:
+        for person_id, service_id in conn.execute(f"SELECT person_id, service_id FROM {table}").fetchall():
+            if (person_id, service_id) not in subjects:
+                conn.execute(f"DELETE FROM {table} WHERE person_id = ? AND service_id = ?", (person_id, service_id))
+    for (service_id,) in conn.execute("SELECT service_id FROM service_unmanaged").fetchall():
+        if service_id not in monitored_ids:
+            conn.execute("DELETE FROM service_unmanaged WHERE service_id = ?", (service_id,))
+
+
 def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
-    """Recomputes and stores the desired state of every subject of every monitored service. Returns the rows ordered by
-    service slug, then person id."""
+    """Recomputes and stores the desired state of every subject of every monitored service, then prunes the rows that
+    no longer belong (see `_prune`). Returns the rows ordered by service slug, then person id.
+
+    Cost: every subject of every monitored service is recomputed on each call, so the work grows with services times
+    people. That is fine at neighbourhood scale. It could later be limited to the person being viewed. Callers run it
+    inside one transaction, so the stored state and the pruning always agree.
+    """
     rows: list[DesiredRow] = []
-    for service in monitored_services(conn):
+    subjects: set[tuple[int, int]] = set()
+    monitored = monitored_services(conn)
+    for service in monitored:
         for person_id, identities in _subjects(conn, service):
             person = registry.get_person(conn, person_id)
             assert person is not None
             value = access.evaluate(conn, person, service).desired
             generation = _store_generation(conn, person_id=person_id, service_id=service.id, value=value, now=now)
+            subjects.add((person_id, service.id))
             rows.append(DesiredRow(person=person, service=service, desired=value, generation=generation,
                                    identities=identities))
+    _prune(conn, subjects, {service.id for service in monitored})
     return rows
 
 
@@ -127,16 +152,22 @@ def report_status(desired_row: tuple[str, int] | None, found: Report | None, man
     return text.STATUS_ALLOWED if desired_value == "allowed" else text.STATUS_SUSPENDED
 
 
-def monitor_health(conn: sqlite3.Connection) -> dict:
+def monitor_health(conn: sqlite3.Connection, now: datetime) -> dict:
     """What the administrator's monitor page shows: the last contact from hallmonitor, the services with a report in
-    error (with how many people), and the unmanaged entries per service."""
+    error (with how many people), and the unmanaged entries per service. It refreshes first, so the page never counts
+    a pair that is no longer a subject. The counts also join on the live pairs and on the monitored services, so a
+    stale report cannot be counted even if a refresh did not prune it."""
+    refresh(conn, now)
+    kinds = ",".join("?" * len(MONITORED_KINDS))
     contact = conn.execute("SELECT last_contact_at FROM monitor_contact WHERE id = 1").fetchone()
     errors = conn.execute(
         "SELECT s.name, COUNT(*) FROM service_report r JOIN service s ON s.id = r.service_id "
-        "WHERE r.observed = 'error' GROUP BY s.id ORDER BY s.name, s.id").fetchall()
+        "JOIN desired_state d ON d.person_id = r.person_id AND d.service_id = r.service_id "
+        f"WHERE r.observed = 'error' AND s.retired = 0 AND s.kind IN ({kinds}) "
+        "GROUP BY s.id ORDER BY s.name, s.id", MONITORED_KINDS).fetchall()
     unmanaged = conn.execute(
         "SELECT s.name, u.count FROM service_unmanaged u JOIN service s ON s.id = u.service_id "
-        "ORDER BY s.name, s.id").fetchall()
+        f"WHERE s.retired = 0 AND s.kind IN ({kinds}) ORDER BY s.name, s.id", MONITORED_KINDS).fetchall()
     return {
         "last_contact_at": None if contact is None else contact[0],
         "errors": [{"name": name, "count": count} for name, count in errors],

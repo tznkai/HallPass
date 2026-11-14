@@ -240,3 +240,96 @@ async def test_desired_for_and_report_for_read_back_the_stored_rows(db: Database
     assert await db.run(lambda c: desired.report_for(c, ann.id, minecraft.id)) is None
     other = await make_service(db, admin, slug="valheim")
     assert await db.run(lambda c: desired.desired_for(c, ann.id, other.id)) is None
+
+
+# Pruning: rows for pairs that stop being subjects ---------------------------------------------------------
+
+async def store_report(db: Database, person: Person, service: services.Service, *, observed: str,
+                       generation: int) -> None:
+    def change(conn) -> None:
+        conn.execute("INSERT INTO service_report (person_id, service_id, observed, detail, generation, reported_at) "
+                     "VALUES (?, ?, ?, NULL, ?, ?)", (person.id, service.id, observed, generation, NOW.isoformat()))
+
+    await db.run(change)
+
+
+async def stored_rows(db: Database, person: Person, service: services.Service) -> tuple[object, object]:
+    return await db.run(lambda c: (desired.desired_for(c, person.id, service.id),
+                                   desired.report_for(c, person.id, service.id)))
+
+
+async def test_a_removed_identity_prunes_its_desired_and_report_rows(db: Database, admin: Person) -> None:
+    minecraft = await make_service(db, admin, slug="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+    await refresh(db)
+    await store_report(db, ann, minecraft, observed="error", generation=1)
+
+    def unbind(conn) -> None:
+        (identity,) = [found for found in registry.identities_of(conn, ann.id) if found.service_slug == "minecraft"]
+        registry.remove_identity(conn, identity.id)
+
+    await db.run(unbind)
+
+    assert await refresh(db, LATER) == []
+    assert await stored_rows(db, ann, minecraft) == (None, None)
+
+
+async def test_a_retired_service_prunes_its_desired_and_report_rows_and_its_unmanaged_count(
+        db: Database, admin: Person) -> None:
+    minecraft = await make_service(db, admin, slug="minecraft")
+    valheim = await make_service(db, admin, slug="valheim")
+    ann = await make_person(db, admin, name="Ann")
+    await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+    await add_identity(db, ann, "valheim", "java_name", "ValheimOne")
+    await refresh(db)
+    await store_report(db, ann, minecraft, observed="error", generation=1)
+    await store_report(db, ann, valheim, observed="allowed", generation=1)
+
+    def count_unmanaged(conn) -> None:
+        for service in (minecraft, valheim):
+            conn.execute("INSERT INTO service_unmanaged (service_id, count, reported_at) VALUES (?, 2, ?)",
+                         (service.id, NOW.isoformat()))
+
+    await db.run(count_unmanaged)
+    await db.run(lambda c: services.retire_service(c, minecraft.id, actor_id=admin.id, now=NOW))
+
+    assert [(row.service.slug, row.person.id) for row in await refresh(db, LATER)] == [("valheim", ann.id)]
+    assert await stored_rows(db, ann, minecraft) == (None, None)
+    assert await db.run(lambda c: c.execute("SELECT service_id FROM service_unmanaged ORDER BY service_id").fetchall()) \
+        == [(valheim.id,)]
+
+
+async def test_a_service_whose_kind_becomes_forward_auth_prunes_its_rows(db: Database, admin: Person) -> None:
+    minecraft = await make_service(db, admin, slug="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+    await refresh(db)
+    await store_report(db, ann, minecraft, observed="error", generation=1)
+
+    await db.run(lambda c: c.execute("UPDATE service SET kind = 'forward_auth' WHERE id = ?", (minecraft.id,)))
+
+    assert await refresh(db, LATER) == []
+    assert await stored_rows(db, ann, minecraft) == (None, None)
+
+
+async def test_a_pair_that_returns_starts_at_generation_one_with_no_old_report(db: Database, admin: Person) -> None:
+    minecraft = await make_service(db, admin, slug="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+    await refresh(db)
+    await store_report(db, ann, minecraft, observed="error", generation=5)
+
+    def unbind(conn) -> None:
+        (identity,) = [found for found in registry.identities_of(conn, ann.id) if found.service_slug == "minecraft"]
+        registry.remove_identity(conn, identity.id)
+
+    await db.run(unbind)
+    await refresh(db, LATER)
+    await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+    rows = await refresh(db, LATER)
+
+    assert generations(rows) == {("minecraft", ann.id): 1}
+    desired_row, found = await stored_rows(db, ann, minecraft)
+    assert (desired_row, found) == (("allowed", 1), None)
+    assert desired.report_status(desired_row, found, False) == text.NOT_YET_CONFIRMED
