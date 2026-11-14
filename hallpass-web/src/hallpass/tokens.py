@@ -34,6 +34,45 @@ class VisibleToken:
     value: str = field(repr=False)
 
 
+@dataclass(frozen=True)
+class AttachedToken:
+    """An attached token as the admin sees it. `value` stays out of repr, as in VisibleToken."""
+    id: int
+    service_id: int
+    person_id: int | None
+    kind: str
+    label: str
+    value: str = field(repr=False)
+    revoked: bool
+
+
+_ATTACHED_COLUMNS = "id, service_id, person_id, kind, label, value, revoked_at IS NOT NULL"
+
+
+def _attached(row: tuple) -> AttachedToken:
+    return AttachedToken(id=row[0], service_id=row[1], person_id=row[2], kind=row[3], label=row[4], value=row[5],
+                         revoked=bool(row[6]))
+
+
+def get_attached(conn: sqlite3.Connection, token_id: int) -> AttachedToken | None:
+    """An attached token by id. Feed tokens are not attached tokens, so they are never returned here."""
+    row = conn.execute(
+        f"SELECT {_ATTACHED_COLUMNS} FROM token WHERE id = ? AND kind IN ('invite_link', 'game_credential', 'api_key')",
+        (token_id,),
+    ).fetchone()
+    return None if row is None else _attached(row)
+
+
+def attached_for(conn: sqlite3.Connection, service_id: int) -> list[AttachedToken]:
+    """The unrevoked attached tokens of one service, for the admin's service page."""
+    rows = conn.execute(
+        f"SELECT {_ATTACHED_COLUMNS} FROM token WHERE service_id = ? AND revoked_at IS NULL "
+        "AND kind IN ('invite_link', 'game_credential', 'api_key') ORDER BY id",
+        (service_id,),
+    ).fetchall()
+    return [_attached(row) for row in rows]
+
+
 def hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 

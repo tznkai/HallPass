@@ -221,6 +221,12 @@ def remove_entitlement(conn: sqlite3.Connection, entitlement_id: int, *, actor_i
     return True
 
 
+def entitlement_service_id(conn: sqlite3.Connection, entitlement_id: int) -> int | None:
+    """The service an entitlement belongs to, or None when there is no such entitlement."""
+    row = conn.execute("SELECT service_id FROM entitlement WHERE id = ?", (entitlement_id,)).fetchone()
+    return None if row is None else row[0]
+
+
 def entitlements_for(conn: sqlite3.Connection, service_id: int) -> list[Entitlement]:
     rows = conn.execute(
         f"SELECT {_ENTITLEMENT_COLUMNS} FROM entitlement WHERE service_id = ? ORDER BY id", (service_id,),

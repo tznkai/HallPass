@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The admin pages: people, invitations, locking, parent links, external identities and groups.
+"""The admin pages: people, invitations, locking, parent links, external identities, groups, terms, and services.
 
 Every route needs an admin (require_admin), and every POST also needs a CSRF token (require_csrf). Each POST writes
 a decision_log row and ends in a 303, so a refresh never repeats it.
@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import registry, terms, text
+from hallpass import registry, services, terms, text, tokens
 from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
 from hallpass.logs import log_event
@@ -162,6 +162,7 @@ def _person_context(conn, person: Person) -> dict:
         "child_choices": [] if is_child else [p for p in others if p.account_type == "child"],
         "identities": registry.identities_of(conn, person.id),
         "identity_kinds": registry.IDENTITY_KINDS,
+        "services": services.list_services(conn),
         "groups": registry.groups_of(conn, person.id),
         "account_types": registry.ACCOUNT_TYPES,
         "no_address_flag": text.NO_FLUXER_ADDRESS_FLAG,
@@ -495,3 +496,223 @@ async def terms_version_page(request: Request, version_id: int, admin: AdminAnyT
     if report is None:
         return message_page(request, text.NOT_FOUND, 404)
     return page(request, "admin/terms_version.html", viewer=admin, **report)
+
+
+# Services ----------------------------------------------------------------------------------------------
+
+def _optional_id(raw: str) -> int | None:
+    clean = raw.strip()
+    if not clean:
+        return None
+    if not clean.isdigit():
+        raise ValueError("person id must be a number")
+    return int(clean)
+
+
+async def _services_page(request: Request, admin: Person, *, status: int = 200, error: str | None = None) -> Response:
+    rows = await _deps(request).db.run(lambda c: services.list_services(c, include_retired=True))
+    return page(request, "admin/services.html", viewer=admin, status_code=status, error=error, services=rows,
+                service_kinds=services.SERVICE_KINDS)
+
+
+@router.get("/services")
+async def services_page(request: Request, admin: Admin) -> Response:
+    return await _services_page(request, admin)
+
+
+@router.post("/services", dependencies=WRITE)
+async def create_service(request: Request, admin: Admin,
+                         slug: Annotated[str, Form()] = "",
+                         name: Annotated[str, Form()] = "",
+                         kind: Annotated[str, Form()] = "",
+                         adapter: Annotated[str, Form()] = "",
+                         url: Annotated[str, Form()] = "",
+                         auto_suspendable: Annotated[str | None, Form()] = None) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int:
+        service = services.create_service(conn, slug=slug, name=name, kind=kind, adapter=adapter,
+                                          auto_suspendable=auto_suspendable is not None, url=url or None,
+                                          actor_id=admin.id, now=now)
+        return service.id
+
+    try:
+        service_id = await deps.db.run(change)
+    except ValueError:
+        return await _services_page(request, admin, status=400, error=text.INVALID_INPUT)
+    except sqlite3.IntegrityError:
+        return await _services_page(request, admin, status=400, error=text.SERVICE_TAKEN)
+    return _to(f"/admin/services/{service_id}")
+
+
+def _service_context(conn, service_id: int) -> dict:
+    service = services.get(conn, service_id)
+    if service is None:
+        raise services.NoSuchService()
+    group_names = {str(group.id): group.name for group in registry.list_groups(conn)}
+    people = registry.list_people(conn)
+    person_names = {str(person.id): person.display_name for person in people}
+    def label(subject_kind: str, subject: str) -> str:
+        if subject_kind == "type":
+            return subject
+        names = group_names if subject_kind == "group" else person_names
+        return names.get(subject, subject)
+
+    entitlements = [{"id": e.id, "subject_kind": e.subject_kind, "effect": e.effect,
+                     "label": label(e.subject_kind, e.subject)}
+                    for e in services.entitlements_for(conn, service_id)]
+    attached = [{"token": t, "person": person_names.get(str(t.person_id), "") if t.person_id else "everyone entitled"}
+                for t in tokens.attached_for(conn, service_id)]
+    subject_choices = ([{"value": f"type:{kind}", "label": f"Type: {kind}"} for kind in registry.ACCOUNT_TYPES]
+                       + [{"value": f"group:{gid}", "label": f"Group: {name}"} for gid, name in group_names.items()]
+                       + [{"value": f"person:{p.id}", "label": f"Person: {p.display_name}"} for p in people])
+    return {"service": service, "entitlements": entitlements, "attached": attached,
+            "subject_choices": subject_choices, "people": people, "attached_kinds": tokens.ATTACHED_KINDS}
+
+
+async def _service_page(request: Request, admin: Person, service_id: int, *, status: int = 200,
+                        error: str | None = None) -> Response:
+    context = await _deps(request).db.run(lambda c: _service_context(c, service_id))
+    return page(request, "admin/service.html", viewer=admin, status_code=status, error=error, **context)
+
+
+@router.get("/services/{service_id}")
+async def service_page(request: Request, service_id: int, admin: Admin) -> Response:
+    return await _service_page(request, admin, service_id)
+
+
+@router.post("/services/{service_id}", dependencies=WRITE)
+async def update_service(request: Request, service_id: int, admin: Admin,
+                         name: Annotated[str, Form()] = "",
+                         adapter: Annotated[str, Form()] = "",
+                         url: Annotated[str, Form()] = "",
+                         auto_suspendable: Annotated[str | None, Form()] = None) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        services.update_service(conn, service_id, name=name, adapter=adapter,
+                                auto_suspendable=auto_suspendable is not None, url=url or None,
+                                actor_id=admin.id, now=now)
+
+    try:
+        await deps.db.run(change)
+    except ValueError:
+        return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
+    return _to(f"/admin/services/{service_id}")
+
+
+async def _set_retired(request: Request, admin: Person, service_id: int, *, retired: bool) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        if retired:
+            services.retire_service(conn, service_id, actor_id=admin.id, now=now)
+        else:
+            services.unretire_service(conn, service_id, actor_id=admin.id, now=now)
+
+    await deps.db.run(change)
+    return _to(f"/admin/services/{service_id}")
+
+
+@router.post("/services/{service_id}/retire", dependencies=WRITE)
+async def retire_service(request: Request, service_id: int, admin: Admin) -> Response:
+    return await _set_retired(request, admin, service_id, retired=True)
+
+
+@router.post("/services/{service_id}/unretire", dependencies=WRITE)
+async def unretire_service(request: Request, service_id: int, admin: Admin) -> Response:
+    return await _set_retired(request, admin, service_id, retired=False)
+
+
+@router.post("/services/{service_id}/entitlements", dependencies=WRITE)
+async def add_service_entitlement(request: Request, service_id: int, admin: Admin,
+                                  subject: Annotated[str, Form()] = "",
+                                  effect: Annotated[str, Form()] = "grant") -> Response:
+    """`subject` is `kind:value` as the form's select offers it: `type:adult`, `group:<id>` or `person:<id>`."""
+    deps = _deps(request)
+    now = deps.clock()
+    kind, _, value = subject.partition(":")
+
+    def change(conn) -> None:
+        if kind not in services.SUBJECT_KINDS or not value:
+            raise ValueError("unknown subject")
+        services.add_entitlement(conn, service_id, kind, value, effect, actor_id=admin.id, now=now)
+
+    try:
+        await deps.db.run(change)
+    except services.EntitlementRefused as refused:
+        return await _service_page(request, admin, service_id, status=400, error=str(refused))
+    except ValueError:
+        return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
+    except sqlite3.IntegrityError:
+        return await _service_page(request, admin, service_id, status=400, error=text.ENTITLEMENT_TAKEN)
+    return _to(f"/admin/services/{service_id}")
+
+
+@router.post("/entitlements/{entitlement_id}/remove", dependencies=WRITE)
+async def remove_service_entitlement(request: Request, entitlement_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int | None:
+        service_id = services.entitlement_service_id(conn, entitlement_id)
+        if service_id is not None:
+            services.remove_entitlement(conn, entitlement_id, actor_id=admin.id, now=now)
+        return service_id
+
+    service_id = await deps.db.run(change)
+    return _to("/admin/services" if service_id is None else f"/admin/services/{service_id}")
+
+
+@router.post("/services/{service_id}/tokens", dependencies=WRITE)
+async def attach_token(request: Request, service_id: int, admin: Admin,
+                       kind: Annotated[str, Form()] = "",
+                       label: Annotated[str, Form()] = "",
+                       value: Annotated[str, Form()] = "",
+                       person: Annotated[str, Form()] = "") -> Response:
+    """Attaches a token to the service: for everyone entitled when `person` is blank, otherwise for that person.
+    The log row names the token id and kind only, never the value."""
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> None:
+        service = services.get(conn, service_id)
+        if service is None:
+            raise services.NoSuchService()
+        person_id = _optional_id(person)
+        if person_id is not None and registry.get_person(conn, person_id) is None:
+            raise registry.NoSuchPerson()
+        token_id = tokens.attach(conn, service_id=service_id, person_id=person_id, kind=kind, label=label.strip(),
+                                 value=value, now=now)
+        registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin.id,
+                              target_person_id=person_id, action="token_attached", services=[service.slug],
+                              detail={"token_id": token_id, "kind": kind})
+
+    try:
+        await deps.db.run(change)
+    except ValueError:
+        return await _service_page(request, admin, service_id, status=400, error=text.INVALID_INPUT)
+    return _to(f"/admin/services/{service_id}")
+
+
+@router.post("/tokens/{token_id}/revoke", dependencies=WRITE)
+async def revoke_token(request: Request, token_id: int, admin: Admin) -> Response:
+    deps = _deps(request)
+    now = deps.clock()
+
+    def change(conn) -> int | None:
+        token = tokens.get_attached(conn, token_id)
+        if token is None or token.revoked:
+            return None
+        service = services.get(conn, token.service_id)
+        tokens.revoke(conn, token_id, now)
+        registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin.id,
+                              target_person_id=token.person_id, action="token_revoked", services=[service.slug],
+                              detail={"token_id": token_id, "kind": token.kind})
+        return token.service_id
+
+    service_id = await deps.db.run(change)
+    return _to("/admin/services" if service_id is None else f"/admin/services/{service_id}")

@@ -145,7 +145,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   </table>
   <form method="post" action="/admin/people/{{ person.id }}/identities" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
-    <label>Service <input name="service_slug" required></label>
+    <label>Service
+      <select name="service_slug" required>
+        {% for choice in services %}<option value="{{ choice.slug }}">{{ choice.name }}</option>{% else %}<option value="" disabled selected>No services yet</option>{% endfor %}
+      </select>
+    </label>
     <label>Kind
       <select name="kind">
         {% for kind in identity_kinds %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}

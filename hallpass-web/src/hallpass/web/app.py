@@ -16,6 +16,7 @@ from hallpass.config import Config
 from hallpass.db import Database
 from hallpass.forward_auth import router as forward_auth_router
 from hallpass.registry import NoSuchGroup, NoSuchPerson
+from hallpass.services import NoSuchService
 from hallpass.web.pages import make_templates, not_found, redirect_to_login, redirect_to_terms
 from hallpass.web.routes_admin import router as admin_router
 from hallpass.web.routes_auth import router as auth_router
@@ -45,6 +46,7 @@ def create_app(deps: AppDeps) -> FastAPI:
     app.add_exception_handler(RedirectToTerms, redirect_to_terms)
     app.add_exception_handler(NoSuchPerson, not_found)
     app.add_exception_handler(NoSuchGroup, not_found)
+    app.add_exception_handler(NoSuchService, not_found)
     app.include_router(auth_router)
     app.include_router(me_router)
     app.include_router(terms_router)

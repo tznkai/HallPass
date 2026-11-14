@@ -1,0 +1,109 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: {{ service.name }}{% endblock %}
+{% block content %}
+<p><a href="/admin/services">All services</a></p>
+<h1>{{ service.name }}</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<p>Slug <code>{{ service.slug }}</code> and kind {{ service.kind }} are fixed once the service exists.
+  State: {{ 'retired' if service.retired else 'live' }}.</p>
+
+<section class="stack">
+  <h2>Details</h2>
+  <form method="post" action="/admin/services/{{ service.id }}" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Name <input name="name" value="{{ service.name }}" required maxlength="100"></label>
+    <label>Adapter <input name="adapter" value="{{ service.adapter }}" maxlength="60"></label>
+    <label>Address <input name="url" value="{{ service.url or '' }}" maxlength="300"></label>
+    <label><input type="checkbox" name="auto_suspendable"{% if service.auto_suspendable %} checked{% endif %}> Can be suspended automatically</label>
+    <button type="submit">Save</button>
+  </form>
+  <form method="post" action="/admin/services/{{ service.id }}/{{ 'unretire' if service.retired else 'retire' }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <button type="submit">{{ 'Bring back' if service.retired else 'Retire' }}</button>
+  </form>
+</section>
+
+<section class="stack">
+  <h2>Who may use it</h2>
+  <table>
+    <thead><tr><th>Subject</th><th>Effect</th><th></th></tr></thead>
+    <tbody>
+      {% for e in entitlements %}
+      <tr>
+        <td>{{ e.subject_kind }}: {{ e.label }}</td>
+        <td>{{ e.effect }}</td>
+        <td>
+          <form method="post" action="/admin/entitlements/{{ e.id }}/remove" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <button type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">Nobody has been granted this service yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/admin/services/{{ service.id }}/entitlements" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Subject
+      <select name="subject">
+        {% for choice in subject_choices %}<option value="{{ choice.value }}">{{ choice.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Effect
+      <select name="effect">
+        <option value="grant">grant</option>
+        <option value="deny">deny (a person only)</option>
+      </select>
+    </label>
+    <button type="submit">Add</button>
+  </form>
+</section>
+
+<section class="stack">
+  <h2>Attached tokens</h2>
+  <table>
+    <thead><tr><th>Kind</th><th>Label</th><th>For</th><th>Value</th><th></th></tr></thead>
+    <tbody>
+      {% for row in attached %}
+      <tr>
+        <td>{{ row.token.kind }}</td>
+        <td>{{ row.token.label }}</td>
+        <td>{{ row.person }}</td>
+        <td><code>{{ row.token.value }}</code></td>
+        <td>
+          <form method="post" action="/admin/tokens/{{ row.token.id }}/revoke" class="inline">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <button type="submit">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No tokens attached.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/admin/services/{{ service.id }}/tokens" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Kind
+      <select name="kind">
+        {% for kind in attached_kinds %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Label <input name="label" maxlength="100"></label>
+    <label>Value <input name="value" required maxlength="500"></label>
+    <label>For
+      <select name="person">
+        <option value="">Everyone entitled to this service</option>
+        {% for choice in people %}<option value="{{ choice.id }}">{{ choice.display_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Attach</button>
+  </form>
+</section>
+{% endblock %}

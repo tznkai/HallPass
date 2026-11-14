@@ -48,3 +48,6 @@ REASON_TERMS = "The current terms must be accepted first."
 FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading the page does not show it again. "
                    "Generating a new link revokes this one.")
 FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. Ask the administrator."
+# The admin service pages.
+SERVICE_TAKEN = "A service with that slug already exists."
+ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."

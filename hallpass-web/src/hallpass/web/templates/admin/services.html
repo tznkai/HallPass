@@ -1,0 +1,43 @@
+<!--
+SPDX-FileCopyrightText: 2026 K. Chen
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+{% extends "base.html" %}
+{% block title %}Hallpass: services{% endblock %}
+{% block content %}
+<h1>Services</h1>
+{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<table>
+  <thead><tr><th>Service</th><th>Kind</th><th>Can be suspended automatically</th><th>State</th></tr></thead>
+  <tbody>
+    {% for svc in services %}
+    <tr>
+      <td><a href="/admin/services/{{ svc.id }}">{{ svc.name }}</a> <code>{{ svc.slug }}</code></td>
+      <td>{{ svc.kind }}</td>
+      <td>{{ 'yes' if svc.auto_suspendable else 'no' }}</td>
+      <td>{{ 'retired' if svc.retired else 'live' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No services yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<section class="stack">
+  <h2>Add a service</h2>
+  <form method="post" action="/admin/services" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <label>Slug <input name="slug" required maxlength="60" pattern="[a-z0-9][a-z0-9_-]*"></label>
+    <label>Name <input name="name" required maxlength="100"></label>
+    <label>Kind
+      <select name="kind">
+        {% for kind in service_kinds %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Adapter <input name="adapter" maxlength="60" placeholder="manual"></label>
+    <label>Address <input name="url" maxlength="300"></label>
+    <label><input type="checkbox" name="auto_suspendable"> Can be suspended automatically</label>
+    <button type="submit">Add service</button>
+  </form>
+</section>
+{% endblock %}
