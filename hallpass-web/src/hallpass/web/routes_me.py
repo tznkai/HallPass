@@ -16,7 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
-from hallpass import access, holds, registry, text, tokens
+from hallpass import access, desired, holds, registry, text, tokens
 from hallpass.auth import current_person, require_csrf
 from hallpass.registry import Person
 from hallpass.services import Service
@@ -34,16 +34,20 @@ REASON_TEXT = {
 
 def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
-    who placed each hold, and a note when a game service has no external identity for the person."""
+    who placed each hold, a note when a game service has no external identity for the person, and the report status
+    hallmonitor's last report gives (None for a service it does not monitor). Callers run `desired.refresh` first."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
     marked = holds.marked_service_ids(conn, person.id)
     rows = []
     for service, decision in access.services_for(conn, person):
         missing_identity = service.kind == "game" and service.slug not in identity_slugs
         holders = holds.hold_labels(conn, person.id, service.id)
+        is_marked = service.id in marked
+        report_status = desired.report_status(desired.desired_for(conn, person.id, service.id),
+                                              desired.report_for(conn, person.id, service.id), is_marked)
         if service.auto_suspendable:
             suspendable = text.CAN_AUTO_SUSPEND
-        elif holders and service.id in marked:
+        elif holders and is_marked:
             suspendable = text.MANUALLY_SUSPENDED
         else:
             suspendable = text.CANNOT_AUTO_SUSPEND
@@ -56,11 +60,13 @@ def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
             "auto_suspendable": service.auto_suspendable,
             "holders": holders,
             "identity_note": text.NO_GAME_IDENTITY if missing_identity else "",
+            "report_status": report_status,
         })
     return rows
 
 
-def _me_context(conn: sqlite3.Connection, person: Person) -> dict:
+def _me_context(conn: sqlite3.Connection, person: Person, now: datetime) -> dict:
+    desired.refresh(conn, now)
     return {
         "rows": service_rows(conn, person),
         "visible_tokens": tokens.visible_to(conn, person),
@@ -78,7 +84,9 @@ def feed_link(base: str, raw: str) -> str:
 
 @router.get("/")
 async def home(request: Request, person: Annotated[Person, Depends(current_person)]) -> Response:
-    context = await request.app.state.deps.db.run(lambda c: _me_context(c, person))
+    deps = request.app.state.deps
+    now = deps.clock()
+    context = await deps.db.run(lambda c: _me_context(c, person, now))
     return page(request, "me.html", viewer=person, **context)
 
 

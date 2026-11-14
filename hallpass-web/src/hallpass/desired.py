@@ -125,3 +125,20 @@ def report_status(desired_row: tuple[str, int] | None, found: Report | None, man
     if found.detail == "pending_restart":
         return text.PENDING_RESTART
     return text.STATUS_ALLOWED if desired_value == "allowed" else text.STATUS_SUSPENDED
+
+
+def monitor_health(conn: sqlite3.Connection) -> dict:
+    """What the administrator's monitor page shows: the last contact from hallmonitor, the services with a report in
+    error (with how many people), and the unmanaged entries per service."""
+    contact = conn.execute("SELECT last_contact_at FROM monitor_contact WHERE id = 1").fetchone()
+    errors = conn.execute(
+        "SELECT s.name, COUNT(*) FROM service_report r JOIN service s ON s.id = r.service_id "
+        "WHERE r.observed = 'error' GROUP BY s.id ORDER BY s.name, s.id").fetchall()
+    unmanaged = conn.execute(
+        "SELECT s.name, u.count FROM service_unmanaged u JOIN service s ON s.id = u.service_id "
+        "ORDER BY s.name, s.id").fetchall()
+    return {
+        "last_contact_at": None if contact is None else contact[0],
+        "errors": [{"name": name, "count": count} for name, count in errors],
+        "unmanaged": [{"name": name, "count": count} for name, count in unmanaged],
+    }

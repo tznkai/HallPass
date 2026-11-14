@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, holds, registry, services, terms, text, tokens
+from hallpass import authentik_sync, desired, holds, registry, services, terms, text, tokens
 from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
 from hallpass.holds import HoldRefused
@@ -864,6 +864,14 @@ async def set_conflict_mode(request: Request, person_id: int, admin: Admin,
         return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
     await authentik_sync.sync_people(deps, changed)
     return _to(f"/admin/people/{person_id}")
+
+
+# Monitor health ----------------------------------------------------------------------------------------
+
+@router.get("/monitor")
+async def monitor_page(request: Request, admin: Admin) -> Response:
+    health = await _deps(request).db.run(desired.monitor_health)
+    return page(request, "admin/monitor.html", viewer=admin, **health)
 
 
 # Reviews ---------------------------------------------------------------------------------------------

@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, grants, holds, registry, terms, text
+from hallpass import authentik_sync, desired, grants, holds, registry, terms, text
 from hallpass.auth import current_person, require_csrf
 from hallpass.holds import HoldRefused
 from hallpass.registry import Person
@@ -52,12 +52,13 @@ async def grant_child(request: Request, child_id: int, person: Annotated[Person,
     return RedirectResponse("/children", status_code=303)
 
 
-def _child_context(conn, parent: Person, child_id: int) -> dict | None:
+def _child_context(conn, parent: Person, child_id: int, now: datetime) -> dict | None:
     """The child's service rows with the parent's controls, or None when the parent is not linked to that child.
     A parent may revoke where no hold of theirs stands, and restore only where they may lift a parent hold."""
     if child_id not in {child.id for child in registry.children_of(conn, parent.id)}:
         return None
     child = registry.get_person(conn, child_id)
+    desired.refresh(conn, now)
     rows = service_rows(conn, child)
     held = holds.services_with_holds(conn, child.id)
     for row in rows:
@@ -69,7 +70,8 @@ def _child_context(conn, parent: Person, child_id: int) -> dict | None:
 
 async def _child_page(request: Request, person: Person, child_id: int, *, status: int = 200,
                       error: str | None = None) -> Response:
-    context = await request.app.state.deps.db.run(lambda c: _child_context(c, person, child_id))
+    deps = request.app.state.deps
+    context = await deps.db.run(lambda c: _child_context(c, person, child_id, deps.clock()))
     if context is None:
         return message_page(request, error or text.FORBIDDEN, status)
     return page(request, "child.html", viewer=person, status_code=status, error=error, **context)
@@ -79,7 +81,8 @@ async def _child_page(request: Request, person: Person, child_id: int, *, status
 async def child_page(request: Request, child_id: int, person: Annotated[Person, Depends(current_person)]) -> Response:
     """A linked parent's view of a child's services, with the revoke and restore controls. It shows no tokens and
     no feed forms."""
-    context = await request.app.state.deps.db.run(lambda c: _child_context(c, person, child_id))
+    deps = request.app.state.deps
+    context = await deps.db.run(lambda c: _child_context(c, person, child_id, deps.clock()))
     if context is None:
         raise HTTPException(403, text.FORBIDDEN)
     return page(request, "child.html", viewer=person, **context)

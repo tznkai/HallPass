@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     {% for row in rows %}
     <tr>
       <td>{{ row.name }}{% if row.identity_note %}<br><span>{{ row.identity_note }}</span>{% endif %}</td>
-      <td>{{ row.status }}{% if row.reasons %}<ul>{% for reason in row.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}{% for label in row.holders %}<br><span>Suspended by {{ label }}</span>{% endfor %}</td>
+      <td>{{ row.status }}{% if row.reasons %}<ul>{% for reason in row.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}{% if row.report_status %}<br><span class="report-status">{{ row.report_status }}</span>{% endif %}{% for label in row.holders %}<br><span>Suspended by {{ label }}</span>{% endfor %}</td>
       <td>{{ row.suspendable }}</td>
       {% if controls %}
       <td>
