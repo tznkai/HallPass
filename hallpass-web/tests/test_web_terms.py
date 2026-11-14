@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from hallpass import text
+from hallpass import registry, text
 from tests.fake_authentik import enrol
 from tests.helpers import (
     TERMS_PRIVACY,
@@ -135,6 +135,22 @@ async def test_with_no_version_published_the_terms_page_says_so_and_pages_redire
 
 
 # AC3.2: acceptance is checked against the current version ------------------------------------------------
+
+async def test_a_person_locked_after_reading_terms_gets_403_and_no_acceptance(env: Env):
+    await publish_terms(env)
+    person, browser = await signed_in_person(env, accepted=False)
+    page = await browser.get("/terms")
+    token = (await form(env, "/terms", client=browser))["csrf"]
+    version_id = re.search(r'name="version_id" value="(\d+)"', page.text).group(1)
+    await env.db.run(lambda c: registry.set_locked(c, person.id, True))
+
+    locked = await browser.post("/terms/accept", data={"csrf": token, "version_id": version_id})
+
+    assert locked.status_code == 403
+    assert text.LOCKED in locked.text
+    count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
+    assert count == 0
+
 
 async def test_accepting_a_stale_version_is_refused_and_records_nothing(env: Env):
     old_version = await publish_terms(env)

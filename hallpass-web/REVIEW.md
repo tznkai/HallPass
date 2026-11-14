@@ -46,4 +46,5 @@ as the code they cite.
 
 ## Status transitions
 
-- `src/hallpass/grants.py:65` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs before any status changes
+- `src/hallpass/grants.py:69` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
+- `src/hallpass/grants.py:44` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind

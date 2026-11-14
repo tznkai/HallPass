@@ -120,15 +120,42 @@ async def test_later_acceptance_does_not_move_an_active_child_back(db: Database,
     assert after.status == "active"
 
 
-async def test_locked_person_who_accepts_stays_locked(db: Database) -> None:
+async def test_locked_person_acceptance_is_refused_and_not_stored(db: Database) -> None:
     publisher = await make(db, display_name="Publisher")
     version = await publish(db, publisher.id)
     child = await make(db, display_name="Kit", account_type="child")
     await db.run(lambda c: registry.set_locked(c, child.id, True))
 
-    after = await accept_terms(db, child.id, version.id)
+    with pytest.raises(grants.AcceptanceLocked):
+        await accept_terms(db, child.id, version.id)
 
-    assert after.status == "locked"
+    stored = await db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
+    logged = await db.run(lambda c: c.execute(
+        "SELECT COUNT(*) FROM decision_log WHERE action = 'terms_accepted'").fetchone()[0])
+    after = await db.run(lambda c: registry.get_person(c, child.id))
+    assert stored == 0 and logged == 0
+    assert after is not None and after.status == "locked"
+
+
+@pytest.mark.parametrize(("account_type", "expected"), [
+    ("adult", "active"),
+    ("child", "awaiting_grant"),
+], ids=["adult-active", "child-awaits-grant"])
+async def test_refused_locked_attempt_does_not_block_the_first_acceptance_after_unlock(
+        db: Database, account_type: str, expected: str) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    person = await make(db, display_name="Someone", account_type=account_type)
+    await db.run(lambda c: registry.set_locked(c, person.id, True))
+    with pytest.raises(grants.AcceptanceLocked):
+        await accept_terms(db, person.id, version.id)
+
+    await db.run(lambda c: registry.set_locked(c, person.id, False))
+    accepted = await accept_terms(db, person.id, version.id)
+
+    assert accepted.status == expected
+    stored = await db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
+    assert stored == 1
 
 
 async def test_accepting_an_unknown_version_is_refused(db: Database) -> None:
@@ -232,6 +259,7 @@ async def test_a_locked_parent_is_refused_and_the_child_is_unchanged(db: Databas
     assert child is not None and child.status == "awaiting_grant"
 
 
-async def test_granting_a_missing_child_raises_no_such_person(db: Database, family: Family) -> None:
-    with pytest.raises(registry.NoSuchPerson):
-        await grant(db, 999, family.parent.id)
+async def test_granting_a_missing_child_is_refused_as_not_linked(db: Database, family: Family) -> None:
+    reason = await refusal_reason(db, 999, family.parent.id)
+
+    assert reason == "not_linked_parent"

@@ -3,8 +3,8 @@
 """Person-status transitions out of `invited`, and parent grants.
 
 This module and `registry.set_locked` are the only places that set a person's status. Plain functions over a
-sqlite3 connection, run inside `Database.run`, so each call is one transaction. Nothing here logs; the decision
-log rows are written here.
+sqlite3 connection, run inside `Database.run`, so each call is one transaction. Nothing here calls log_event;
+each change writes its decision_log row.
 """
 
 from __future__ import annotations
@@ -27,15 +27,22 @@ class GrantRefused(Exception):
         self.reason = reason
 
 
+class AcceptanceLocked(Exception):
+    """A locked person tried to accept terms. Nothing is recorded; the web layer answers with the locked text."""
+
+
 def _set_status(conn: sqlite3.Connection, person_id: int, status: str) -> None:
     conn.execute("UPDATE person SET status = ? WHERE id = ?", (status, person_id))
 
 
 def accept_terms(conn: sqlite3.Connection, person_id: int, version_id: int, now: datetime) -> Person:
-    """Records the acceptance. On the person's first-ever acceptance while invited, moves them out of invited."""
+    """Records the acceptance. On the person's first-ever acceptance while invited, moves them out of invited.
+    A locked person is refused before anything is written, so a lock can never leave an acceptance behind."""
     person = registry.get_person(conn, person_id)
     if person is None:
         raise registry.NoSuchPerson()
+    if person.status == "locked":
+        raise AcceptanceLocked()
     version = terms.get(conn, version_id)
     if version is None:
         raise ValueError("unknown terms version")
@@ -57,13 +64,14 @@ def _is_linked(conn: sqlite3.Connection, child_id: int, parent_id: int) -> bool:
 
 
 def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datetime) -> Person:
-    """A linked parent approves an awaiting child. Checks run in order; the first failure raises GrantRefused."""
+    """A linked parent approves an awaiting child. Checks run in order; the first failure raises GrantRefused.
+    The link is checked first, so a missing child and a child the caller is not linked to are refused alike."""
+    if not _is_linked(conn, child_id, parent_id):
+        raise GrantRefused("not_linked_parent")
     child = registry.get_person(conn, child_id)
     parent = registry.get_person(conn, parent_id)
     if child is None or parent is None:
         raise registry.NoSuchPerson()
-    if not _is_linked(conn, child_id, parent_id):
-        raise GrantRefused("not_linked_parent")
     state = terms.state_for(conn, parent_id)
     if state.current is None or not state.accepted_current:
         raise GrantRefused("parent_terms")

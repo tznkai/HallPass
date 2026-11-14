@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
 from hallpass import grants, terms, text
-from hallpass.auth import current_person_any_terms, require_csrf
+from hallpass.auth import current_person_any_terms, end_session, require_csrf
 from hallpass.registry import Person
 from hallpass.web.pages import message_page, page
 from hallpass.web.routes_auth import safe_next
@@ -45,6 +45,12 @@ async def accept_terms(request: Request, person: Annotated[Person, Depends(curre
         grants.accept_terms(conn, person.id, version_id, now)
         return True
 
-    if not await deps.db.run(change):
+    try:
+        accepted = await deps.db.run(change)
+    except grants.AcceptanceLocked:
+        # Locked between the sign-in check above and this write. Same answer as the auth layer gives a locked person.
+        end_session(request)
+        raise HTTPException(403, text.LOCKED) from None
+    if not accepted:
         return message_page(request, text.TERMS_CHANGED, 409)
     return RedirectResponse(safe_next(next_path, deps.config) or "/", status_code=303)

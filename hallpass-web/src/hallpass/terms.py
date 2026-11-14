@@ -3,7 +3,7 @@
 """Versioned terms of service and privacy text, each person's acceptance of them, and the gate rules.
 
 Plain functions over a sqlite3 connection. Callers run them inside `Database.run`. `publish` writes its own
-decision-log row; the web layer logs everything else.
+`terms_published` decision-log row. `accept` writes none; `grants.accept_terms` writes the `terms_accepted` row.
 """
 
 from __future__ import annotations

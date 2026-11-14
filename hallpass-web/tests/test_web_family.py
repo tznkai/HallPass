@@ -21,6 +21,7 @@ from tests.helpers import (
     publish_terms,
     sign_in,
     signed_in_person,
+    store_person,
 )
 
 NOW_TEXT = "2026-11-13T12:00:00+00:00"
@@ -112,6 +113,20 @@ async def test_an_unrelated_adult_cannot_approve_the_child(env: Env):
     assert refused.status_code == 403
     assert text.GRANT_REFUSED["not_linked_parent"] in refused.text
     assert (await person_row(env, child)).status == "awaiting_grant"
+    assert await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM parent_grant").fetchone()[0]) == 0
+
+
+async def test_a_missing_child_and_an_unlinked_child_get_the_same_refusal(env: Env):
+    _, stranger = await signed_in_person(env, account_type="adult", display_name="Ana")
+    unlinked = await store_person(env, display_name="Unlinked", account_type="child")
+    token = (await form(env, "/children", client=stranger))["csrf"]
+
+    missing = await stranger.post("/children/999999/grant", data={"csrf": token})
+    existing = await stranger.post(f"/children/{unlinked.id}/grant", data={"csrf": token})
+
+    assert missing.status_code == existing.status_code == 403
+    assert missing.text == existing.text
+    assert text.GRANT_REFUSED["not_linked_parent"] in missing.text
     assert await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM parent_grant").fetchone()[0]) == 0
 
 
