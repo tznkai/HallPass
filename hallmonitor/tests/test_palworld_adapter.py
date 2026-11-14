@@ -307,3 +307,15 @@ async def test_the_registry_needs_every_palworld_setting(db: Database, caplog: p
 async def test_the_registry_builds_the_adapter_when_every_setting_is_present(db: Database) -> None:
     async with httpx.AsyncClient() as http:
         assert isinstance(build_adapter("palworld", ctx(db, http)), PalworldAdapter)
+
+
+async def test_apply_refuses_to_unban_a_ban_nobody_here_placed(db: Database) -> None:
+    """Reconcile never applies to a banned_external subject, so the apply's own refusal is checked directly."""
+    pal, ptero = pal_state(), banlist()
+    moderator_ban(ptero, f"steam_{OTHER_ID}")
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        adapter = palworld(db, http)
+        result = await adapter.apply(Subject("r1", (Identity("steam_id", OTHER_ID),), "allowed", 2), "allowed")
+    assert result == Observed("banned_external")
+    assert pal.requests == []
+    assert file_text(ptero) == f"steam_{OTHER_ID}\n"
