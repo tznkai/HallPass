@@ -42,7 +42,7 @@ CANNOT_AUTO_SUSPEND = "cannot be automatically suspended"
 NO_GAME_IDENTITY = "no game identity on file"
 # One message per access.Access reason, in the order access.evaluate adds them.
 REASON_RETIRED = "The service has been retired."
-REASON_NOT_ENTITLED = "You are not entitled to this service."
+REASON_NOT_ENTITLED = "Not entitled to this service."
 REASON_NOT_ACTIVE = "The account is not active yet. A parent must approve it."
 REASON_TERMS = "The current terms must be accepted first."
 FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading the page does not show it again. "

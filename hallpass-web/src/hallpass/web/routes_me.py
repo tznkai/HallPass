@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
@@ -56,8 +57,11 @@ def _me_context(conn: sqlite3.Connection, person: Person) -> dict:
 
 
 def feed_link(base: str, raw: str) -> str:
-    separator = "&" if "?" in base else "?"
-    return f"{base}{separator}token={raw}"
+    """The feed address with the token added to its query. Any fragment stays last, so the token is never put after
+    a `#` where a server cannot read it."""
+    parts = urlsplit(base)
+    query = f"{parts.query}&token={raw}" if parts.query else f"token={raw}"
+    return urlunsplit(parts._replace(query=query))
 
 
 @router.get("/")

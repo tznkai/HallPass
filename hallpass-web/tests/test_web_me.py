@@ -10,9 +10,11 @@ from __future__ import annotations
 import re
 
 import httpx
+import pytest
 
 from hallpass import registry, services, text, tokens
 from hallpass.registry import Person
+from hallpass.web.routes_me import feed_link
 from tests.helpers import (
     NOW,
     Env,
@@ -198,6 +200,41 @@ async def test_a_person_who_is_not_a_parent_gets_403_on_another_persons_child_pa
     response = await stranger.get(f"/children/{child}")
 
     assert response.status_code == 403
+
+
+async def test_a_parent_viewing_a_child_row_gets_neutral_wording_not_you(env: Env):
+    # The child has an identity for the game but no entitlement, so the row is listed with its reason.
+    parent, child, parent_browser, _ = await family(env)
+    parent_person = await env.db.run(lambda c: registry.get_person(c, parent))
+    await create_service(env, "valheim", "game", actor=parent_person)
+    await env.db.run(lambda c: registry.add_identity(c, child, "valheim", "steam_id", STEAM_ID))
+
+    response = await parent_browser.get(f"/children/{child}")
+
+    assert response.status_code == 200
+    assert "Valheim" in response.text
+    assert text.REASON_NOT_ENTITLED in response.text
+    assert "You are not entitled" not in response.text
+
+
+@pytest.mark.parametrize("name", [name for name in dir(text) if name.startswith("REASON_")])
+def test_no_reason_text_addresses_the_reader_as_you(name: str):
+    # Reason texts appear on the parent's view of a child as well, so they must not say "you".
+    assert re.search(r"\byou\b", getattr(text, name), re.IGNORECASE) is None
+
+
+@pytest.mark.parametrize("base, expected", [
+    # An existing query and a fragment: the token joins the query and the fragment stays last.
+    ("https://feeds.hallpass.test/feed.ics?lang=en#top", "https://feeds.hallpass.test/feed.ics?lang=en&token=RAW#top"),
+    # No query: the token starts one, and the fragment stays last.
+    ("https://feeds.hallpass.test/feed.ics#top", "https://feeds.hallpass.test/feed.ics?token=RAW#top"),
+    # A plain address is unchanged apart from the token.
+    ("https://feeds.hallpass.test/feed.ics", "https://feeds.hallpass.test/feed.ics?token=RAW"),
+    # A fragment with a question mark must not be taken for a query.
+    ("https://feeds.hallpass.test/feed.ics#a?b", "https://feeds.hallpass.test/feed.ics?token=RAW#a?b"),
+])
+def test_the_feed_token_goes_in_the_query_and_never_after_a_fragment(base: str, expected: str):
+    assert feed_link(base, "RAW") == expected
 
 
 async def test_a_linked_parent_sees_the_childs_services_but_not_its_tokens(env: Env):
