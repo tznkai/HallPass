@@ -56,7 +56,7 @@ def test_read_prints_line_count_and_masked_first_line_and_never_the_content(caps
     console = Console([KEY, SERVER, HOST])
     text = ptero_files_check.read_file(_ptero_client(handler), SERVER, PATH, console)
 
-    assert text == body
+    assert text == body.encode("utf-8")
     out = capsys.readouterr().out
     # The shape of the id is a run of nines, which the console's long-run redaction then shows as <id>.
     assert out.strip() == "STEP read: status=200 lines=2 first_line=aaaaa_<id>"
@@ -95,7 +95,7 @@ def test_write_sends_the_same_text_as_raw_body_and_prints_the_status(capsys):
         return httpx.Response(204)
 
     console = Console([KEY, SERVER, HOST])
-    assert ptero_files_check.write_file(_ptero_client(handler), SERVER, PATH, "x\ny\n", console) is True
+    assert ptero_files_check.write_file(_ptero_client(handler), SERVER, PATH, b"x\ny\n", console) is True
     assert sent == {
         "method": "POST", "path": f"/api/client/servers/{SERVER}/files/write", "file": PATH,
         "content_type": "text/plain", "body": "x\ny\n",
@@ -111,6 +111,25 @@ def test_resources_prints_the_state_and_whether_uptime_is_present(capsys):
 
     ptero_files_check.check_resources(_ptero_client(handler), SERVER, Console([KEY, SERVER, HOST]))
     assert capsys.readouterr().out.strip() == "STEP resources: current_state=running uptime_present=True"
+
+
+def test_main_writes_back_the_bytes_it_read_even_when_they_are_not_utf8(monkeypatch, capsys):
+    monkeypatch.setenv("PTERO_URL", PTERO_BASE)
+    monkeypatch.setenv("PTERO_KEY", KEY)
+    monkeypatch.setenv("PTERO_SERVER", SERVER)
+    raw = b"steam_1\xff\xfe\nline \x80 two\r\n"   # bytes that are not UTF-8, with a CRLF
+    writes: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files/contents"):
+            return httpx.Response(200, content=raw)
+        if request.url.path.endswith("/files/write"):
+            writes.append(request.content)
+            return httpx.Response(204)
+        return httpx.Response(200, json={"attributes": {"current_state": "offline", "resources": {}}})
+
+    assert ptero_files_check.main(["--path", PATH], transport=httpx.MockTransport(handler)) == 0
+    assert writes == [raw]
 
 
 def test_a_missing_config_variable_is_a_config_error_naming_the_variable(monkeypatch, capsys):

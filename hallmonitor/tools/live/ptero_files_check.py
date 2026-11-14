@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Hand-run Pterodactyl file and resource check for hallmonitor. Works on one file of one server, given by --path.
 
-Reads the file and prints its line count and the first line's shape, never its content. Writes the same text back
+Reads the file and prints its line count and the first line's shape, never its content. Writes the same bytes back
 unchanged and prints the status. Reads the server's resources and prints its state and whether an uptime is present.
 Ids, the key and the instance address are printed as <redacted>, and every digit is masked in a shape.
 
@@ -44,8 +44,9 @@ def _files_path(server: str, action: str) -> str:
     return f"/api/client/servers/{server}/files/{action}"
 
 
-def read_file(client: httpx.Client, server: str, path: str, console: Console) -> str | None:
-    """Reads the file and prints its shape. Returns the text, or None when the read failed."""
+def read_file(client: httpx.Client, server: str, path: str, console: Console) -> bytes | None:
+    """Reads the file and prints its shape. Returns the bytes exactly as the server sent them, or None when the read
+    failed. The shape is decoded only for display, so a file that is not UTF-8 is still written back unchanged."""
     try:
         response = client.get(_files_path(server, "contents"), params={"file": path})
     except httpx.HTTPError as exc:
@@ -54,18 +55,17 @@ def read_file(client: httpx.Client, server: str, path: str, console: Console) ->
     if response.status_code != 200:
         console.step("read", f"status={response.status_code}")
         return None
-    text = response.text
-    lines = text.splitlines()
+    lines = response.content.decode("utf-8", errors="replace").splitlines()
     first = shape(lines[0]) if lines else "(empty)"
     console.step("read", f"status=200 lines={len(lines)} first_line={first}")
-    return text
+    return response.content
 
 
-def write_file(client: httpx.Client, server: str, path: str, text: str, console: Console) -> bool:
-    """Writes the text back as a raw body and prints the status. True on a 204."""
+def write_file(client: httpx.Client, server: str, path: str, content: bytes, console: Console) -> bool:
+    """Writes the bytes back as a raw body and prints the status. True on a 204."""
     try:
         response = client.post(_files_path(server, "write"), params={"file": path},
-                               content=text.encode("utf-8"), headers={"Content-Type": "text/plain"})
+                               content=content, headers={"Content-Type": "text/plain"})
     except httpx.HTTPError as exc:
         console.step("write", f"failed: {console.error(exc)}")
         return False
@@ -109,10 +109,10 @@ def main(argv: list[str] | None = None, transport: httpx.BaseTransport | None = 
     console = Console([key, server, *instance_secrets(base_url)])
     client = make_client(base_url, key, transport=transport)
     try:
-        text = read_file(client, server, args.path, console)
-        if text is None:
+        content = read_file(client, server, args.path, console)
+        if content is None:
             return 1
-        ok = write_file(client, server, args.path, text, console)
+        ok = write_file(client, server, args.path, content, console)
         check_resources(client, server, console)
         return 0 if ok else 1
     except KeyboardInterrupt:
