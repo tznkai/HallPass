@@ -7,22 +7,29 @@ Covers hallpass.AC5.4 to AC5.8, and the forward-auth parts of AC3.4, AC3.5 and A
 
 from __future__ import annotations
 
-from urllib.parse import urlencode
+import logging
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 
-from hallpass import services, tokens
+from hallpass import registry, services, tokens
+from hallpass.auth import Identity
+from hallpass.logs import FIELDS_ATTR
 from hallpass.registry import Person
+from tests.fake_authentik import enrol
 from tests.helpers import (
     BASE_URL,
     NOW,
     Env,
     accept_current,
+    accept_for,
     form,
+    invite_person,
     make_service,
     new_client,
     publish_terms,
     signed_in_person,
+    store_person,
 )
 from tests.test_web_family import family
 
@@ -277,3 +284,73 @@ async def test_a_child_awaiting_a_grant_is_denied_until_a_parent_approves(env: E
     assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
 
     assert (await check(child_browser, "calendar")).status_code == 200
+
+
+# Logs: no token, URI or host, and no service slug for an unknown one ----------------------------------------------
+
+async def test_forward_auth_logs_leave_out_the_token_the_uri_the_host_and_the_unknown_slug(env: Env, caplog):
+    await make_service(env.db, "calendar")
+    person, feed = await _feed_setup(env)
+    raw = await _issue(env, person, feed)
+    caplog.set_level(logging.INFO)
+    caplog.clear()
+
+    allowed = await check(new_client(env), "cal-feed", uri=f"/x.ics?token={raw}")
+    signin = await check(new_client(env), "calendar", uri="/events?week=2")
+    unknown = await check(new_client(env), "no-such-service", uri="/x.ics")
+
+    assert (allowed.status_code, signin.status_code, unknown.status_code) == (200, 302, 403)
+    records = [record for record in caplog.records if record.name.startswith("hallpass")]
+    events = [record for record in records if record.getMessage() == "forward_auth"]
+    assert [getattr(record, FIELDS_ATTR)["outcome"] for record in events] == ["allow", "signin", "deny"]
+    # The whole record, message, arguments and extra fields, must hold none of the forwarded values.
+    forbidden = (raw, FORWARDED_HOST, "/x.ics", "/events")
+    for record in records:
+        blob = repr(record.__dict__)
+        for value in forbidden:
+            assert value not in blob, f"a {record.getMessage()} record holds a forbidden value"
+    unknown_record = next(record for record in events
+                          if getattr(record, FIELDS_ATTR).get("reason") == "unknown_service")
+    assert "service" not in getattr(unknown_record, FIELDS_ATTR)
+
+
+# AC5.5: a person locked after sign-in ------------------------------------------------------------------------------
+
+async def test_a_person_locked_after_sign_in_gets_403_on_the_same_browser_with_no_redirect(env: Env):
+    await publish_terms(env)
+    person, browser = await signed_in_person(env, account_type="adult")
+    calendar = await make_service(env.db, "calendar")
+    await grant_type(env, calendar, "adult", person)
+    assert (await check(browser, "calendar")).status_code == 200
+    await env.db.run(lambda c: registry.set_locked(c, person.id, True))
+
+    response = await check(browser, "calendar")
+
+    assert response.status_code == 403
+    assert "location" not in response.headers
+
+
+# AC5.5 with the login route: a hostile forwarded host is not kept as the place to return to ------------------------
+
+async def test_the_forward_auth_sign_in_redirect_does_not_keep_a_hostile_next(env: Env):
+    await publish_terms(env)
+    await make_service(env.db, "calendar")
+    person = await store_person(env, account_type="adult")
+    user = enrol(env.authentik, await invite_person(env, person), f"person{person.id}")
+    await accept_for(env, person.id)
+    browser = new_client(env)
+
+    hostile = await browser.get("/forward-auth", params={"service": "calendar"},
+                                headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.invalid",
+                                         "X-Forwarded-Uri": "/x"})
+    assert hostile.status_code == 302
+    assert parse_qs(urlsplit(hostile.headers["location"]).query)["next"] == ["https://evil.invalid/x"]
+
+    login = await browser.get(hostile.headers["location"])
+    assert login.status_code == 302
+    env.oidc.next_identity = Identity(sub=user["uuid"], username=user["username"],
+                                      enrollment_ref=user["attributes"]["hallpass_enrollment"])
+    callback = await browser.get(login.headers["location"])
+
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/"
