@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallpass
 
-Last verified: 2026-11-13
+Last verified: 2026-11-14
 
 ## Purpose
 
@@ -34,7 +34,24 @@ CI runs exactly these three checks.
 - Monitor API types are duplicated, never shared. Each project keeps its own copy of any type that crosses the
   boundary.
 
+## Process
+
+`python -m hallpass` runs two uvicorn listeners in one process: the public web app (`HALLPASS_BIND`, trusts
+forwarded headers from 127.0.0.1 only) and the monitor API (`HALLPASS_MONITOR_BIND`, default `127.0.0.1:8081`).
+The monitor listener is never proxied: it refuses any request carrying a proxy header, then checks the bearer
+`HALLPASS_MONITOR_TOKEN` (32+ characters). Config refuses a monitor bind that overlaps the public port.
+
+Exit codes (`src/hallpass/__main__.py`, covered by `tests/test_main.py`): 0 clean stop on SIGINT/SIGTERM, 2 bad
+environment, 3 database refused (quarantined or unreadable), 4 a listener failed to start (the other is stopped
+too), 1 any other uncaught error. A second stop signal forces both listeners to exit.
+
+Migrations are `src/hallpass/migrations/NNNN_*.sql`, applied by `PRAGMA user_version`. Versions must be contiguous
+from 1 (startup raises otherwise); add a new file, never edit a shipped one.
+
 ## Monitor API contract
+
+Routes: `GET /api/monitor/v1/desired` and `POST /api/monitor/v1/reports` (204), in `src/hallpass/monitor_api.py`.
+A desired value's generation goes up only when the recomputed value changes.
 
 `tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example
 of the monitor API bodies. It is byte-identical in hallpass and hallmonitor. A change to it must land in both projects
@@ -65,5 +82,6 @@ code updates `REVIEW.md` in the same change.
 
 ## Live work
 
-Live scripts live in `tools/live/`. They are hand-run only, never run by CI. Results are recorded in
-`docs/<name>-notes.md`, with placeholders in place of real hosts and ids.
+Live scripts live in `tools/live/` (`authentik_check.py`, `authentik_sessions_check.py`). They are hand-run only,
+never run by CI. Results are recorded in `docs/authentik-notes.md`, with placeholders in place of real hosts and
+ids. A behaviour the code relies on that no live run has confirmed yet is written down there as pending.
