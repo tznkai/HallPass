@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from hallmonitor.adapters import fluxer, manual, minecraft, palworld
+from hallmonitor.adapters import fluxer, manual, minecraft, palworld, valheim
 from hallmonitor.adapters.base import Adapter
 from hallmonitor.adapters.context import AdapterContext
 
@@ -25,6 +25,7 @@ ADAPTERS: dict[str, AdapterPlugin] = {
     "fluxer": AdapterPlugin(fluxer.create),
     "minecraft": AdapterPlugin(minecraft.create),
     "palworld": AdapterPlugin(palworld.create),
+    "valheim": AdapterPlugin(valheim.create),
 }
 
 
