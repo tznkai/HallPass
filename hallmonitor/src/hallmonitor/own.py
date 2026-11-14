@@ -1,16 +1,23 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The record of suspensions hallmonitor placed itself. Only `(slug, identity, own_ref)` is stored.
+"""The record of suspensions hallmonitor placed itself. Only `(slug, identity, own_ref, placed_at)` is stored.
 
 The Fluxer adapter places no suspensions and never calls these helpers. They exist for adapters that do.
+
+A record is forgotten only once its ban has been absent from the ban list for longer than the grace window. A game server
+may take a moment to write a ban to its list, so a ban placed within that window is still in flight, not gone.
 """
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import UTC, datetime
 
 from hallmonitor.contract import iso_utc
+
+DEFAULT_GRACE_SECONDS = 600
+GRACE_DIGITS = re.compile(r"[0-9]{1,9}")
 
 
 def record_own(conn: sqlite3.Connection, slug: str, identity: str, own_ref: str, now: datetime) -> None:
@@ -38,3 +45,18 @@ def own_record(conn: sqlite3.Connection, slug: str, identity: str) -> tuple[str,
     if row is None:
         return None
     return row[0], datetime.strptime(row[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def within_grace(placed_at: datetime, now: datetime, grace_seconds: int) -> bool:
+    """True while a ban placed at `placed_at` is inside the grace window. `placed_at` is stored to the second, so the
+    measured time since placement can run up to one second longer than the true time. The window is widened by that
+    second, so it never closes before `grace_seconds` has really passed."""
+    return (now - placed_at).total_seconds() < grace_seconds + 1
+
+
+def parse_grace_seconds(raw: str) -> int | None:
+    """The `forget_grace_seconds` setting as a positive whole number of seconds, or None when it is not one."""
+    if GRACE_DIGITS.fullmatch(raw) is None:
+        return None
+    value = int(raw)
+    return value if value > 0 else None

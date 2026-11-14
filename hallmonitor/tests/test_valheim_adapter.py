@@ -239,6 +239,28 @@ async def test_a_moderator_re_add_during_a_pending_restore_is_banned_external(db
     assert OWN_ID in [line.strip() for line in file_text(fake).splitlines()]
 
 
+async def test_a_ban_whose_line_a_moderator_removed_is_forgotten_and_a_later_re_add_is_banned_external(
+        db: Database) -> None:
+    """The forget step: our record outlives a line that was removed outside the adapter. The record is forgotten with
+    no write, and a moderator who then re-adds the id is banned_external, whose line is never removed."""
+    fake = ptero_state(COMMENT)
+    await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)
+    fake.files[(SERVER, PATH)] = COMMENT                       # a moderator's unban, made through the game
+    writes_before = len(writes(fake))
+    hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=2))
+    await run(db, hallpass, fake, T0)
+    assert await record_of(db, OWN_ID) is None
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+    assert len(writes(fake)) == writes_before
+
+    moderator_line(fake, OWN_ID)                               # the moderator re-adds the id
+    hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=3)]
+    await run(db, hallpass, fake, T0)
+    assert outcomes(hallpass)[-1] == ("r1", "banned_external", None)
+    assert len(writes(fake)) == writes_before
+    assert OWN_ID in [line.strip() for line in file_text(fake).splitlines()]
+
+
 # AC12.4: restart detection, with live_reload off -----------------------------------------------------------
 
 async def test_a_pending_suspension_reports_pending_restart_until_the_server_restarts(db: Database) -> None:

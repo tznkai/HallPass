@@ -78,7 +78,7 @@ class SourceRconAdapter:
     capabilities = Capabilities(suspend=True, restore=True, read_state=True, removes_connected=True)
 
     def __init__(self, *, slug: str, db: Database, clock: Callable[[], datetime], host: str, port: int,
-                 password: str, universe: str) -> None:
+                 password: str, universe: str, grace_seconds: int) -> None:
         self._slug = slug
         self._db = db
         self._clock = clock
@@ -86,6 +86,7 @@ class SourceRconAdapter:
         self._port = port
         self._password = password
         self._universe = universe
+        self._grace = grace_seconds
 
     @asynccontextmanager
     async def _session(self) -> AsyncIterator[RconClient]:
@@ -107,7 +108,16 @@ class SourceRconAdapter:
     async def _forget(self, steam_id: str) -> None:
         await self._db.run(lambda c: own.forget_own(c, self._slug, steam_id))
 
-    async def _observe_one(self, subject: Subject, listed: set[str]) -> Observed:
+    async def _record(self, steam_id: str) -> tuple[str, datetime] | None:
+        return await self._db.run(lambda c: own.own_record(c, self._slug, steam_id))
+
+    def _in_flight(self, record: tuple[str, datetime] | None, now: datetime) -> bool:
+        """True for our own ban placed within the grace window. The console list may not show it yet, so a ban that is not
+        listed inside the window is in flight, not gone. Observe reads it as suspended, so the record is kept and no
+        second ban is sent. Past the window it is forgotten, as a ban that never appeared."""
+        return record is not None and record[0] == OWN_BAN and own.within_grace(record[1], now, self._grace)
+
+    async def _observe_one(self, subject: Subject, listed: set[str], now: datetime) -> Observed:
         failure = _identity_error(subject, self._universe)
         if failure is not None:
             return failure
@@ -116,21 +126,29 @@ class SourceRconAdapter:
         sid = _source_id(steam_id, self._universe)
         assert sid is not None
         if sid not in listed:
-            if await self._owned(steam_id):
-                await self._forget(steam_id)   # the ban is gone from the list: the record no longer describes a ban
+            record = await self._record(steam_id)
+            if record is None:
+                return Observed("allowed")
+            if self._in_flight(record, now):
+                return Observed("suspended")
+            await self._forget(steam_id)   # past the grace window and still not listed: the record no longer describes a ban
             return Observed("allowed")
         return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")
 
     async def observe(self, subjects: Sequence[Subject]) -> Mapping[str, Observed]:
         async with self._session() as client:
             listed = set(await self._listed(client))
-        return {subject.ref: await self._observe_one(subject, listed) for subject in subjects}
+        now = self._clock()
+        return {subject.ref: await self._observe_one(subject, listed, now) for subject in subjects}
 
     async def _suspend(self, steam_id: str, sid: str) -> Observed:
+        record = await self._record(steam_id)
         async with self._session() as client:
             if sid in await self._listed(client):
                 # Re-checked here, because a moderator's ban may have appeared since observe. Ours is already in force.
                 return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")
+            if self._in_flight(record, self._clock()):
+                return Observed("suspended")          # our ban is already in flight: never a second ban
             await client.command(f"banid 0 {sid} kick")
             await client.command("writeid")
             if sid not in await self._listed(client):
@@ -187,8 +205,9 @@ def create(ctx: AdapterContext) -> SourceRconAdapter | None:
     password = ctx.settings.get("rcon_password")
     port = _port(ctx.settings.get("port", str(DEFAULT_PORT)))
     universe = ctx.settings.get("steamid_universe", DEFAULT_UNIVERSE)
-    if not (host and password and port is not None and UNIVERSE.fullmatch(universe)):
+    grace = own.parse_grace_seconds(ctx.settings.get("forget_grace_seconds", str(own.DEFAULT_GRACE_SECONDS)))
+    if not (host and password and port is not None and UNIVERSE.fullmatch(universe) and grace is not None):
         log_event(log, "adapter_not_configured", adapter="source_rcon", service=ctx.slug)
         return None
     return SourceRconAdapter(slug=ctx.slug, db=ctx.db, clock=ctx.clock, host=host, port=port, password=password,
-                             universe=universe)
+                             universe=universe, grace_seconds=grace)

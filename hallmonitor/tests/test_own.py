@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -65,3 +65,28 @@ async def test_own_record_reads_the_reference_and_the_time_it_was_placed(db: Dat
 
 async def test_own_record_of_an_unknown_pair_is_none(db: Database) -> None:
     assert await db.run(lambda c: own.own_record(c, "valheim", "1001")) is None
+
+
+# The grace window: the setting plus one second, since placed_at is stored to the second ----------------------
+
+@pytest.mark.parametrize(("elapsed", "inside"), [(0, True), (599, True), (600, True), (601, False), (602, False)])
+def test_the_grace_window_is_the_setting_plus_the_one_second_margin(elapsed: int, inside: bool) -> None:
+    assert own.within_grace(NOW, NOW + timedelta(seconds=elapsed), 600) is inside
+
+
+def test_a_placed_at_that_is_later_than_now_is_inside_the_window() -> None:
+    assert own.within_grace(NOW, NOW - timedelta(seconds=5), 600)
+
+
+@pytest.mark.parametrize("raw", ["1", "120", "600", "999999999"])
+def test_a_positive_whole_number_is_a_grace_setting(raw: str) -> None:
+    assert own.parse_grace_seconds(raw) == int(raw)
+
+
+@pytest.mark.parametrize("raw", ["", "0", "00", "-1", "+5", "1.5", "1e3", " 5", "5 ", "1234567890", "\u0661"])
+def test_anything_else_is_not_a_grace_setting(raw: str) -> None:
+    assert own.parse_grace_seconds(raw) is None
+
+
+def test_the_default_grace_is_ten_minutes() -> None:
+    assert own.DEFAULT_GRACE_SECONDS == 600

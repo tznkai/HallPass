@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import socket
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ URL = "https://hallpass.invalid"
 PASSWORD = "test-pass"
 WRONG_PASSWORD = "wrong-pass"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+GRACE = own.DEFAULT_GRACE_SECONDS
 SLUG = "ship"
 # SteamID64s are built at runtime from the base. The Source IDs below are what the conversion gives for them.
 OWN_ID = str(STEAM64_BASE + 1001)
@@ -103,23 +104,24 @@ def settings_for(port: int, **overrides: str) -> dict[str, str]:
     return {"host": LOOPBACK, "port": str(port), "rcon_password": PASSWORD, **overrides}
 
 
-def ctx(db: Database, http: httpx.AsyncClient, settings: dict[str, str]) -> AdapterContext:
+def ctx(db: Database, http: httpx.AsyncClient, settings: dict[str, str], at: datetime = NOW) -> AdapterContext:
     return AdapterContext(slug=SLUG, settings=settings, config=Config(hallpass_url=URL, hallpass_token=TOKEN),
-                          db=db, http=http, clock=lambda: NOW)
+                          db=db, http=http, clock=lambda: at)
 
 
-def adapter_for(db: Database, http: httpx.AsyncClient, port: int, **overrides: str) -> SourceRconAdapter:
-    adapter = build_adapter("source_rcon", ctx(db, http, settings_for(port, **overrides)))
+def adapter_for(db: Database, http: httpx.AsyncClient, port: int, at: datetime = NOW,
+                **overrides: str) -> SourceRconAdapter:
+    adapter = build_adapter("source_rcon", ctx(db, http, settings_for(port, **overrides), at))
     assert isinstance(adapter, SourceRconAdapter)
     return adapter
 
 
 async def run(db: Database, http: httpx.AsyncClient, hallpass: FakeHallpassState, port: int,
-              **overrides: str) -> None:
-    adapter = adapter_for(db, http, port, **overrides)
+              at: datetime = NOW, **overrides: str) -> None:
+    adapter = adapter_for(db, http, port, at, **overrides)
     client = MonitorClient(URL, TOKEN, transport=make_hallpass_transport(hallpass))
     try:
-        await cycle(client=client, adapter_for=lambda s: adapter if s.slug == SLUG else None, now=NOW)
+        await cycle(client=client, adapter_for=lambda s: adapter if s.slug == SLUG else None, now=at)
     finally:
         await client.aclose()
 
@@ -232,6 +234,31 @@ async def test_a_ban_placed_by_a_moderator_after_observe_is_never_taken_over(db:
     assert await record_of(db, OWN_ID) is None
 
 
+async def test_an_own_record_whose_id_a_moderator_unlisted_is_forgotten_and_a_later_re_add_is_banned_external(
+        db: Database, http: httpx.AsyncClient) -> None:
+    """The forget step: our record outlives the id's removal from the list, made outside the adapter. Past the grace
+    window the record is forgotten with no banid, removeid or writeid, and a re-add is banned_external and kept."""
+    state = server_state()
+    hallpass = source_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    async with rcon_server(state) as port:
+        await run(db, http, hallpass, port)
+        state.source_bans.remove(OWN_SID)                      # a moderator's unban, made through the console
+        hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=4)]
+        before = len(state.commands)
+        await run(db, http, hallpass, port, at=NOW + timedelta(seconds=GRACE + 1))
+        assert await record_of(db, OWN_ID) is None
+        assert outcomes(hallpass)[-1] == ("r1", "allowed", None)
+        assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in state.commands[before:])
+
+        state.source_bans.append(OWN_SID)                     # the moderator re-adds the id
+        hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=5)]
+        before = len(state.commands)
+        await run(db, http, hallpass, port, at=NOW + timedelta(seconds=GRACE + 2))
+    assert outcomes(hallpass)[-1] == ("r1", "banned_external", None)
+    assert state.source_bans == [OWN_SID]
+    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in state.commands[before:])
+
+
 async def test_a_moderator_ban_on_our_subject_is_not_lifted_by_a_restore(db: Database, http: httpx.AsyncClient) -> None:
     state = server_state(source_bans=[OWN_SID])
     subj = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
@@ -254,6 +281,46 @@ async def test_a_server_that_does_not_confirm_the_ban_is_not_applied_and_not_rec
     assert f"banid 0 {OWN_SID} kick" in state.commands
     assert await record_of(db, OWN_ID) is None
     assert outcomes(hallpass) == [("r1", "error", "not_applied")]
+
+
+# The console's list may lag a banid. A ban inside the grace window that is not listed is in flight: it reads as
+# suspended, its record is kept, and no second banid is sent. Past the window, an unlisted ban is forgotten.
+
+async def test_a_ban_the_list_has_not_shown_within_the_grace_window_is_suspended_and_kept(db: Database,
+                                                                                         http: httpx.AsyncClient) -> None:
+    state = server_state()
+    hallpass = source_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    async with rcon_server(state) as port:
+        await run(db, http, hallpass, port)                              # cycle N: banid and record
+        state.source_bans.remove(OWN_SID)                                # the list has not caught up
+        bans_sent = [cmd for cmd in state.commands if cmd.startswith("banid")]
+        await run(db, http, hallpass, port, at=NOW + timedelta(seconds=60))  # cycle N+1, inside the window
+    assert outcomes(hallpass)[-1] == ("r1", "suspended", None)
+    assert [cmd for cmd in state.commands if cmd.startswith("banid")] == bans_sent
+    assert await record_of(db, OWN_ID) == ("ban", NOW)
+
+
+async def test_an_unlisted_ban_past_the_grace_window_is_forgotten_and_not_banned_again_for_an_allowed_subject(
+        db: Database, http: httpx.AsyncClient) -> None:
+    state = server_state()
+    hallpass = source_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    async with rcon_server(state) as port:
+        await run(db, http, hallpass, port)
+        state.source_bans.remove(OWN_SID)
+        hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=4)]
+        await run(db, http, hallpass, port, at=NOW + timedelta(seconds=GRACE + 1))
+    assert await record_of(db, OWN_ID) is None
+    assert outcomes(hallpass)[-1] == ("r1", "allowed", None)
+    assert not any(cmd.startswith("removeid") for cmd in state.commands)
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "abc", "1234567890"])
+async def test_a_forget_grace_that_is_not_a_positive_whole_number_is_not_configured(
+        db: Database, http: httpx.AsyncClient, caplog: pytest.LogCaptureFixture, value: str) -> None:
+    settings = settings_for(27015, forget_grace_seconds=value)
+    with caplog.at_level(logging.INFO):
+        assert build_adapter("source_rcon", ctx(db, http, settings)) is None
+    assert [r.getMessage() for r in caplog.records].count("adapter_not_configured") == 1
 
 
 # Identity: a missing or malformed steam_id is refused before any console command is sent -----------------

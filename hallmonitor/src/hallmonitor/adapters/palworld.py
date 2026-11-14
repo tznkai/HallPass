@@ -67,8 +67,8 @@ class PalworldAdapter:
     capabilities = Capabilities(suspend=True, restore=True, read_state=True, removes_connected=True)
 
     def __init__(self, *, slug: str, db: Database, clock: Callable[[], datetime], http: httpx.AsyncClient,
-                 rest_url: str,
-                 admin_password: str, files: PteroFiles, banlist_path: str) -> None:
+                 rest_url: str, admin_password: str, files: PteroFiles, banlist_path: str,
+                 grace_seconds: int) -> None:
         self._slug = slug
         self._db = db
         self._clock = clock
@@ -77,6 +77,7 @@ class PalworldAdapter:
         self._password = admin_password
         self._files = files
         self._banlist = banlist_path
+        self._grace = grace_seconds
 
     async def _ban_entries(self) -> list[str]:
         """The non-blank lines of the ban-list file, stripped. A Pterodactyl failure leaves as AdapterError."""
@@ -105,27 +106,44 @@ class PalworldAdapter:
     async def _forget(self, steam_id: str) -> None:
         await self._db.run(lambda c: own.forget_own(c, self._slug, steam_id))
 
-    async def _observe_one(self, subject: Subject, banned: set[str]) -> Observed:
+    async def _record(self, steam_id: str) -> tuple[str, datetime] | None:
+        return await self._db.run(lambda c: own.own_record(c, self._slug, steam_id))
+
+    def _in_flight(self, record: tuple[str, datetime] | None, now: datetime) -> bool:
+        """True for our own ban placed within the grace window. The ban list may not show it yet: the server writes the
+        file after the REST call, so a ban that is not listed inside the window is in flight, not gone. Observe reads it
+        as suspended, so the record is kept and no second ban is sent. Past the window it is forgotten, as a ban that
+        never appeared."""
+        return record is not None and record[0] == OWN_BAN and own.within_grace(record[1], now, self._grace)
+
+    async def _observe_one(self, subject: Subject, banned: set[str], now: datetime) -> Observed:
         failure = _identity_error(subject)
         if failure is not None:
             return failure
         steam_id = _steam_id(subject)
         assert steam_id is not None
         if _userid(steam_id) not in banned:
-            if await self._owned(steam_id):
-                await self._forget(steam_id)   # the ban is gone from the file: the record no longer describes a ban
+            record = await self._record(steam_id)
+            if record is None:
+                return Observed("allowed")
+            if self._in_flight(record, now):
+                return Observed("suspended")
+            await self._forget(steam_id)   # past the grace window and still not listed: the record no longer describes a ban
             return Observed("allowed")
         return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")
 
     async def observe(self, subjects: Sequence[Subject]) -> Mapping[str, Observed]:
         banned = set(await self._ban_entries())
-        return {subject.ref: await self._observe_one(subject, banned) for subject in subjects}
+        now = self._clock()
+        return {subject.ref: await self._observe_one(subject, banned, now) for subject in subjects}
 
     async def _suspend(self, steam_id: str) -> Observed:
         userid = _userid(steam_id)
         if userid in set(await self._ban_entries()):
             # Re-checked here, because a moderator's ban may have appeared since observe. Ours is already in force.
             return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")
+        if self._in_flight(await self._record(steam_id), self._clock()):
+            return Observed("suspended")          # our ban is already in flight: never a second ban
         await self._post("ban", {"userid": userid, "message": BAN_MESSAGE})
         now = self._clock()
         await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))
@@ -157,10 +175,11 @@ class PalworldAdapter:
 
 def create(ctx: AdapterContext) -> PalworldAdapter | None:
     settings = ctx.settings
-    if not all(settings.get(name) for name in REQUIRED_SETTINGS):
+    grace = own.parse_grace_seconds(settings.get("forget_grace_seconds", str(own.DEFAULT_GRACE_SECONDS)))
+    if not all(settings.get(name) for name in REQUIRED_SETTINGS) or grace is None:
         log_event(log, "adapter_not_configured", adapter="palworld", service=ctx.slug)
         return None
     files = PteroFiles(settings["ptero_url"], settings["ptero_key"], settings["ptero_server"], http=ctx.http)
     return PalworldAdapter(slug=ctx.slug, db=ctx.db, clock=ctx.clock, http=ctx.http,
                            rest_url=settings["rest_url"], admin_password=settings["admin_password"],
-                           files=files, banlist_path=settings["banlist_path"])
+                           files=files, banlist_path=settings["banlist_path"], grace_seconds=grace)

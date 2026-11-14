@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,8 @@ from tests.fake_ptero_files import PTERO_KEY, FakePteroState
 URL = "https://fake.test"
 SLUG = "pal"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+GRACE = own.DEFAULT_GRACE_SECONDS
+PAST_GRACE = NOW + timedelta(seconds=GRACE + 60)
 OWN_ID = str(STEAM64_BASE + 1001)
 OTHER_ID = str(STEAM64_BASE + 1002)
 SETTINGS = {
@@ -95,23 +97,24 @@ def outcomes(hallpass: FakeHallpassState) -> list[tuple[str, str, str | None]]:
     return [(entry["ref"], entry["observed"], entry["detail"]) for entry in hallpass.reports]
 
 
-def ctx(db: Database, http: httpx.AsyncClient, settings: dict[str, str] = SETTINGS) -> AdapterContext:
+def ctx(db: Database, http: httpx.AsyncClient, settings: dict[str, str] = SETTINGS, at: datetime = NOW) -> AdapterContext:
     return AdapterContext(slug=SLUG, settings=settings, config=Config(hallpass_url=URL, hallpass_token=TOKEN),
-                          db=db, http=http, clock=lambda: NOW)
+                          db=db, http=http, clock=lambda: at)
 
 
-def palworld(db: Database, http: httpx.AsyncClient) -> PalworldAdapter:
-    adapter = build_adapter("palworld", ctx(db, http))
+def palworld(db: Database, http: httpx.AsyncClient, at: datetime = NOW) -> PalworldAdapter:
+    adapter = build_adapter("palworld", ctx(db, http, at=at))
     assert isinstance(adapter, PalworldAdapter)
     return adapter
 
 
-async def run(db: Database, hallpass: FakeHallpassState, pal: FakePalworldState, ptero: FakePteroState) -> None:
+async def run(db: Database, hallpass: FakeHallpassState, pal: FakePalworldState, ptero: FakePteroState,
+              at: datetime = NOW) -> None:
     async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
-        adapter = palworld(db, http)
+        adapter = palworld(db, http, at)
         client = MonitorClient(URL, TOKEN, transport=make_hallpass_transport(hallpass))
         try:
-            await cycle(client=client, adapter_for=lambda s: adapter if s.slug == SLUG else None, now=NOW)
+            await cycle(client=client, adapter_for=lambda s: adapter if s.slug == SLUG else None, now=at)
         finally:
             await client.aclose()
 
@@ -206,17 +209,65 @@ async def test_a_ban_placed_by_a_moderator_after_our_observe_is_not_lifted(db: D
     assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) is None
 
 
-async def test_a_record_whose_ban_is_gone_from_the_file_is_forgotten_without_an_unban(db: Database) -> None:
+async def test_a_record_whose_ban_is_gone_past_the_grace_window_is_forgotten_without_an_unban(db: Database) -> None:
     pal, ptero = pal_state(), banlist()
     hallpass = pal_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
     await run(db, hallpass, pal, ptero)
     ptero.files[(SERVER, BANLIST_PATH)] = ""
     sent = len(pal.requests)
     hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=4)]
-    await run(db, hallpass, pal, ptero)
+    await run(db, hallpass, pal, ptero, at=PAST_GRACE)
     assert len(pal.requests) == sent
     assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) is None
     assert outcomes(hallpass)[-1] == ("r1", "allowed", None)
+
+
+# The ban list may lag the REST call. A ban inside the grace window that is not listed yet is in flight: it reads as
+# suspended, its record is kept, and no second ban is sent. Past the window, an unlisted ban is forgotten.
+
+async def test_a_lagging_ban_file_within_the_grace_window_is_suspended_and_the_record_kept(db: Database) -> None:
+    pal, ptero = pal_state(), banlist()
+    hallpass = pal_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    await run(db, hallpass, pal, ptero)                                  # cycle N: the ban is sent and recorded
+    ptero.files[(SERVER, BANLIST_PATH)] = ""                             # the file has not caught up
+    sent = len(pal.requests)
+    await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=60))  # cycle N+1, inside the window
+    assert outcomes(hallpass)[-1] == ("r1", "suspended", None)
+    assert len(pal.requests) == sent
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
+
+
+async def test_a_line_that_appears_late_within_the_grace_window_is_still_ours(db: Database) -> None:
+    pal, ptero = pal_state(), banlist()
+    hallpass = pal_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    await run(db, hallpass, pal, ptero)
+    ptero.files[(SERVER, BANLIST_PATH)] = ""
+    await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=60))
+    ptero.files[(SERVER, BANLIST_PATH)] = f"steam_{OWN_ID}\n"            # the line arrives in cycle N+2
+    sent = len(pal.requests)
+    await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=120))
+    assert outcomes(hallpass)[-1] == ("r1", "suspended", None)
+    assert len(pal.requests) == sent
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
+
+
+async def test_the_unlisted_record_is_kept_at_the_setting_and_forgotten_one_second_after_it(db: Database) -> None:
+    """The window is the setting plus the one-second margin for the second-precision placed_at, so at exactly the
+    setting the ban is still in flight, and one second later it is forgotten."""
+    pal, ptero = pal_state(), banlist()
+    hallpass = pal_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    await run(db, hallpass, pal, ptero)
+    ptero.files[(SERVER, BANLIST_PATH)] = ""
+    await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=GRACE))
+    assert outcomes(hallpass)[-1] == ("r1", "suspended", None)
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
+
+    hallpass.services[0]["subjects"] = [subject("r1", "allowed", steam(OWN_ID), generation=4)]
+    sent = len(pal.requests)
+    await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=GRACE + 1))
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) is None
+    assert outcomes(hallpass)[-1] == ("r1", "allowed", None)
+    assert len(pal.requests) == sent
 
 
 # Identity: a missing or malformed steam_id is refused before any request or file write -----------------
@@ -308,6 +359,23 @@ async def test_the_registry_needs_every_palworld_setting(db: Database, caplog: p
 async def test_the_registry_builds_the_adapter_when_every_setting_is_present(db: Database) -> None:
     async with httpx.AsyncClient() as http:
         assert isinstance(build_adapter("palworld", ctx(db, http)), PalworldAdapter)
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "1e3", "abc", "1234567890"])
+async def test_a_forget_grace_that_is_not_a_positive_whole_number_is_not_configured(
+        db: Database, caplog: pytest.LogCaptureFixture, value: str) -> None:
+    settings = {**SETTINGS, "forget_grace_seconds": value}
+    async with httpx.AsyncClient() as http:
+        with caplog.at_level(logging.INFO):
+            assert build_adapter("palworld", ctx(db, http, settings)) is None
+    assert [r.getMessage() for r in caplog.records].count("adapter_not_configured") == 1
+
+
+async def test_the_forget_grace_defaults_to_the_documented_seconds_and_accepts_a_setting(db: Database) -> None:
+    async with httpx.AsyncClient() as http:
+        assert palworld(db, http)._grace == own.DEFAULT_GRACE_SECONDS == 600
+        settings = {**SETTINGS, "forget_grace_seconds": "120"}
+        assert build_adapter("palworld", ctx(db, http, settings))._grace == 120
 
 
 async def test_apply_refuses_to_unban_a_ban_nobody_here_placed(db: Database) -> None:
