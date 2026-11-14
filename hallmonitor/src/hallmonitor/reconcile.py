@@ -19,7 +19,8 @@ from datetime import UTC, datetime
 import httpx
 
 from hallmonitor.adapters.base import Adapter, AdapterError, Observed
-from hallmonitor.adapters.registry import AdapterContext, build_adapter
+from hallmonitor.adapters.context import AdapterContext
+from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient, MonitorError
 from hallmonitor.config import Config
 from hallmonitor.contract import Report, ServiceDesired, Subject

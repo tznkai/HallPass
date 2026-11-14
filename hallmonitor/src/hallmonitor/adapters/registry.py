@@ -7,26 +7,12 @@ Mirrors fluxer-activity-panel's sources/registry.py. A plugin returns None when 
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 
-import httpx
-
-from hallmonitor.adapters import manual
+from hallmonitor.adapters import fluxer, manual
 from hallmonitor.adapters.base import Adapter
-from hallmonitor.config import Config
-from hallmonitor.db import Database
-
-
-@dataclass(frozen=True)
-class AdapterContext:
-    slug: str
-    settings: Mapping[str, str]
-    config: Config
-    db: Database
-    http: httpx.AsyncClient
-    clock: Callable[[], datetime]
+from hallmonitor.adapters.context import AdapterContext
 
 
 @dataclass(frozen=True)
@@ -36,6 +22,7 @@ class AdapterPlugin:
 
 ADAPTERS: dict[str, AdapterPlugin] = {
     "manual": AdapterPlugin(manual.create),
+    "fluxer": AdapterPlugin(fluxer.create),
 }
 
 
