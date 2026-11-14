@@ -79,3 +79,8 @@ LOCKDOWN_EMAIL_BODY_MONITORED = ("Access for {child} is suspended on every servi
 LOCKDOWN_REVIEW_REASON_DEFAULT = "Two changes by different parents within the review window."
 LOCKDOWN_REVIEW_REASON_MONITORED = ("Two changes by different parents within the review window. "
                                     "The agreement note reads: {agreement_note}")
+# Monitor reports, shown next to the access status: what hallmonitor last reported for a service row.
+NOT_YET_CONFIRMED = "requested, not yet confirmed"
+BANNED_IN_GAME = "banned in game"
+SERVICE_ERROR = "the service could not be reached"
+PENDING_RESTART = "applied, waiting for the service to restart"
