@@ -4,7 +4,7 @@
 
 Forward auth, the personal page and the desired-state computation for the monitor API all use `evaluate`, so they
 cannot disagree. A service is suspended whenever any reason applies. The reasons come in a fixed order:
-retired, not_entitled, not_active, terms. Hold reasons are added in a later phase.
+retired, not_entitled, not_active, terms, held. A hold of any kind on (person, service) gives `held`.
 """
 
 from __future__ import annotations
@@ -24,6 +24,27 @@ class Access:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class Hold:
+    id: int
+    person_id: int
+    service_id: int
+    kind: Literal["parent", "admin", "lockdown"]
+    placed_by: int | None
+    placed_at: str
+    reason: str
+    review_id: int | None
+
+
+def holds_for(conn: sqlite3.Connection, person_id: int, service_id: int) -> list[Hold]:
+    rows = conn.execute(
+        "SELECT id, person_id, service_id, kind, placed_by, placed_at, reason, review_id FROM hold "
+        "WHERE person_id = ? AND service_id = ? ORDER BY id",
+        (person_id, service_id),
+    ).fetchall()
+    return [Hold(*row) for row in rows]
+
+
 def evaluate(conn: sqlite3.Connection, person: Person, service: Service) -> Access:
     reasons: list[str] = []
     if service.retired:
@@ -34,6 +55,8 @@ def evaluate(conn: sqlite3.Connection, person: Person, service: Service) -> Acce
         reasons.append("not_active")
     if terms.services_blocked(terms.state_for(conn, person.id)):
         reasons.append("terms")
+    if holds_for(conn, person.id, service.id):
+        reasons.append("held")
     return Access(desired="suspended" if reasons else "allowed", reasons=tuple(reasons))
 
 

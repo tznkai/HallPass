@@ -179,3 +179,55 @@ async def test_services_for_lists_entitled_and_identified_services_by_name_and_s
         ("calendar", "allowed"), ("valheim", "suspended"),
     ]
     assert rows[1][1].reasons == ("not_entitled",)
+
+
+# held reason (AC6.3, store level) ----------------------------------------------------------------
+
+async def insert_hold(db: Database, *, person_id: int, service_id: int, kind: str, placed_by: int | None) -> None:
+    await db.run(lambda c: c.execute(
+        "INSERT INTO hold (person_id, service_id, kind, placed_by, placed_at) VALUES (?, ?, ?, ?, ?)",
+        (person_id, service_id, kind, placed_by, "2026-11-13T12:00:00+00:00")))
+
+
+async def remove_holds(db: Database, *, person_id: int, kind: str) -> None:
+    await db.run(lambda c: c.execute("DELETE FROM hold WHERE person_id = ? AND kind = ?", (person_id, kind)))
+
+
+async def test_parent_and_admin_holds_suspend_with_held_until_both_are_gone(db: Database, admin: Person) -> None:
+    adult, calendar = await active_adult_with_type_grant(db, admin)
+    parent = await make_person(db, account_type="parent", name="Mum")
+    await insert_hold(db, person_id=adult.id, service_id=calendar.id, kind="parent", placed_by=parent.id)
+    await insert_hold(db, person_id=adult.id, service_id=calendar.id, kind="admin", placed_by=admin.id)
+
+    assert await decide(db, adult.id, calendar) == access.Access(desired="suspended", reasons=("held",))
+
+    await remove_holds(db, person_id=adult.id, kind="parent")
+    assert await decide(db, adult.id, calendar) == access.Access(desired="suspended", reasons=("held",))
+
+    await remove_holds(db, person_id=adult.id, kind="admin")
+    assert await decide(db, adult.id, calendar) == access.Access(desired="allowed", reasons=())
+
+
+async def test_a_hold_on_one_service_does_not_suspend_another(db: Database, admin: Person) -> None:
+    adult, calendar = await active_adult_with_type_grant(db, admin)
+    valheim = await make_service(db, "valheim", kind="game")
+    await entitle(db, admin, valheim.id, "type", "adult")
+    await insert_hold(db, person_id=adult.id, service_id=calendar.id, kind="admin", placed_by=admin.id)
+
+    assert (await decide(db, adult.id, calendar)).reasons == ("held",)
+    assert await decide(db, adult.id, valheim) == access.Access(desired="allowed", reasons=())
+
+
+async def test_holds_for_returns_only_the_holds_on_that_person_and_service(db: Database, admin: Person) -> None:
+    adult, calendar = await active_adult_with_type_grant(db, admin)
+    other = await make_person(db, name="Other")
+    valheim = await make_service(db, "valheim", kind="game")
+    parent = await make_person(db, account_type="parent", name="Mum")
+    await insert_hold(db, person_id=adult.id, service_id=calendar.id, kind="parent", placed_by=parent.id)
+    await insert_hold(db, person_id=adult.id, service_id=valheim.id, kind="admin", placed_by=admin.id)
+    await insert_hold(db, person_id=other.id, service_id=calendar.id, kind="admin", placed_by=admin.id)
+
+    found = await db.run(lambda c: access.holds_for(c, adult.id, calendar.id))
+    assert [(h.kind, h.placed_by, h.review_id) for h in found] == [("parent", parent.id, None)]
+    on_valheim = await db.run(lambda c: access.holds_for(c, adult.id, valheim.id))
+    assert [(h.kind, h.placed_by, h.service_id) for h in on_valheim] == [("admin", admin.id, valheim.id)]

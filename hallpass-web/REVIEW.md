@@ -57,8 +57,8 @@ as the code they cite.
 
 ## Access decision
 
-- `src/hallpass/access.py:27` `def evaluate(conn` — the one per-person, per-service decision that forward auth, the personal page and the desired-state computation all share
-- `src/hallpass/access.py:37` `Access(desired=` — the service is suspended whenever any reason applies, so a retired, unentitled, inactive or blocked person is never allowed
+- `src/hallpass/access.py:48` `def evaluate(conn` — the one per-person, per-service decision that forward auth, the personal page and the desired-state computation all share
+- `src/hallpass/access.py:60` `Access(desired=` — the service is suspended whenever any reason applies, so a retired, unentitled, inactive, blocked or held person is never allowed
 
 ## Forward auth
 
