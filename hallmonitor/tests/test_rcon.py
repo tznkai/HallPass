@@ -122,6 +122,39 @@ async def test_connection_dropped_mid_response_is_protocol_error():
     assert info.value.reason == "protocol"
 
 
+SHORT_TIMEOUT = 0.2  # seconds: long enough for loopback, short enough that a timeout test stays quick
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+async def test_a_server_that_never_answers_the_sentinel_times_out(dialect):
+    state = FakeRconState(dialect=dialect, swallow_sentinel=True)
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD, dialect=dialect, timeout=SHORT_TIMEOUT) as client:
+            with pytest.raises(RconError) as info:
+                await client.command("whitelist list")
+    assert info.value.reason == "timeout"
+
+
+async def test_a_server_that_never_answers_the_password_times_out():
+    state = FakeRconState(silent_auth=True)
+    async with rcon_server(state) as port:
+        with pytest.raises(RconError) as info:
+            async with RconClient(LOOPBACK, port, PASSWORD, timeout=SHORT_TIMEOUT):
+                pass
+    assert info.value.reason == "timeout"
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+async def test_a_response_closed_after_its_first_fragment_is_a_protocol_error(dialect):
+    state = FakeRconState(dialect=dialect, fragment=True, close_after_first_fragment=True,
+                          handler=lambda _state, _cmd: "a" * 5000)   # two fragments; the second never arrives
+    async with rcon_server(state) as port:
+        async with RconClient(LOOPBACK, port, PASSWORD, dialect=dialect) as client:
+            with pytest.raises(RconError) as info:
+                await client.command("anything")
+    assert info.value.reason == "protocol"
+
+
 async def test_command_over_the_limit_is_refused_before_sending():
     state = FakeRconState()
     async with rcon_server(state) as port:
