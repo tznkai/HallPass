@@ -46,7 +46,7 @@ async def test_command_round_trip_returns_the_handler_output(dialect):
     async with rcon_server(state) as port:
         async with RconClient(LOOPBACK, port, PASSWORD, dialect=dialect) as client:
             text = await client.command("whitelist list")
-    assert text == "There are 1 whitelisted player: Steve"
+    assert text == "There are 1 whitelisted player(s): Steve"
     assert state.commands == ["whitelist list"]
 
 

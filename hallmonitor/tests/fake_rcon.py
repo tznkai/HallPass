@@ -54,10 +54,10 @@ def _index(names: list[str], name: str) -> int | None:
 
 
 def _whitelist_list(state: FakeRconState) -> str:
+    # The plan's default format, with the plural written as player(s) for every count.
     if not state.whitelist:
         return "There are no whitelisted players"
-    noun = "player" if len(state.whitelist) == 1 else "players"
-    return f"There are {len(state.whitelist)} whitelisted {noun}: {', '.join(state.whitelist)}"
+    return f"There are {len(state.whitelist)} whitelisted player(s): {', '.join(state.whitelist)}"
 
 
 def _whitelist_add(state: FakeRconState, stored: str, shown: str) -> str:

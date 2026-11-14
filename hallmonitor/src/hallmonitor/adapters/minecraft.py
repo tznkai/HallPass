@@ -33,7 +33,7 @@ DEFAULT_PORT = 25575
 DEFAULT_FLOODGATE_PREFIX = "."
 DEFAULT_KICK_MESSAGE = "Access paused. Ask a parent or the administrator."
 NO_WHITELISTED = "There are no whitelisted players"
-WHITELIST_LINE = re.compile(r"whitelisted players?:\s*(.*)$")
+WHITELIST_LINE = re.compile(r"whitelisted player(?:s|\(s\))?:\s*(.*)$")  # the plan's player(s), or plural or singular
 BAN_HEADER = re.compile(r"There are (?:no bans|\d+ ban\(s\):)")
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
 

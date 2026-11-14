@@ -17,9 +17,9 @@ from typing import Any
 import httpx
 import pytest
 
-from hallmonitor.adapters.base import Observed
+from hallmonitor.adapters.base import AdapterError, Observed
 from hallmonitor.adapters.context import AdapterContext
-from hallmonitor.adapters.minecraft import BEDROCK_KIND, JAVA_KIND, MinecraftAdapter
+from hallmonitor.adapters.minecraft import BEDROCK_KIND, JAVA_KIND, MinecraftAdapter, _parse_whitelist
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.client import MonitorClient
 from hallmonitor.config import Config
@@ -254,6 +254,33 @@ async def test_a_player_with_only_one_of_two_names_listed_is_brought_fully_onto_
         await run(hallpass, port)
     assert state.whitelist == ["Steve", ".Tim"]
     assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+# The whitelist list format: the plan's default strings, parsed exactly -----------------------------------
+
+@pytest.mark.parametrize(("text", "names"), [
+    ("There are 1 whitelisted player(s): Steve", ["Steve"]),
+    ("There are 3 whitelisted player(s): a, b, c", ["a", "b", "c"]),
+    ("There are 2 whitelisted players: Steve, .Tim", ["Steve", ".Tim"]),
+    ("There are no whitelisted players", []),
+])
+def test_the_whitelist_list_parses_the_plan_format(text: str, names: list[str]) -> None:
+    assert _parse_whitelist(text) == names
+
+
+def test_a_whitelist_list_in_an_unknown_format_is_unexpected() -> None:
+    with pytest.raises(AdapterError) as info:
+        _parse_whitelist("Whitelist: Steve")
+    assert info.value.reason == "unexpected"
+
+
+async def test_a_whitelist_in_the_plan_format_is_read_and_a_hold_is_applied() -> None:
+    state = server_state(whitelist=["Steve", "Alex"], online={"Steve"})
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Alex"]
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
 
 
 # AC9.10 (Minecraft): an unmanaged whitelist entry is left alone and counted --------------------------------
