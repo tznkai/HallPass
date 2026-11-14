@@ -8,6 +8,9 @@ Exit codes:
 - 3: the database was refused (quarantined or unreadable).
 - 4: a listener failed to start, or ended with SystemExit. The other listener is asked to stop too.
 Any other uncaught error exits 1 through Python's default handling.
+
+A stop signal (SIGINT or SIGTERM) asks both listeners to stop, and each lets its in-flight requests finish. A second
+stop signal sets `force_exit` on both, which cuts that wait short, as a second Ctrl+C does under uvicorn.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ import contextlib
 import logging
 import signal
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 
 import uvicorn
@@ -57,17 +60,30 @@ class MonitorServer(_NoSignalServer):
     """The monitor listener. `serve_both` stops it along with the public one."""
 
 
-async def serve_both(public: uvicorn.Server, monitor: uvicorn.Server) -> int:
-    """Runs both listeners until SIGINT or SIGTERM, or until one of them stops. A stop request reaches both servers. A
-    listener that ends, normally or by error, asks the other to stop. Returns EXIT_LISTENER_FAILED when a listener
-    failed to start (uvicorn exits with SystemExit on a bind failure) and EXIT_OK otherwise. Any other exception from
-    a listener is raised after the other listener has stopped."""
-    loop = asyncio.get_running_loop()
-    servers = (public, monitor)
+def stop_request(servers: Sequence[uvicorn.Server]) -> Callable[[], None]:
+    """Returns the handler for SIGINT and SIGTERM. The first signal asks every server to stop. A repeated signal also
+    sets `force_exit` on every server, so a slow in-flight request cannot hold the process open."""
+    signals_received = 0
 
     def request_stop() -> None:
+        nonlocal signals_received
+        signals_received += 1
         for server in servers:
             server.should_exit = True
+            if signals_received > 1:
+                server.force_exit = True
+
+    return request_stop
+
+
+async def serve_both(public: uvicorn.Server, monitor: uvicorn.Server) -> int:
+    """Runs both listeners until SIGINT or SIGTERM, or until one of them stops. A stop request reaches both servers, and
+    a repeated one forces both to exit (see `stop_request`). A listener that ends, normally or by error, asks the other
+    to stop. Returns EXIT_LISTENER_FAILED when a listener failed to start (uvicorn exits with SystemExit on a bind
+    failure) and EXIT_OK otherwise. Any other exception from a listener is raised after the other listener has
+    stopped."""
+    loop = asyncio.get_running_loop()
+    request_stop = stop_request((public, monitor))
 
     async def run(server: uvicorn.Server, other: uvicorn.Server) -> int:
         try:

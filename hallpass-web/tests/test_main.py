@@ -24,7 +24,8 @@ from pathlib import Path
 import pytest
 import uvicorn
 
-from hallpass.__main__ import EXIT_LISTENER_FAILED, EXIT_OK, MonitorServer, PublicServer, build_servers, main, serve_both
+from hallpass.__main__ import (EXIT_LISTENER_FAILED, EXIT_OK, MonitorServer, PublicServer, build_servers, main,
+                               serve_both, stop_request)
 from tests.helpers import ENV, make_env
 
 HOST = "127.0.0.1"
@@ -71,6 +72,7 @@ class FakeServer:
 
     def __init__(self, *, finish: bool = False, fail: BaseException | None = None) -> None:
         self.should_exit = False
+        self.force_exit = False
         self._finish = finish
         self._fail = fail
 
@@ -79,6 +81,18 @@ class FakeServer:
             raise self._fail
         while not self._finish and not self.should_exit:
             await asyncio.sleep(0.01)
+
+
+def test_a_repeated_stop_signal_forces_both_servers_to_exit() -> None:
+    public, monitor = FakeServer(), FakeServer()
+    request_stop = stop_request((public, monitor))
+
+    request_stop()
+    assert (public.should_exit, monitor.should_exit) == (True, True)
+    assert (public.force_exit, monitor.force_exit) == (False, False)
+
+    request_stop()
+    assert (public.force_exit, monitor.force_exit) == (True, True)
 
 
 async def test_when_one_listener_ends_the_other_is_asked_to_stop() -> None:
@@ -140,10 +154,19 @@ async def test_the_listeners_bind_their_own_ports_and_only_the_public_one_trusts
 
 # Subprocess lifecycle: real listeners, real signals ----------------------------------------------------
 
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind((HOST, 0))
-        return probe.getsockname()[1]
+def free_ports(count: int) -> list[int]:
+    """Returns `count` distinct free ports on 127.0.0.1. Every probe stays open until all ports are known, so the kernel
+    cannot hand the same port out twice; the probes are closed together afterwards."""
+    probes: list[socket.socket] = []
+    try:
+        for _ in range(count):
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probes.append(probe)
+            probe.bind((HOST, 0))
+        return [probe.getsockname()[1] for probe in probes]
+    finally:
+        for probe in probes:
+            probe.close()
 
 
 def is_listening(port: int) -> bool:
@@ -202,7 +225,7 @@ def json_events(output: Path) -> list[dict]:
 
 
 def test_sigterm_stops_both_listeners_and_runs_the_cleanup(tmp_path: Path) -> None:
-    public_port, monitor_port = free_port(), free_port()
+    public_port, monitor_port = free_ports(2)
     process, output = launch(tmp_path, public_port, monitor_port)
     try:
         wait_until_listening(public_port, process)
@@ -230,7 +253,7 @@ def test_a_port_already_in_use_exits_4_and_stops_the_other_listener(tmp_path: Pa
         taken.bind((HOST, 0))
         taken.listen(1)
         taken_port = taken.getsockname()[1]
-        other_port = free_port()
+        (other_port,) = free_ports(1)  # the taken socket is still open, so this port cannot be the taken one
         public_port, monitor_port = (taken_port, other_port) if occupied == "public" else (other_port, taken_port)
         process, output = launch(tmp_path, public_port, monitor_port)
         try:
