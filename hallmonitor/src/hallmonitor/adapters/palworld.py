@@ -113,7 +113,9 @@ class PalworldAdapter:
         """True for our own ban placed within the grace window. The ban list may not show it yet: the server writes the
         file after the REST call, so a ban that is not listed inside the window is in flight, not gone. Observe reads it
         as suspended, so the record is kept and no second ban is sent. Past the window it is forgotten, as a ban that
-        never appeared."""
+        never appeared. Inside the window (a) a moderator's ban on the same id counts as ours and is lifted on restore,
+        and (b) a moderator's unban is reported as suspended and not re-enforced until the window ends. Both are
+        accepted costs of handling the ban-list lag, pending the live check."""
         return record is not None and record[0] == OWN_BAN and own.within_grace(record[1], now, self._grace)
 
     async def _observe_one(self, subject: Subject, banned: set[str], now: datetime) -> Observed:

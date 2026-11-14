@@ -270,6 +270,19 @@ async def test_the_unlisted_record_is_kept_at_the_setting_and_forgotten_one_seco
     assert len(pal.requests) == sent
 
 
+async def test_apply_inside_the_grace_window_does_not_send_a_second_ban_when_the_list_lacks_our_ban(db: Database) -> None:
+    """The in-flight guard in apply: our ban is recorded within the window and the list does not show it, so apply
+    sends no second ban request and reports suspended, with the record kept."""
+    pal, ptero = pal_state(), banlist()
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        await db.run(lambda c: own.record_own(c, SLUG, OWN_ID, "ban", NOW))
+        adapter = palworld(db, http, at=NOW + timedelta(seconds=60))
+        result = await adapter.apply(Subject("r1", (Identity("steam_id", OWN_ID),), "suspended", 2), "suspended")
+    assert result == Observed("suspended")
+    assert pal.requests == []
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
+
+
 # Identity: a missing or malformed steam_id is refused before any request or file write -----------------
 
 async def test_a_missing_ban_list_file_fails_the_service_with_not_found(db: Database) -> None:

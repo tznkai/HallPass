@@ -4,8 +4,9 @@
 
 The Fluxer adapter places no suspensions and never calls these helpers. They exist for adapters that do.
 
-A record is forgotten only once its ban has been absent from the ban list for longer than the grace window. A game server
-may take a moment to write a ban to its list, so a ban placed within that window is still in flight, not gone.
+A Palworld record is forgotten only once its ban has been absent from the ban list for longer than the grace window.
+The Palworld server may take a moment to write a ban to its list, so a ban placed within that window is still in flight,
+not gone. The Source console list is written by `writeid` before the command returns, so Source has no such window.
 """
 
 from __future__ import annotations
