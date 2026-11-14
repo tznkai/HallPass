@@ -91,6 +91,22 @@ The Fluxer `email` mapping is checked with the Fluxer SSO run (hallmonitor `docs
 `GET /api/v3/core/tokens/?identifier=<identifier>` → `expiring` false. An `expires` timestamp is still present
 but does not apply while `expiring` is false.
 
+## Phase 2 sign-in
+
+Hallpass ran against the test Authentik at `<hallpass>` behind the reverse proxy, with the strict redirect URI
+`<hallpass>/auth/callback` on the hallpass OIDC provider.
+
+- **Admin bootstrap:** signing in as the Authentik admin, whose `sub` is listed in `HALLPASS_ADMIN_SUBS`, made that
+  person the hallpass admin.
+- **Invite:** the admin created a child with no email. The page showed an invite URL of the form
+  `<authentik>/if/flow/<flow-slug>/?itoken=<pk>`.
+- **Enrolment:** in a private window, the invite URL led through username and password to a new Authentik
+  account. The flow then ended on Authentik's own application library (`<authentik>/if/user/#library`), not on
+  hallpass, because the invite URL carries no `next`.
+- **First sign-in and binding:** opening `<hallpass>/` in the same window signed the child in to hallpass. The
+  admin's people page then showed the child's username, so the enrolment value bound the record to the account.
+- **Single use:** opening the invite URL a second time was refused.
+
 ## Design changes
 
 - **Ending a user's sessions.** The plan's `end_sessions(pk)` listed `?user=<pk>` and deleted each result.
