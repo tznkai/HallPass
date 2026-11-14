@@ -357,7 +357,7 @@ def people_missing_fluxer_address(conn: sqlite3.Connection) -> list[Person]:
 # Decision log -----------------------------------------------------------------------------------------
 
 def log_decision(conn: sqlite3.Connection, *, at: datetime, actor_kind: str, actor_person_id: int | None,
-                 target_person_id: int | None, action: str, services: Iterable[str] = (),
+                 target_person_id: int | None, action: str, services: Iterable[str | int] = (),
                  detail: dict | None = None, reversal: bool = False) -> int:
     return conn.execute(
         "INSERT INTO decision_log (at, actor_kind, actor_person_id, target_person_id, action, services, detail, "

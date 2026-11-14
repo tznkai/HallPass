@@ -154,6 +154,7 @@ class Config:
     smtp_from: str | None = None
     smtp_starttls: bool = True
     admin_email: str | None = None
+    conflict_window_hours: int = 24
 
     def secrets(self) -> list[str]:
         """Every non-empty secret value, for the log redaction filter. Add each new secret field here."""
@@ -205,4 +206,5 @@ class Config:
             smtp_from=smtp_from,
             smtp_starttls=_flag(env, "SMTP_STARTTLS", True),
             admin_email=_email(env, "HALLPASS_ADMIN_EMAIL"),
+            conflict_window_hours=_positive_int(env, "HALLPASS_CONFLICT_WINDOW_HOURS", "24"),
         )

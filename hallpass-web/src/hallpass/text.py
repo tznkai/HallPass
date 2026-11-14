@@ -51,3 +51,28 @@ FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. As
 # The admin service pages.
 SERVICE_TAKEN = "A service with that slug already exists."
 ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
+# Holds and the conflict rules. Actor labels are what a person sees as "Suspended by ...".
+ACTOR_ADMIN = "the administrator"
+ACTOR_SYSTEM = "the system"
+STRICT_NOT_YOURS = "{names} placed a hold on this service. In strict mode only the parent who placed a hold can lift it."
+RESTORE_NOT_AUTOMATIC = "This service cannot be restored automatically. Ask the administrator."
+NOT_YOUR_CHILD = "You can only change holds for a child linked to you."
+LOCKDOWN_ADMIN_ONLY = ("Only the administrator can lift an administrator hold or a lockdown. "
+                       "A lockdown is lifted by resolving its review.")
+MARK_NO_HOLD = "Only a held service can be marked manually suspended."
+MARK_NOT_MANUAL = "Only a service that cannot be automatically suspended can be marked manually suspended."
+# Notification emails are plain text. The child's display name and the actor label are the only names in them.
+CHANGE_EMAIL_SUBJECT = "Hallpass: access changed for {child}"
+CHANGE_EMAIL_BODY = ("{actor} changed the access of {child} in hallpass.\n\n"
+                     "Sign in to hallpass for details.\n")
+LOCKDOWN_EMAIL_SUBJECT = "Hallpass: access locked down for {child}"
+LOCKDOWN_EMAIL_BODY_DEFAULT = ("Access for {child} is suspended on every service, because two changes by different "
+                               "parents were made within the review window. The administrator will review it.\n\n"
+                               "Sign in to hallpass for details.\n")
+LOCKDOWN_EMAIL_BODY_MONITORED = ("Access for {child} is suspended on every service, because two changes by different "
+                                 "parents were made within the review window. The agreement note reads:\n\n"
+                                 "{agreement_note}\n\nThe administrator will review it. "
+                                 "Sign in to hallpass for details.\n")
+LOCKDOWN_REVIEW_REASON_DEFAULT = "Two changes by different parents within the review window."
+LOCKDOWN_REVIEW_REASON_MONITORED = ("Two changes by different parents within the review window. "
+                                    "The agreement note reads: {agreement_note}")

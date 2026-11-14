@@ -42,6 +42,7 @@ GOOD_ENV = {
     "SMTP_FROM": "hallpass@hallpass.invalid",
     "SMTP_STARTTLS": "false",
     "HALLPASS_ADMIN_EMAIL": "admin@hallpass.invalid",
+    "HALLPASS_CONFLICT_WINDOW_HOURS": "12",
 }
 
 REQUIRED = [
@@ -73,6 +74,7 @@ def test_complete_env_parses_with_every_field() -> None:
     assert config.smtp_from == "hallpass@hallpass.invalid"
     assert config.smtp_starttls is False
     assert config.admin_email == "admin@hallpass.invalid"
+    assert config.conflict_window_hours == 12
 
 
 def test_smtp_and_admin_email_are_optional_when_blank() -> None:
@@ -106,6 +108,12 @@ def test_smtp_starttls_must_be_true_or_false(bad: str) -> None:
         Config.from_env({**GOOD_ENV, "SMTP_STARTTLS": bad})
 
 
+@pytest.mark.parametrize("bad", ["0", "-3", "soon"])
+def test_conflict_window_must_be_a_positive_integer(bad: str) -> None:
+    with pytest.raises(ConfigError, match="HALLPASS_CONFLICT_WINDOW_HOURS"):
+        Config.from_env({**GOOD_ENV, "HALLPASS_CONFLICT_WINDOW_HOURS": bad})
+
+
 def test_smtp_host_needs_a_from_address() -> None:
     with pytest.raises(ConfigError, match="SMTP_FROM"):
         Config.from_env({**GOOD_ENV, "SMTP_FROM": ""})
@@ -129,9 +137,10 @@ def test_malformed_smtp_host_is_refused_without_echoing_it() -> None:
 def test_defaults_apply_when_optional_variables_are_blank() -> None:
     env = {**GOOD_ENV, "HALLPASS_SESSION_MAX_AGE_SECONDS": "", "HALLPASS_DATA_DIR": "  ", "HALLPASS_BIND": "",
            "HALLPASS_INVITE_EXPIRY_HOURS": "", "HALLPASS_LOG_LEVEL": "", "HALLPASS_COOKIE_DOMAIN": "",
-           "HALLPASS_ADMIN_SUBS": ""}
+           "HALLPASS_ADMIN_SUBS": "", "HALLPASS_CONFLICT_WINDOW_HOURS": ""}
     config = Config.from_env(env)
     assert config.session_max_age_seconds == 43200
+    assert config.conflict_window_hours == 24
     assert config.data_dir == Path("data")
     assert (config.bind_host, config.bind_port) == ("127.0.0.1", 8080)
     assert config.invite_expiry_hours == 168
