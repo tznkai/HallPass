@@ -131,6 +131,41 @@ async def test_an_unsupported_report_on_a_held_abiotic_row_reads_cannot_be_autom
     assert f'{REPORT_LINE}cannot be automatically suspended<' in page.text
 
 
+# The admin person page: every service row, with its access status and report status ---------------------------
+
+async def test_the_admin_person_page_lists_each_service_with_its_status_and_report(env: Env) -> None:
+    person, browser = await signed_in_person(env)
+    await entitle(env, person, "minecraft", "game")
+    await entitle(env, person, "calendar", "forward_auth")
+    await browser.get("/")
+    await admin_client(env)
+    await post_report(env, slug="minecraft", ref=person.ref, observed="error", generation=1, detail="no_adapter")
+
+    page = await env.client.get(f"/admin/people/{person.id}")
+
+    assert page.status_code == 200
+    services_section = page.text.split("<h2>Services</h2>", 1)[1].split("<h2>Holds</h2>", 1)[0]
+    assert "<td>Minecraft" in services_section and "<td>Calendar" in services_section
+    assert services_section.count(f"{text.STATUS_ALLOWED}") >= 2
+    assert f"{REPORT_LINE}{text.NOT_CONFIGURED}<" in services_section
+    assert text.SERVICE_ERROR not in services_section
+    assert "Revoke" not in services_section, "the admin rows carry no parent controls"
+
+
+async def test_the_admin_person_page_shows_why_a_held_service_is_suspended(env: Env) -> None:
+    person, browser = await signed_in_person(env)
+    await entitle(env, person, "minecraft", "game")
+    await browser.get("/")
+    await admin_hold(env, person)
+
+    page = await env.client.get(f"/admin/people/{person.id}")
+
+    services_section = page.text.split("<h2>Services</h2>", 1)[1].split("<h2>Holds</h2>", 1)[0]
+    assert text.STATUS_SUSPENDED in services_section
+    assert text.REASON_HELD in services_section
+    assert f"{REPORT_LINE}{text.NOT_YET_CONFIRMED}<" in services_section
+
+
 # Pruning on the pages: a pair that stops being a subject shows and counts nothing ----------------------------
 
 ERROR_COUNT = "<td>Minecraft</td><td>1</td>"

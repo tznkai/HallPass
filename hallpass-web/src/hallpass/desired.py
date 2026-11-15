@@ -144,7 +144,8 @@ def report_status(desired_row: tuple[str, int] | None, found: Report | None, man
     if found.observed == "unsupported":
         return text.MANUALLY_SUSPENDED if manual_mark else text.CANNOT_AUTO_SUSPEND
     if found.observed == "error":
-        return text.SERVICE_ERROR
+        # no_adapter means hallmonitor has no settings for the service, not that a call to it failed.
+        return text.NOT_CONFIGURED if found.detail == "no_adapter" else text.SERVICE_ERROR
     if found.generation < desired_generation or found.observed != desired_value:
         return text.NOT_YET_CONFIRMED
     if found.detail == "pending_restart":

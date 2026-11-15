@@ -217,6 +217,8 @@ def report(observed: str, *, generation: int = 1, detail: str | None = None) -> 
     pytest.param(("suspended", 1), report("unsupported"), True, text.MANUALLY_SUSPENDED,
                  id="unsupported-marked"),
     pytest.param(("suspended", 1), report("error", detail="unreachable"), False, text.SERVICE_ERROR, id="error"),
+    pytest.param(("allowed", 1), report("error", detail="no_adapter"), False, text.NOT_CONFIGURED,
+                 id="error-no-adapter"),
     pytest.param(("suspended", 1), report("suspended", detail="pending_restart"), False, text.PENDING_RESTART,
                  id="pending-restart"),
 ])

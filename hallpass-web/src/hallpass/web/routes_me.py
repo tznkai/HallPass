@@ -3,7 +3,8 @@
 """The personal page: a person's services and status, their attached tokens, and the feed-link generator.
 
 A person's page is only ever built for the signed-in person (`current_person`). Nothing here takes another person's id;
-the parent's view of a child lives in routes_family and shows the child's service rows only.
+the parent's view of a child lives in routes_family and shows the child's service rows only. The admin person page
+(routes_admin) reuses `service_rows` for the person it shows.
 """
 
 from __future__ import annotations

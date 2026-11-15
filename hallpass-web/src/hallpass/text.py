@@ -96,4 +96,5 @@ LOCKDOWN_REVIEW_REASON_MONITORED = ("Two changes by different parents within the
 NOT_YET_CONFIRMED = "requested, not yet confirmed"
 BANNED_IN_GAME = "banned in game"
 SERVICE_ERROR = "the service could not be reached"
+NOT_CONFIGURED = "not configured in hallmonitor"
 PENDING_RESTART = "applied, waiting for the service to restart"

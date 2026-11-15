@@ -24,6 +24,7 @@ from hallpass.holds import HoldRefused
 from hallpass.logs import log_event
 from hallpass.registry import LinkRefused, NoSuchGroup, Person
 from hallpass.web.pages import message_page, page
+from hallpass.web.routes_me import service_rows
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin")
@@ -207,16 +208,19 @@ def _hold_rows(conn, person_id: int) -> list[dict]:
     return rows
 
 
-def _load_person(conn, person_id: int) -> dict:
+def _load_person(conn, person_id: int, now: datetime) -> dict:
     person = registry.get_person(conn, person_id)
     if person is None:
         raise registry.NoSuchPerson()
-    return _person_context(conn, person)
+    desired.refresh(conn, now)
+    return {**_person_context(conn, person), "service_rows": service_rows(conn, person)}
 
 
 async def _person_page(request: Request, admin: Person, person_id: int, *, status: int = 200,
                        error: str | None = None, warning: str | None = None) -> Response:
-    context = await _deps(request).db.run(lambda c: _load_person(c, person_id))
+    deps = _deps(request)
+    now = deps.clock()
+    context = await deps.db.run(lambda c: _load_person(c, person_id, now))
     return page(request, "admin/person.html", viewer=admin, status_code=status, error=error,
                 warning=WARNINGS.get(warning or ""), **context)
 
