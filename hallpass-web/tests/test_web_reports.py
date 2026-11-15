@@ -156,8 +156,12 @@ async def test_the_admin_person_page_shows_why_a_held_service_is_suspended(env: 
     person, browser = await signed_in_person(env)
     await entitle(env, person, "minecraft", "game")
     await browser.get("/")
+    confirmed = await post_report(env, slug="minecraft", ref=person.ref, observed="allowed", generation=1)
+    assert confirmed.status_code == 204
     await admin_hold(env, person)
 
+    # Only the admin page runs between the hold and this read, so its own refresh must raise the generation: without
+    # it the stale ("allowed", 1) row would still read as confirmed.
     page = await env.client.get(f"/admin/people/{person.id}")
 
     services_section = page.text.split("<h2>Services</h2>", 1)[1].split("<h2>Holds</h2>", 1)[0]
