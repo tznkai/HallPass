@@ -6,7 +6,8 @@ Reads the file and prints its line count and the first line's shape, never its c
 unchanged and prints the status. Reads the server's resources and prints its state and whether an uptime is present.
 Ids, the key and the instance address are printed as <redacted>, and every digit is masked in a shape.
 
-Environment: PTERO_URL, PTERO_KEY (a subuser key with only the file permissions), PTERO_SERVER (the server's short id).
+Environment: PTERO_URL, PTERO_KEY (a subuser key with only file.read and file.read-content, plus file.create for the
+write step: the write route checks file.create, not file.update), PTERO_SERVER (the server's short id).
 Exit codes: 0 every step ran; 1 a step failed; 2 configuration error; 130 interrupted.
 """
 

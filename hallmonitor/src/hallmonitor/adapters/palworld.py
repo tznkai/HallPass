@@ -119,7 +119,7 @@ class PalworldAdapter:
         as suspended, so the record is kept and no second ban is sent. Past the window it is forgotten, as a ban that
         never appeared. Inside the window (a) a moderator's ban on the same id counts as ours and is lifted on restore,
         and (b) a moderator's unban is reported as suspended and not re-enforced until the window ends. Both are
-        accepted costs of handling the ban-list lag, pending the live check."""
+        accepted costs of handling the ban-list lag. The live check showed the line on the first read after the ban."""
         return record is not None and record[0] == OWN_BAN and own.within_grace(record[1], now, self._grace)
 
     async def _observe_one(self, subject: Subject, banned: set[str], now: datetime) -> Observed:

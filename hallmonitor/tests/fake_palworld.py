@@ -4,7 +4,8 @@
 
 The REST routes are `POST /v1/api/ban` and `POST /v1/api/unban`, with HTTP Basic auth as `admin` and the admin password.
 A ban appends a `<userid>,<PlayerUId>` line to the ban-list file, the shape the live server writes (a 32-hex PlayerUId),
-and an unban removes that userid's lines, so the Pterodactyl read sees both. The file routes are served by `tests.fake_ptero_files.handle`, which owns the file text.
+and an unban removes that userid's lines, so the Pterodactyl read sees both. The file routes are served by
+`tests.fake_ptero_files.handle`, which owns the file text.
 """
 
 from __future__ import annotations
