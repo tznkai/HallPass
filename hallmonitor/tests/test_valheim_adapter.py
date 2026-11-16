@@ -714,6 +714,28 @@ async def test_a_failed_write_keeps_the_earlier_pending_record(db: Database) -> 
     assert await record_of(db, OWN_ID) == ("remove", T0)
 
 
+async def test_a_failed_restore_keeps_the_write_reason_so_the_pass_still_stops(
+        db: Database, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """A write refused for auth, and then a database failure while putting the earlier record back: the subject still
+    reports the write's own reason, so the loop stops the service's remaining applies."""
+    fake = ptero_state(PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n", uptime_ms=HOUR_MS)
+    await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)
+
+    async def broken_restore(self, steam_id, earlier) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ValheimAdapter, "_restore", broken_restore)
+    fake.fail_next = {"write": 401}
+    second = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=2),
+                             subject("r2", "allowed", steam(THIRD_ID)))
+    before = file_text(fake)
+    with caplog.at_level(logging.WARNING):
+        await run(db, second, fake, T0 + ONE_MINUTE)
+    assert dict((ref, (state, detail)) for ref, state, detail in outcomes(second))["r1"] == ("error", "auth")
+    assert file_text(fake) == before, "the service-wide stop keeps r2's add from being written"
+    assert [r.getMessage() for r in caplog.records].count("record_restore_failed") == 1
+
+
 # The two configured lists must name two files ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("banned", [
@@ -725,8 +747,11 @@ async def test_a_failed_write_keeps_the_earlier_pending_record(db: Database) -> 
     ".//" + PERMITTED,
     "x/../" + PERMITTED,
     "x/./../" + PERMITTED,
+    "../" + PERMITTED,
+    "/../" + PERMITTED,
+    "x/../../" + PERMITTED,
 ], ids=["same", "leading_slash", "whitespace", "double_slash", "dot_segment", "dot_slash_double", "parent_segment",
-        "mixed_segments"])
+        "mixed_segments", "above_root", "rooted_above_root", "two_above_root"])
 async def test_a_ban_list_path_naming_the_permitted_list_is_not_configured(db: Database, banned: str) -> None:
     settings = dict(SETTINGS, bannedlist_path=banned)
     async with httpx.AsyncClient() as http:

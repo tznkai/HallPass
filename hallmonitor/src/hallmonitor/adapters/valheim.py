@@ -118,9 +118,13 @@ def _without_id(text: str, steam_id: str) -> str:
 
 
 def _same_file(first: str, second: str) -> bool:
-    """True when two configured paths name one file: surrounding whitespace, leading slashes, dot segments and repeated
-    slashes are not significant."""
-    return posixpath.normpath(first.strip().lstrip("/")) == posixpath.normpath(second.strip().lstrip("/"))
+    """True when two configured paths name one file: surrounding whitespace, leading slashes, dot segments, repeated
+    slashes and `..` above the server root are not significant. Each path is rooted before it is normalised, so a `..`
+    that would climb above the root stays at it."""
+    def rooted(path: str) -> str:
+        return posixpath.normpath("/" + path.strip().lstrip("/"))
+
+    return rooted(first) == rooted(second)
 
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
@@ -236,7 +240,12 @@ class ValheimAdapter:
         try:
             await self._write(text)
         except AdapterError:
-            await self._restore(steam_id, earlier)
+            try:
+                await self._restore(steam_id, earlier)
+            except Exception:  # noqa: BLE001 - any restore failure must not hide the write's own reason
+                # The write's own reason must still reach the loop, so a service-wide failure still stops the pass.
+                # The earlier record may be lost here; it takes a failed write and a failed database call together.
+                log_event(log, "record_restore_failed", level=logging.WARNING, service=self._slug)
             raise
         return Observed(state, PENDING)
 
