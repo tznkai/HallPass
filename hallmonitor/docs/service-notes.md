@@ -142,6 +142,21 @@ recorded. The `hallmonitor` subuser's Client API key (`ptlc_...`) is used with e
 
 ## Valheim
 
+Verdict: automated (permitted list through Pterodactyl, live reload). Checked on 2026-11-16 on a server run without
+`-crossplay`, using one test account. Ids are placeholders such as `<steam-id>`.
+
+- **Files.** `.config/unity3d/IronGate/Valheim/permittedlist.txt` and `bannedlist.txt`, relative to the server root.
+  Both are ASCII, with no BOM and LF line endings, and each starts with a `// ...` comment line.
+- **Enforcement.** With one valid entry, the permitted list is enforced: a made-up id, bare or as `Steam_<id>`, was
+  refused.
+- **Forms.** The test account's id was let in both as bare digits and as `Steam_<steam-id>`. The adapter writes the
+  `Steam_` form, so the line keeps working if crossplay is turned on later.
+- **Live reload.** Removing the test account's line while the server ran kicked the connected player. Adding it back, as
+  `Steam_<steam-id>`, let them join with no restart. So `live_reload` is true for this server.
+- **Not tested.** An empty permitted list (V4). Valheim is widely documented to let anyone join when the list is empty,
+  so the adapter's empty-list guard (`would_open_server`) is required regardless.
+- **Permissions.** Writing needs `file.create`, as in `## Pterodactyl`.
+
 ## The Ship
 
 ## Abiotic Factor

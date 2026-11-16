@@ -58,8 +58,9 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 - **Identity allowlists.** Every identity passes an allowlist before any command or file line is built from it:
   Minecraft Java/Bedrock name patterns and the Floodgate prefix set, and a canonical SteamID64 (`adapters/steam.py`)
   for Palworld, Valheim and Source. An unsafe value is `bad_identity`. Never widen these without a live check.
-- Valheim edits the ban-list file through `pterodactyl.py`, which has no compare-and-swap (the race is accepted in
-  `REVIEW.md`). Unless `live_reload` is on, a change is `pending_restart` until the server's uptime covers it.
+- Valheim edits the permitted list through `pterodactyl.py`, which has no compare-and-swap (the race is accepted in
+  `REVIEW.md`). It never writes the ban list, and a suspension that would leave the list empty writes nothing. Unless
+  `live_reload` is on, a change is `pending_restart` until the server's uptime covers it.
 
 ## Monitor API contract
 
@@ -95,7 +96,7 @@ code updates `REVIEW.md` in the same change.
 
 Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run
 only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
-ids. Fluxer, Palworld and the Pterodactyl permissions are recorded. The Minecraft section lists the adapter's assumptions
-as pending, and the Valheim, The Ship and Abiotic Factor sections are still empty. Until a service's check is
-recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
+ids. Fluxer, Palworld, Valheim and the Pterodactyl permissions are recorded. The Minecraft section lists the adapter's
+assumptions as pending, and The Ship and Abiotic Factor sections are still empty. Until a service's check is recorded,
+that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
 not `file.update`.
