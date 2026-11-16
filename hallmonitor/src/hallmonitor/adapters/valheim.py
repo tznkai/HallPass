@@ -25,6 +25,7 @@ for it.
 from __future__ import annotations
 
 import logging
+import posixpath
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 
@@ -117,8 +118,9 @@ def _without_id(text: str, steam_id: str) -> str:
 
 
 def _same_file(first: str, second: str) -> bool:
-    """True when two configured paths name one file: surrounding whitespace and leading slashes are not significant."""
-    return first.strip().lstrip("/") == second.strip().lstrip("/")
+    """True when two configured paths name one file: surrounding whitespace, leading slashes, dot segments and repeated
+    slashes are not significant."""
+    return posixpath.normpath(first.strip().lstrip("/")) == posixpath.normpath(second.strip().lstrip("/"))
 
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
@@ -213,16 +215,29 @@ class ValheimAdapter:
         pending = await self._pending_check(self._clock())
         return {subject.ref: await self._observe_one(subject, listed, banned, pending) for subject in subjects}
 
+    async def _restore(self, steam_id: str, earlier: tuple[str, datetime] | None) -> None:
+        """Puts back the record that a change replaced, or forgets the new record when the subject had none."""
+        if earlier is None:
+            await self._forget(steam_id)
+        else:
+            await self._set_record(steam_id, earlier[0], earlier[1])
+
     async def _change(self, steam_id: str, ref: str, now: datetime, text: str) -> Observed:
-        """Writes one change and reports its state. The record is placed before the write, so a write that fails
-        leaves a record that no longer matches the file, and the next observe forgets it. With live reload nothing is
-        recorded, and nothing is pending, so the uptime is not read."""
+        """Writes one change and reports its state. The new record is placed before the write. When the write fails,
+        the subject's earlier record is put back, or the new one is forgotten when there was none, so a failed write
+        never erases a change that is still pending. With live reload nothing is recorded, and nothing is pending, so
+        the uptime is not read."""
         state = "allowed" if ref == OWN_ADD else "suspended"
         if self._live_reload:
             await self._write(text)
             return Observed(state)
+        earlier = await self._record(steam_id)
         await self._set_record(steam_id, ref, now)
-        await self._write(text)
+        try:
+            await self._write(text)
+        except AdapterError:
+            await self._restore(steam_id, earlier)
+            raise
         return Observed(state, PENDING)
 
     async def _suspend(self, steam_id: str) -> Observed:

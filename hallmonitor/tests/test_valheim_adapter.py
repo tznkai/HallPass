@@ -439,7 +439,7 @@ async def test_a_failed_write_is_that_subject_only_and_the_others_still_apply(db
     await run(db, hallpass, fake, T0)
     assert outcomes(hallpass) == [("r1", "error", "http"), ("r2", "allowed", PENDING)]
     assert file_text(fake) == PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n" + steam_form(THIRD_ID) + "\n"
-    assert await record_of(db, OWN_ID) == ("remove", T0)   # placed before the write; the next observe forgets it
+    assert await record_of(db, OWN_ID) is None   # no earlier record, so the failed write leaves none
     assert await record_of(db, THIRD_ID) == ("add", T0)
 
 
@@ -680,7 +680,7 @@ async def test_a_failed_record_writes_nothing(db: Database, monkeypatch: pytest.
     assert writes(fake) == []
 
 
-async def test_a_record_left_by_a_failed_write_is_forgotten_by_the_next_observe(db: Database) -> None:
+async def test_a_failed_write_with_no_earlier_record_leaves_no_record(db: Database) -> None:
     fake = ptero_state(PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n", uptime_ms=HOUR_MS)
     before = file_text(fake)
     fake.fail_next = {"write": 500}
@@ -688,7 +688,7 @@ async def test_a_record_left_by_a_failed_write_is_forgotten_by_the_next_observe(
     await run(db, first, fake, T0)
     assert outcomes(first) == [("r1", "error", "http")]
     assert file_text(fake) == before
-    assert await record_of(db, OWN_ID) == ("remove", T0)
+    assert await record_of(db, OWN_ID) is None
 
     second = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=2))
     await run(db, second, fake, T0 + ONE_MINUTE)
@@ -696,11 +696,44 @@ async def test_a_record_left_by_a_failed_write_is_forgotten_by_the_next_observe(
     assert await record_of(db, OWN_ID) is None
 
 
+async def test_a_failed_write_keeps_the_earlier_pending_record(db: Database) -> None:
+    """The earlier removal is still pending, since the server has not restarted. A failed allow must not erase it."""
+    fake = ptero_state(PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n", uptime_ms=HOUR_MS)
+    await run(db, valheim_service(subject("r1", "suspended", steam(OWN_ID))), fake, T0)
+    assert await record_of(db, OWN_ID) == ("remove", T0)
+
+    fake.fail_next = {"write": 500}
+    second = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=2))
+    await run(db, second, fake, T0 + ONE_MINUTE)
+    assert outcomes(second) == [("r1", "error", "http")]
+    assert await record_of(db, OWN_ID) == ("remove", T0)
+
+    third = valheim_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    await run(db, third, fake, T0 + 2 * ONE_MINUTE)
+    assert outcomes(third) == [("r1", "suspended", PENDING)]
+    assert await record_of(db, OWN_ID) == ("remove", T0)
+
+
 # The two configured lists must name two files ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("banned", [PERMITTED, "/" + PERMITTED, " " + PERMITTED + " ", "//" + PERMITTED],
-                         ids=["same", "leading_slash", "whitespace", "double_slash"])
+@pytest.mark.parametrize("banned", [
+    PERMITTED,
+    "/" + PERMITTED,
+    " " + PERMITTED + " ",
+    "//" + PERMITTED,
+    "./" + PERMITTED,
+    ".//" + PERMITTED,
+    "x/../" + PERMITTED,
+    "x/./../" + PERMITTED,
+], ids=["same", "leading_slash", "whitespace", "double_slash", "dot_segment", "dot_slash_double", "parent_segment",
+        "mixed_segments"])
 async def test_a_ban_list_path_naming_the_permitted_list_is_not_configured(db: Database, banned: str) -> None:
     settings = dict(SETTINGS, bannedlist_path=banned)
     async with httpx.AsyncClient() as http:
         assert build_adapter("valheim", ctx(db, http, T0, settings=settings)) is None
+
+
+async def test_a_ban_list_in_a_different_directory_is_a_different_file(db: Database) -> None:
+    settings = dict(SETTINGS, bannedlist_path="a//" + PERMITTED)   # names a/permittedlist.txt, not permittedlist.txt
+    async with httpx.AsyncClient() as http:
+        assert isinstance(build_adapter("valheim", ctx(db, http, T0, settings=settings)), ValheimAdapter)
