@@ -1,14 +1,19 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Valheim adapter: holds a player by editing `bannedlist.txt` through Pterodactyl. Valheim has no console, so the file
-is the only mechanism.
+"""The Valheim adapter: the permitted list, edited through Pterodactyl. Valheim has no console, so the file is the only
+mechanism, and a subject is allowed while an entry of `permittedlist.txt` names its SteamID64.
 
-A line that is all digits is a SteamID64. Every other line is a comment or a blank, and is kept as it is. A suspension
-appends the id; a restore removes one line that carries that id. Only a line with our own `ban` record is ours, so a line
-someone else placed is `banned_external` and is never removed.
+An entry names a SteamID64 in bare digits (`<digits>`) or with the Steam_ prefix (`Steam_<digits>`). Both forms are
+read, and a change writes the Steam_ form, so the line keeps working if crossplay is turned on later. Comments (`//`)
+and blank lines are never entries. Every other line is kept byte for byte.
+
+Hallmonitor never writes the ban list. `bannedlist.txt` is read only, when it is configured, and an id it names is
+`banned_external`, which is never added or removed. Removing the last entry would open the server to anyone, so a
+suspension that would leave no entry writes nothing.
 
 The server reads the file at start, so unless `live_reload` is on, a change is `pending_restart` until the server's
-uptime shows a restart since the change. The uptime is compared with the time the change was placed.
+uptime shows a restart since the change. The uptime is compared with the time the change was placed. With `live_reload`
+on, a removal disconnects a player who is online at once, so the adapter says so in its capabilities.
 
 The file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read before it. A
 moderator's edit saved between that read and that write would be overwritten. The window is one read and one write,
@@ -33,10 +38,11 @@ from hallmonitor.pterodactyl import PteroError, PteroFiles
 
 log = logging.getLogger(__name__)
 STEAM_KIND = "steam_id"
-OWN_BAN = "ban"
-OWN_RESTORE = "restore"
+STEAM_PREFIX = "Steam_"
+OWN_ADD = "add"        # an own record: hallmonitor added the id's line, so a restart must pass before it takes effect
+OWN_REMOVE = "remove"  # an own record: hallmonitor removed the id's line, likewise
 PENDING = "pending_restart"
-REQUIRED_SETTINGS = ("ptero_url", "ptero_key", "ptero_server", "banlist_path")
+REQUIRED_SETTINGS = ("ptero_url", "ptero_key", "ptero_server", "permittedlist_path")
 LIVE_RELOAD_VALUES = ("true", "false")
 
 
@@ -54,33 +60,43 @@ def _identity_error(subject: Subject) -> Observed | None:
     return None
 
 
-def _id_lines(text: str) -> list[str]:
-    """The stripped id lines of the file, in order. A line is an id when its stripped text is all ASCII digits."""
-    stripped = [line.strip() for line in text.split("\n")]
-    return [line for line in stripped if line and all("0" <= char <= "9" for char in line)]
+def _is_entry(line: str) -> bool:
+    """A line is an entry when it is not blank and not a `//` comment."""
+    stripped = line.strip()
+    return stripped != "" and not stripped.startswith("//")
 
 
-def _with_id(text: str, steam_id: str) -> str:
-    """The file with the id on its own line at the end. A file that ends with a newline keeps one; a file that does not
-    keeps none, and an empty file gets one line with a newline."""
+def _line_id(line: str) -> str | None:
+    """The digits of the SteamID64 a line names, in either form, or None when it names none. The digits are not checked
+    here: a line whose digits are not a valid id names no subject, and that is decided where the id is compared."""
+    stripped = line.strip()
+    digits = stripped[len(STEAM_PREFIX):] if stripped.startswith(STEAM_PREFIX) else stripped
+    return digits if digits != "" and all("0" <= char <= "9" for char in digits) else None
+
+
+def _ids_named(text: str) -> set[str]:
+    """Every SteamID64 that some line of the file names, in either form."""
+    return {line_id for line in text.split("\n") if (line_id := _line_id(line)) is not None}
+
+
+def _has_entry(text: str) -> bool:
+    return any(_is_entry(line) for line in text.split("\n"))
+
+
+def _with_line(text: str, line: str) -> str:
+    """The file with one line added at the end. A file that ends with a newline keeps one; a file that does not keeps
+    none, and an empty file gets the line with a newline."""
     if text == "":
-        return f"{steam_id}\n"
+        return f"{line}\n"
     if text.endswith("\n"):
-        return f"{text}{steam_id}\n"
-    return f"{text}\n{steam_id}"
+        return f"{text}{line}\n"
+    return f"{text}\n{line}"
 
 
 def _without_id(text: str, steam_id: str) -> str:
-    """The file with one line that carries the id removed: the last such line, since `_with_id` appends at the end.
-    When a moderator has added the same id, the file holds two identical lines, and removing one leaves the other,
-    which is then not ours and is reported banned_external. Splitting on `\\n` and joining back keeps the trailing
-    newline, or its absence, and every other line byte for byte."""
-    parts = text.split("\n")
-    for index in range(len(parts) - 1, -1, -1):
-        if parts[index].strip() == steam_id:
-            del parts[index]
-            break
-    return "\n".join(parts)
+    """The file with every line that names the id removed, in either form. Splitting on `\\n` and joining back keeps the
+    trailing newline, or its absence, and every other line byte for byte."""
+    return "\n".join(line for line in text.split("\n") if _line_id(line) != steam_id)
 
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
@@ -95,28 +111,33 @@ def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
 
 
 class ValheimAdapter:
-    capabilities = Capabilities(suspend=True, restore=True, read_state=True, removes_connected=False)
-
     def __init__(self, *, slug: str, db: Database, clock: Callable[[], datetime], files: PteroFiles,
-                 banlist_path: str, live_reload: bool) -> None:
+                 permittedlist_path: str, bannedlist_path: str | None, live_reload: bool) -> None:
         self._slug = slug
         self._db = db
         self._clock = clock
         self._files = files
-        self._banlist = banlist_path
+        self._permitted = permittedlist_path
+        self._banned = bannedlist_path
         self._live_reload = live_reload
+        self.capabilities = Capabilities(suspend=True, restore=True, read_state=True, removes_connected=live_reload)
 
-    async def _read(self) -> str:
+    async def _read(self, path: str) -> str:
         try:
-            return await self._files.read(self._banlist)
+            return await self._files.read(path)
         except PteroError as error:
             raise AdapterError(error.reason) from None
 
     async def _write(self, text: str) -> None:
         try:
-            await self._files.write(self._banlist, text)
+            await self._files.write(self._permitted, text)
         except PteroError as error:
             raise AdapterError(error.reason) from None
+
+    async def _banned_ids(self) -> set[str]:
+        if self._banned is None:
+            return set()
+        return _ids_named(await self._read(self._banned))
 
     async def _pending_check(self, now: datetime) -> Callable[[datetime], bool]:
         """A test of whether a change placed at a time is still pending. The uptime is read once, here. With live reload
@@ -138,62 +159,72 @@ class ValheimAdapter:
     async def _forget(self, steam_id: str) -> None:
         await self._db.run(lambda c: own.forget_own(c, self._slug, steam_id))
 
-    async def _observe_one(self, subject: Subject, listed: set[str], pending: Callable[[datetime], bool]) -> Observed:
+    async def _change_detail(self, steam_id: str, listed: bool, pending: Callable[[datetime], bool]) -> str | None:
+        """The detail for the subject's own change, if one is on record: `pending_restart` while the change has not
+        reached a restarted server. A record that no longer matches the file, or whose change has reached a restarted
+        server, is forgotten."""
+        record = await self._record(steam_id)
+        if record is None:
+            return None
+        ref, placed_at = record
+        if ref == (OWN_ADD if listed else OWN_REMOVE) and pending(placed_at):
+            return PENDING
+        await self._forget(steam_id)
+        return None
+
+    async def _observe_one(self, subject: Subject, listed: set[str], banned: set[str],
+                           pending: Callable[[datetime], bool]) -> Observed:
         failure = _identity_error(subject)
         if failure is not None:
             return failure
         steam_id = _steam_id(subject)
         assert steam_id is not None
-        record = await self._record(steam_id)
-        if steam_id in listed:
-            if record is not None and record[0] == OWN_BAN:
-                return Observed("suspended", PENDING if pending(record[1]) else None)
-            return Observed("banned_external")   # no record, or a restore record: a line nobody here placed
-        if record is None:
-            return Observed("allowed")
-        ref, placed_at = record
-        if ref == OWN_BAN:
-            await self._forget(steam_id)          # our line is gone from the file, so the record describes nothing
-            return Observed("allowed")
-        if pending(placed_at):
-            return Observed("allowed", PENDING)
-        await self._forget(steam_id)              # the restore has reached a restarted server
-        return Observed("allowed")
+        if steam_id in banned:
+            return Observed("banned_external")
+        is_listed = steam_id in listed
+        detail = await self._change_detail(steam_id, is_listed, pending)
+        return Observed("allowed" if is_listed else "suspended", detail)
 
     async def observe(self, subjects: Sequence[Subject]) -> Mapping[str, Observed]:
-        listed = set(_id_lines(await self._read()))
+        listed = _ids_named(await self._read(self._permitted))
+        banned = await self._banned_ids()
         pending = await self._pending_check(self._clock())
-        return {subject.ref: await self._observe_one(subject, listed, pending) for subject in subjects}
+        return {subject.ref: await self._observe_one(subject, listed, banned, pending) for subject in subjects}
 
-    async def _suspend(self, steam_id: str, text: str, listed: bool, record: tuple[str, datetime] | None,
-                       now: datetime) -> Observed:
-        if listed:
-            if record is not None and record[0] == OWN_BAN:
-                pending = await self._pending_check(now)
-                return Observed("suspended", PENDING if pending(record[1]) else None)
-            return Observed("banned_external")
-        await self._write(_with_id(text, steam_id))
-        await self._set_record(steam_id, OWN_BAN, now)
+    async def _placed(self, steam_id: str, ref: str, now: datetime) -> Observed:
+        """The observation after this apply's own change. With live reload nothing is pending or recorded."""
+        state = "allowed" if ref == OWN_ADD else "suspended"
+        if self._live_reload:
+            return Observed(state)
+        await self._set_record(steam_id, ref, now)
         pending = await self._pending_check(now)
-        return Observed("suspended", PENDING if pending(now) else None)
+        return Observed(state, PENDING if pending(now) else None)
 
-    async def _restore(self, steam_id: str, text: str, listed: bool, record: tuple[str, datetime] | None,
-                       now: datetime) -> Observed:
-        if listed:
-            if record is None or record[0] != OWN_BAN:
-                return Observed("banned_external")
-            await self._write(_without_id(text, steam_id))
-            await self._set_record(steam_id, OWN_RESTORE, now)
-            pending = await self._pending_check(now)
-            return Observed("allowed", PENDING if pending(now) else None)
-        if record is None:
-            return Observed("allowed")            # nothing of ours is in the file or pending: nothing to change
-        if record[0] == OWN_BAN:
-            await self._set_record(steam_id, OWN_RESTORE, now)   # our line already gone; the restore starts now
-            pending = await self._pending_check(now)
-            return Observed("allowed", PENDING if pending(now) else None)
-        pending = await self._pending_check(now)  # a restore already in progress
-        return Observed("allowed", PENDING if pending(record[1]) else None)
+    async def _suspend(self, steam_id: str) -> Observed:
+        text = await self._read(self._permitted)
+        now = self._clock()
+        if steam_id not in _ids_named(text):
+            return Observed("suspended", await self._detail_now(steam_id, False, now))
+        remaining = _without_id(text, steam_id)
+        if not _has_entry(remaining):
+            log_event(log, "not_applied", service="valheim", outcome="would_open_server", level=logging.WARNING)
+            return Observed("error", "would_open_server")
+        await self._write(remaining)
+        return await self._placed(steam_id, OWN_REMOVE, now)
+
+    async def _allow(self, steam_id: str) -> Observed:
+        if steam_id in await self._banned_ids():
+            return Observed("banned_external")
+        text = await self._read(self._permitted)
+        now = self._clock()
+        if steam_id in _ids_named(text):
+            return Observed("allowed", await self._detail_now(steam_id, True, now))
+        await self._write(_with_line(text, STEAM_PREFIX + steam_id))
+        return await self._placed(steam_id, OWN_ADD, now)
+
+    async def _detail_now(self, steam_id: str, listed: bool, now: datetime) -> str | None:
+        pending = await self._pending_check(now)
+        return await self._change_detail(steam_id, listed, pending)
 
     async def apply(self, subject: Subject, desired: str) -> Observed:
         if desired not in ("allowed", "suspended"):
@@ -203,17 +234,14 @@ class ValheimAdapter:
             return failure
         steam_id = _steam_id(subject)
         assert steam_id is not None
-        text = await self._read()
-        listed = steam_id in set(_id_lines(text))
-        record = await self._record(steam_id)
-        now = self._clock()
         if desired == "suspended":
-            return await self._suspend(steam_id, text, listed, record, now)
-        return await self._restore(steam_id, text, listed, record, now)
+            return await self._suspend(steam_id)
+        return await self._allow(steam_id)
 
     async def unmanaged_count(self, subjects: Sequence[Subject]) -> int | None:
         known = {_steam_id(subject) for subject in subjects if _identity_error(subject) is None}
-        return sum(1 for line in _id_lines(await self._read()) if line not in known)
+        return sum(1 for line in (await self._read(self._permitted)).split("\n")
+                   if _is_entry(line) and _line_id(line) not in known)
 
 
 def create(ctx: AdapterContext) -> ValheimAdapter | None:
@@ -224,4 +252,6 @@ def create(ctx: AdapterContext) -> ValheimAdapter | None:
         return None
     files = PteroFiles(settings["ptero_url"], settings["ptero_key"], settings["ptero_server"], http=ctx.http)
     return ValheimAdapter(slug=ctx.slug, db=ctx.db, clock=ctx.clock, files=files,
-                          banlist_path=settings["banlist_path"], live_reload=live_reload == "true")
+                          permittedlist_path=settings["permittedlist_path"],
+                          bannedlist_path=settings.get("bannedlist_path") or None,
+                          live_reload=live_reload == "true")

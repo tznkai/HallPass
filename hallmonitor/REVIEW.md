@@ -62,19 +62,23 @@ as the code they cite.
 - `src/hallmonitor/adapters/source_rcon.py:133` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — the re-check before a Source ban: a moderator ban that appeared after observe is never taken over, because apply reads the list before it runs `banid`
 - `src/hallmonitor/adapters/source_rcon.py:145` `if not await self._owned(steam_id):` — the removeid gate: a restore runs no `removeid` unless the ban is recorded as ours
 - `src/hallmonitor/adapters/palworld.py:135` `if self._in_flight(record, now):` — a Palworld ban placed within the grace window that the ban list does not show yet reads as `suspended`, so its record is kept and no second ban is sent
-- `src/hallmonitor/adapters/valheim.py:149` `if record is not None and record[0] == OWN_BAN:` — the Valheim ownership check: a listed id counts as ours only with a `ban` record, so a `restore` record never makes a line ours
-- `src/hallmonitor/adapters/valheim.py:183` `if record is None or record[0] != OWN_BAN:` — the Valheim restore gate: a line with no `ban` record is never removed from the ban-list file
 
 The Palworld forget step relies on the ban-list file reflecting a ban within the grace window; the live check confirms that the file shows a new ban inside that window, before any record is forgotten. The live check showed the line on the first read after the REST ban (see `docs/service-notes.md` `## Palworld`). The window has two accepted costs: inside it a moderator's ban on the same id counts as ours and is lifted on restore, and a moderator's unban is reported as suspended and not re-enforced until the window ends. The Source adapter has no window: its console list is re-read after `writeid`, so an id the list does not show is forgotten at once.
 
 The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read just before it. A moderator's edit saved between that read and that write would be overwritten. The window holds one read and one write with only a local database call between them, and the race is accepted on that basis.
 
+## Valheim permitted list
+
+- `src/hallmonitor/adapters/valheim.py:209` `if not _has_entry(remaining):` — the empty-list guard: a suspension that would leave no entry in the permitted list writes nothing and reports `would_open_server`, because an empty permitted list lets anyone join
+- `src/hallmonitor/adapters/valheim.py:133` `await self._files.write(self._permitted, text)` — the only write in the adapter, and it targets the permitted list, so the ban list is read but never written
+- `src/hallmonitor/adapters/valheim.py:216` `if steam_id in await self._banned_ids():` — the ban check before any add: an id the ban list names is `banned_external` and is never added to the permitted list
+
 ## Restart detection
 
-- `src/hallmonitor/adapters/valheim.py:89` `if uptime is None:` — a stopped server counts as not yet restarted, so a change is reported `pending_restart` until the server runs again
-- `src/hallmonitor/adapters/valheim.py:94` `return uptime >= (now - placed_at).total_seconds() - 1` — the restart test: the server has run continuously since the change when its uptime reaches the time since the change, less a one-second margin for the second-precision placed_at, so a change is never called restarted by mistake
-- `src/hallmonitor/adapters/valheim.py:127` `uptime = await self._files.uptime_seconds()` — the uptime is read once per observe or apply call, and not at all with live reload, so every change in one call is compared with the same reading
-- `src/hallmonitor/adapters/valheim.py:150` `return Observed("suspended", PENDING if pending(record[1]) else None)` — the detail rule: `pending_restart` shows only while the change is pending, and a restart since the change clears it
+- `src/hallmonitor/adapters/valheim.py:105` `if uptime is None:` — a stopped server counts as not yet restarted, so a change is reported `pending_restart` until the server runs again
+- `src/hallmonitor/adapters/valheim.py:110` `return uptime >= (now - placed_at).total_seconds() - 1` — the restart test: the server has run continuously since the change when its uptime reaches the time since the change, less a one-second margin for the second-precision placed_at, so a change is never called restarted by mistake
+- `src/hallmonitor/adapters/valheim.py:148` `uptime = await self._files.uptime_seconds()` — the uptime is read once per observe or apply call, and not at all with live reload, so every change in one call is compared with the same reading
+- `src/hallmonitor/adapters/valheim.py:170` `if ref == (OWN_ADD if listed else OWN_REMOVE) and pending(placed_at):` — the detail rule: `pending_restart` shows only while the record matches the file and its change has not reached a restarted server; otherwise the record is forgotten
 
 ## Pterodactyl client
 
