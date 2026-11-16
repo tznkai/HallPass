@@ -52,9 +52,11 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 - A failure with a service-wide reason (`auth`, `timeout`, `unreachable`) stops that service's remaining applies; any
   other failure stays with its subject.
 - **Ban ownership.** Hallmonitor lifts only bans it placed. Every ban it places is recorded in `own.py`
-  (`own_suspension`); a listed ban with no own record is `banned_external`, and restore never unbans, `removeid`s or
-  removes a ban-list line without that record. Fluxer places and lifts no bans at all: its only mutation is ending
-  sessions, and a disabled account is `banned_external`.
+  (`own_suspension`); a listed ban with no own record is `banned_external`, and restore never unbans or `removeid`s
+  without that record. Valheim is the exception: it never writes the ban list, and its own records only time its
+  restart rule. They do not decide ownership, because the permitted list is hallpass's to control, like the Minecraft
+  whitelist. Fluxer places and lifts no bans at all: its only mutation is ending sessions, and a disabled account is
+  `banned_external`.
 - **Identity allowlists.** Every identity passes an allowlist before any command or file line is built from it:
   Minecraft Java/Bedrock name patterns and the Floodgate prefix set, and a canonical SteamID64 (`adapters/steam.py`)
   for Palworld, Valheim and Source. An unsafe value is `bad_identity`. Never widen these without a live check.

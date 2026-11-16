@@ -5,7 +5,8 @@ mechanism, and a subject is allowed while an entry of `permittedlist.txt` names 
 
 An entry names a SteamID64 in bare digits (`<digits>`) or with the Steam_ prefix (`Steam_<digits>`). Both forms are
 read, and a change writes the Steam_ form, so the line keeps working if crossplay is turned on later. Comments (`//`)
-and blank lines are never entries. Every other line is kept byte for byte.
+and blank lines are never entries. Every other line is kept byte for byte. A leading byte-order mark is ignored when a
+line is classified, and it stays where it is in the file.
 
 Hallmonitor never writes the ban list. `bannedlist.txt` is read only, when it is configured, and an id it names is
 `banned_external`, which is never added or removed. Removing the last entry would open the server to anyone, so a
@@ -39,6 +40,7 @@ from hallmonitor.pterodactyl import PteroError, PteroFiles
 log = logging.getLogger(__name__)
 STEAM_KIND = "steam_id"
 STEAM_PREFIX = "Steam_"
+BOM = "\ufeff"         # the UTF-8 byte-order mark; str.strip does not remove it, so it is removed before a line is read
 OWN_ADD = "add"        # an own record: hallmonitor added the id's line, so a restart must pass before it takes effect
 OWN_REMOVE = "remove"  # an own record: hallmonitor removed the id's line, likewise
 PENDING = "pending_restart"
@@ -60,17 +62,23 @@ def _identity_error(subject: Subject) -> Observed | None:
     return None
 
 
+def _body(line: str) -> str:
+    """The line without a leading byte-order mark and without surrounding whitespace. Every line is classified through
+    here, so a BOM at the start of the file never makes a comment an entry or hides an id."""
+    return line.removeprefix(BOM).strip()
+
+
 def _is_entry(line: str) -> bool:
     """A line is an entry when it is not blank and not a `//` comment."""
-    stripped = line.strip()
-    return stripped != "" and not stripped.startswith("//")
+    body = _body(line)
+    return body != "" and not body.startswith("//")
 
 
 def _line_id(line: str) -> str | None:
     """The digits of the SteamID64 a line names, in either form, or None when it names none. The digits are not checked
     here: a line whose digits are not a valid id names no subject, and that is decided where the id is compared."""
-    stripped = line.strip()
-    digits = stripped[len(STEAM_PREFIX):] if stripped.startswith(STEAM_PREFIX) else stripped
+    body = _body(line)
+    digits = body[len(STEAM_PREFIX):] if body.startswith(STEAM_PREFIX) else body
     return digits if digits != "" and all("0" <= char <= "9" for char in digits) else None
 
 
@@ -83,20 +91,34 @@ def _has_entry(text: str) -> bool:
     return any(_is_entry(line) for line in text.split("\n"))
 
 
+def _eol(text: str) -> str:
+    """The line ending the file uses: CRLF when the text contains one, otherwise LF."""
+    return "\r\n" if "\r\n" in text else "\n"
+
+
 def _with_line(text: str, line: str) -> str:
-    """The file with one line added at the end. A file that ends with a newline keeps one; a file that does not keeps
-    none, and an empty file gets the line with a newline."""
+    """The file with one line added at the end, ended the way the file ends its lines. A file that ends with a newline
+    keeps one; a file that does not keeps none, and an empty file gets the line with a newline."""
     if text == "":
         return f"{line}\n"
+    eol = _eol(text)
     if text.endswith("\n"):
-        return f"{text}{line}\n"
-    return f"{text}\n{line}"
+        return f"{text}{line}{eol}"
+    return f"{text}{eol}{line}"
 
 
 def _without_id(text: str, steam_id: str) -> str:
-    """The file with every line that names the id removed, in either form. Splitting on `\\n` and joining back keeps the
-    trailing newline, or its absence, and every other line byte for byte."""
-    return "\n".join(line for line in text.split("\n") if _line_id(line) != steam_id)
+    """The file with every line that names the id removed, in either form. A leading byte-order mark stays at the start
+    of the file even when the line it sits on is the one removed. Splitting on `\\n` and joining back keeps the trailing
+    newline, or its absence, and every other line byte for byte."""
+    bom = BOM if text.startswith(BOM) else ""
+    kept = [line for line in text[len(bom):].split("\n") if _line_id(line) != steam_id]
+    return bom + "\n".join(kept)
+
+
+def _same_file(first: str, second: str) -> bool:
+    """True when two configured paths name one file: surrounding whitespace and leading slashes are not significant."""
+    return first.strip().lstrip("/") == second.strip().lstrip("/")
 
 
 def _pending(uptime: float | None, placed_at: datetime, now: datetime) -> bool:
@@ -191,14 +213,17 @@ class ValheimAdapter:
         pending = await self._pending_check(self._clock())
         return {subject.ref: await self._observe_one(subject, listed, banned, pending) for subject in subjects}
 
-    async def _placed(self, steam_id: str, ref: str, now: datetime) -> Observed:
-        """The observation after this apply's own change. With live reload nothing is pending or recorded."""
+    async def _change(self, steam_id: str, ref: str, now: datetime, text: str) -> Observed:
+        """Writes one change and reports its state. The record is placed before the write, so a write that fails
+        leaves a record that no longer matches the file, and the next observe forgets it. With live reload nothing is
+        recorded, and nothing is pending, so the uptime is not read."""
         state = "allowed" if ref == OWN_ADD else "suspended"
         if self._live_reload:
+            await self._write(text)
             return Observed(state)
         await self._set_record(steam_id, ref, now)
-        pending = await self._pending_check(now)
-        return Observed(state, PENDING if pending(now) else None)
+        await self._write(text)
+        return Observed(state, PENDING)
 
     async def _suspend(self, steam_id: str) -> Observed:
         text = await self._read(self._permitted)
@@ -209,8 +234,7 @@ class ValheimAdapter:
         if not _has_entry(remaining):
             log_event(log, "not_applied", service="valheim", outcome="would_open_server", level=logging.WARNING)
             return Observed("error", "would_open_server")
-        await self._write(remaining)
-        return await self._placed(steam_id, OWN_REMOVE, now)
+        return await self._change(steam_id, OWN_REMOVE, now, remaining)
 
     async def _allow(self, steam_id: str) -> Observed:
         if steam_id in await self._banned_ids():
@@ -219,8 +243,7 @@ class ValheimAdapter:
         now = self._clock()
         if steam_id in _ids_named(text):
             return Observed("allowed", await self._detail_now(steam_id, True, now))
-        await self._write(_with_line(text, STEAM_PREFIX + steam_id))
-        return await self._placed(steam_id, OWN_ADD, now)
+        return await self._change(steam_id, OWN_ADD, now, _with_line(text, STEAM_PREFIX + steam_id))
 
     async def _detail_now(self, steam_id: str, listed: bool, now: datetime) -> str | None:
         pending = await self._pending_check(now)
@@ -247,11 +270,14 @@ class ValheimAdapter:
 def create(ctx: AdapterContext) -> ValheimAdapter | None:
     settings = ctx.settings
     live_reload = settings.get("live_reload", "false")
-    if not (all(settings.get(name) for name in REQUIRED_SETTINGS) and live_reload in LIVE_RELOAD_VALUES):
+    banned = settings.get("bannedlist_path") or None
+    usable = all(settings.get(name) for name in REQUIRED_SETTINGS) and live_reload in LIVE_RELOAD_VALUES
+    # Both lists in one file would make the ban list the target of a write, so equal paths are not configured.
+    same_file = banned is not None and _same_file(banned, settings.get("permittedlist_path", ""))
+    if not usable or same_file:
         log_event(log, "adapter_not_configured", adapter="valheim", service=ctx.slug)
         return None
     files = PteroFiles(settings["ptero_url"], settings["ptero_key"], settings["ptero_server"], http=ctx.http)
     return ValheimAdapter(slug=ctx.slug, db=ctx.db, clock=ctx.clock, files=files,
-                          permittedlist_path=settings["permittedlist_path"],
-                          bannedlist_path=settings.get("bannedlist_path") or None,
+                          permittedlist_path=settings["permittedlist_path"], bannedlist_path=banned,
                           live_reload=live_reload == "true")

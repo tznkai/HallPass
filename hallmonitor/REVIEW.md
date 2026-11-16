@@ -69,16 +69,17 @@ The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the
 
 ## Valheim permitted list
 
-- `src/hallmonitor/adapters/valheim.py:209` `if not _has_entry(remaining):` — the empty-list guard: a suspension that would leave no entry in the permitted list writes nothing and reports `would_open_server`, because an empty permitted list lets anyone join
-- `src/hallmonitor/adapters/valheim.py:133` `await self._files.write(self._permitted, text)` — the only write in the adapter, and it targets the permitted list, so the ban list is read but never written
-- `src/hallmonitor/adapters/valheim.py:216` `if steam_id in await self._banned_ids():` — the ban check before any add: an id the ban list names is `banned_external` and is never added to the permitted list
+- `src/hallmonitor/adapters/valheim.py:234` `if not _has_entry(remaining):` — the empty-list guard: a suspension that would leave no entry in the permitted list writes nothing and reports `would_open_server`, because an empty permitted list lets anyone join
+- `src/hallmonitor/adapters/valheim.py:155` `await self._files.write(self._permitted, text)` — the only write in the adapter, and it targets the permitted list, so the ban list is read but never written
+- `src/hallmonitor/adapters/valheim.py:224` `await self._set_record(steam_id, ref, now)` — the record is placed before the write, so a write that fails leaves a record that no longer matches the file and the next observe forgets it
+- `src/hallmonitor/adapters/valheim.py:240` `if steam_id in await self._banned_ids():` — the ban check before any add: an id the ban list names is `banned_external` and is never added to the permitted list
 
 ## Restart detection
 
-- `src/hallmonitor/adapters/valheim.py:105` `if uptime is None:` — a stopped server counts as not yet restarted, so a change is reported `pending_restart` until the server runs again
-- `src/hallmonitor/adapters/valheim.py:110` `return uptime >= (now - placed_at).total_seconds() - 1` — the restart test: the server has run continuously since the change when its uptime reaches the time since the change, less a one-second margin for the second-precision placed_at, so a change is never called restarted by mistake
-- `src/hallmonitor/adapters/valheim.py:148` `uptime = await self._files.uptime_seconds()` — the uptime is read once per observe or apply call, and not at all with live reload, so every change in one call is compared with the same reading
-- `src/hallmonitor/adapters/valheim.py:170` `if ref == (OWN_ADD if listed else OWN_REMOVE) and pending(placed_at):` — the detail rule: `pending_restart` shows only while the record matches the file and its change has not reached a restarted server; otherwise the record is forgotten
+- `src/hallmonitor/adapters/valheim.py:127` `if uptime is None:` — a stopped server counts as not yet restarted, so a change is reported `pending_restart` until the server runs again
+- `src/hallmonitor/adapters/valheim.py:132` `return uptime >= (now - placed_at).total_seconds() - 1` — the restart test: the server has run continuously since the change when its uptime reaches the time since the change, less a one-second margin for the second-precision placed_at, so a change is never called restarted by mistake
+- `src/hallmonitor/adapters/valheim.py:170` `uptime = await self._files.uptime_seconds()` — the uptime is read at most once per observe or apply call, and not at all with live reload, so every change in one call is compared with the same reading; a change that was just written reports `pending_restart` without a read, so an uptime failure cannot turn a done change into an error
+- `src/hallmonitor/adapters/valheim.py:192` `if ref == (OWN_ADD if listed else OWN_REMOVE) and pending(placed_at):` — the detail rule: `pending_restart` shows only while the record matches the file and its change has not reached a restarted server; otherwise the record is forgotten
 
 ## Pterodactyl client
 
