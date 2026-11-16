@@ -32,7 +32,7 @@ from tests.fake_hallpass import TOKEN, FakeHallpassState
 from tests.fake_hallpass import make_transport as make_hallpass_transport
 from tests.fake_palworld import BANLIST_PATH, PALWORLD_PASSWORD, REST_PREFIX, SERVER, FakePalworldState
 from tests.fake_palworld import make_transport as make_palworld_transport
-from tests.fake_palworld import moderator_ban
+from tests.fake_palworld import moderator_ban, player_uid
 from tests.fake_ptero_files import PTERO_KEY, FakePteroState
 
 URL = "https://fake.test"
@@ -146,7 +146,7 @@ async def test_a_suspension_bans_through_rest_and_records_the_ban(db: Database) 
     assert rest_calls(pal) == [("POST", f"{REST_PREFIX}ban")]
     assert pal.requests[0][2]["userid"] == f"steam_{OWN_ID}"
     assert isinstance(pal.requests[0][2]["message"], str) and pal.requests[0][2]["message"]
-    assert file_text(ptero) == f"steam_{OWN_ID}\n"
+    assert file_text(ptero) == f"steam_{OWN_ID},{player_uid(f'steam_{OWN_ID}')}\n"
     assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
     assert outcomes(hallpass) == [("r1", "suspended", None)]
 
@@ -183,7 +183,7 @@ async def test_a_moderator_ban_is_never_lifted_when_the_desired_state_is_allowed
     hallpass = pal_service(subject("r1", "allowed", steam(OTHER_ID), generation=2))
     await run(db, hallpass, pal, ptero)
     assert pal.requests == []
-    assert file_text(ptero) == f"steam_{OTHER_ID}\n"
+    assert file_text(ptero) == f"steam_{OTHER_ID},{player_uid(f'steam_{OTHER_ID}')}\n"
     assert outcomes(hallpass) == [("r1", "banned_external", None)]
 
 
@@ -243,7 +243,7 @@ async def test_a_line_that_appears_late_within_the_grace_window_is_still_ours(db
     await run(db, hallpass, pal, ptero)
     ptero.files[(SERVER, BANLIST_PATH)] = ""
     await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=60))
-    ptero.files[(SERVER, BANLIST_PATH)] = f"steam_{OWN_ID}\n"            # the line arrives in cycle N+2
+    ptero.files[(SERVER, BANLIST_PATH)] = f"steam_{OWN_ID},{player_uid(f'steam_{OWN_ID}')}\n"  # arrives in cycle N+2
     sent = len(pal.requests)
     await run(db, hallpass, pal, ptero, at=NOW + timedelta(seconds=120))
     assert outcomes(hallpass)[-1] == ("r1", "suspended", None)
@@ -359,6 +359,41 @@ async def test_unmanaged_counts_the_entries_that_match_no_subject(db: Database) 
         assert await adapter.unmanaged_count(known) == 1
 
 
+@pytest.mark.parametrize("line", [
+    pytest.param("steam_{id},0123456789ABCDEF0123456789ABCDEF", id="with-player-uid"),
+    pytest.param("steam_{id}", id="bare"),
+    pytest.param("  steam_{id} , 0123456789ABCDEF0123456789ABCDEF  ", id="spaced"),
+    pytest.param("steam_{id},", id="empty-second-field"),
+])
+async def test_a_ban_line_is_read_by_its_first_field(db: Database, line: str) -> None:
+    """The live ban list writes `steam_<id>,<PlayerUId>`; only the text before the first comma names the player."""
+    pal, ptero = pal_state(), banlist(line.format(id=OTHER_ID) + "\n")
+    hallpass = pal_service(subject("r1", "allowed", steam(OTHER_ID)))
+    await run(db, hallpass, pal, ptero)
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+    assert pal.requests == []
+
+
+async def test_our_ban_in_the_live_shape_is_seen_and_not_sent_again(db: Database) -> None:
+    pal, ptero = pal_state(), banlist()
+    hallpass = pal_service(subject("r1", "suspended", steam(OWN_ID)))
+    await run(db, hallpass, pal, ptero)
+    assert "," in file_text(ptero), "the fake writes the live `<userid>,<PlayerUId>` shape"
+    await run(db, hallpass, pal, ptero)
+    assert rest_calls(pal) == [("POST", f"{REST_PREFIX}ban")]
+    assert await db.run(lambda c: own.own_record(c, SLUG, OWN_ID)) == ("ban", NOW)
+
+
+async def test_unmanaged_reads_the_first_field_of_each_line(db: Database) -> None:
+    pal = pal_state()
+    ptero = banlist(f"steam_{OTHER_ID},0123456789ABCDEF0123456789ABCDEF\n"
+                    f"steam_{STEAM64_BASE + 1003},FEDCBA9876543210FEDCBA9876543210\n\n")
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        adapter = palworld(db, http)
+        known = [Subject("r1", (Identity("steam_id", OTHER_ID),), "allowed", 1)]
+        assert await adapter.unmanaged_count(known) == 1
+
+
 @pytest.mark.parametrize("missing", sorted(SETTINGS))
 async def test_the_registry_needs_every_palworld_setting(db: Database, caplog: pytest.LogCaptureFixture,
                                                          missing: str) -> None:
@@ -400,4 +435,4 @@ async def test_apply_refuses_to_unban_a_ban_nobody_here_placed(db: Database) -> 
         result = await adapter.apply(Subject("r1", (Identity("steam_id", OTHER_ID),), "allowed", 2), "allowed")
     assert result == Observed("banned_external")
     assert pal.requests == []
-    assert file_text(ptero) == f"steam_{OTHER_ID}\n"
+    assert file_text(ptero) == f"steam_{OTHER_ID},{player_uid(f'steam_{OTHER_ID}')}\n"

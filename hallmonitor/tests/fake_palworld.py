@@ -3,13 +3,14 @@
 """A fake Palworld REST API, served together with the Pterodactyl file routes through one httpx MockTransport.
 
 The REST routes are `POST /v1/api/ban` and `POST /v1/api/unban`, with HTTP Basic auth as `admin` and the admin password.
-A ban appends its userid to the ban-list file, and an unban removes that userid's lines, so the Pterodactyl read sees
-both. The file routes are served by `tests.fake_ptero_files.handle`, which owns the file text.
+A ban appends a `<userid>,<PlayerUId>` line to the ban-list file, the shape the live server writes (a 32-hex PlayerUId),
+and an unban removes that userid's lines, so the Pterodactyl read sees both. The file routes are served by `tests.fake_ptero_files.handle`, which owns the file text.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -53,16 +54,25 @@ def _file_text(ptero: FakePteroState) -> str:
     return ptero.files.get((SERVER, BANLIST_PATH), "")
 
 
+def player_uid(userid: str) -> str:
+    """A stable 32-hex PlayerUId for a userid, standing in for the one the live server writes after the comma."""
+    return hashlib.md5(userid.encode("utf-8")).hexdigest().upper()
+
+
+def _userid_of(line: str) -> str:
+    return line.split(",", 1)[0].strip()
+
+
 def _with_line(text: str, userid: str) -> str:
-    if userid in [line.strip() for line in text.splitlines()]:
+    if userid in [_userid_of(line) for line in text.splitlines()]:
         return text
     if text and not text.endswith("\n"):
         text += "\n"
-    return text + userid + "\n"
+    return text + f"{userid},{player_uid(userid)}\n"
 
 
 def _without(text: str, userid: str) -> str:
-    kept = [line for line in text.splitlines() if line.strip() != userid]
+    kept = [line for line in text.splitlines() if _userid_of(line) != userid]
     return "".join(line + "\n" for line in kept)
 
 

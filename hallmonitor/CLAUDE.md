@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallmonitor
 
-Last verified: 2026-11-14
+Last verified: 2026-11-16
 
 ## Purpose
 
@@ -95,7 +95,7 @@ code updates `REVIEW.md` in the same change.
 
 Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run
 only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
-ids. Only Fluxer is recorded so far. The Minecraft section lists the adapter's assumptions as pending, and the
-Palworld, Valheim, The Ship and Abiotic Factor sections are still empty. Until a service's check is recorded, that
-adapter's framing and parsing, and the Palworld grace window with its accepted costs (see `REVIEW.md`), are
-unconfirmed.
+ids. Fluxer, Palworld and the Pterodactyl permissions are recorded. The Minecraft section lists the adapter's assumptions
+as pending, and the Valheim, The Ship and Abiotic Factor sections are still empty. Until a service's check is
+recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
+not `file.update`.

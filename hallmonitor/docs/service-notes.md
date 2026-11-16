@@ -110,6 +110,36 @@ defaults, and each item below is pending live confirmation. Hosts and names are 
 
 ## Palworld
 
+Verdict: automated (REST ban and unban, ban list read through Pterodactyl). Checked on 2026-11-15 with
+`tools/live/palworld_check.py` and `tools/live/ptero_files_check.py`, using one account. Hosts and ids are placeholders
+such as `<pal-host>` and `<steam-id>`.
+
+- **REST API.** Enabled with `RESTAPIEnabled=True` and `RESTAPIPort=<port>` inside `OptionSettings` in
+  `PalWorldSettings.ini`. Under Pterodactyl the port needs its own allocation on the server. The egg in use rebuilt the
+  ini at startup at first, so check the values after a restart. The REST port is plain HTTP with Basic auth, so keep it
+  on the LAN and reachable only from the hallmonitor host.
+- **Ban list.** `Pal/Saved/SaveGames/banlist.txt`, one ban per line as `steam_<steam-id>,<PlayerUId>`, where the
+  PlayerUId is 32 hexadecimal characters, followed by a newline. The adapter reads each line up to the first comma, so
+  a bare `steam_<steam-id>` line is read the same way.
+- **Timing.** The line was in the file on the first read after the REST ban, and gone on the first read after the REST
+  unban. The 600 s forget grace window is therefore well clear.
+- **Pending.** A ban for a Steam id that has never joined, which has no PlayerUId yet, was not tried. A file-edit
+  fallback for when REST is down was set aside, because it is not known whether the server needs the PlayerUId in a
+  line it reads.
+
+## Pterodactyl
+
+Panel 1.15.2, at or above the CVE-2026-54593 fix (Panel 1.12.3, Wings 1.12.2); the Wings version is still to be
+recorded. The `hallmonitor` subuser's Client API key (`ptlc_...`) is used with each server's own id.
+
+- **Permissions.** Reading a file needs `file.read` and `file.read-content`. Writing a file's contents
+  (`POST /api/client/servers/<id>/files/write`) needs `file.create`, not `file.update`: the panel checks
+  `file.create` on that route, and a subuser with only `file.update` got 403. So Palworld, which only reads its ban
+  list, needs the two read permissions; a server whose list hallmonitor edits needs `file.create` as well. No
+  `control.*` or `websocket.*` permission is needed.
+- **Resources.** `GET /api/client/servers/<id>/resources` returned the state and an uptime with the read-only
+  permissions.
+
 ## Valheim
 
 ## The Ship

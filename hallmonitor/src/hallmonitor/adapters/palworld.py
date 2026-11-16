@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The Palworld adapter: bans and unbans through the server's REST API, and reads the ban-list file through Pterodactyl.
 
-The file shows bans placed by anyone, so a subject is banned when its `steam_<id>` is listed. A ban is ours only when
+The file shows bans placed by anyone, one per line as `steam_<id>,<PlayerUId>` (the live check showed a 32-hex PlayerUId
+after the comma), so a subject is banned when a line's first field is its `steam_<id>`. A ban is ours only when
 hallmonitor recorded it in `own_suspension`. A listed ban without that record is `banned_external`, and the adapter
 never sends an unban for it. An unban is sent only for a ban the adapter placed.
 
@@ -80,12 +81,15 @@ class PalworldAdapter:
         self._grace = grace_seconds
 
     async def _ban_entries(self) -> list[str]:
-        """The non-blank lines of the ban-list file, stripped. A Pterodactyl failure leaves as AdapterError."""
+        """The userid of each non-blank line of the ban-list file: the text before the first comma, stripped, so both
+        `steam_<id>,<PlayerUId>` and a bare `steam_<id>` read as `steam_<id>`. A Pterodactyl failure leaves as
+        AdapterError."""
         try:
             text = await self._files.read(self._banlist)
         except PteroError as error:
             raise AdapterError(error.reason) from None
-        return [line.strip() for line in text.splitlines() if line.strip()]
+        entries = (line.split(",", 1)[0].strip() for line in text.splitlines())
+        return [entry for entry in entries if entry]
 
     async def _owned(self, steam_id: str) -> bool:
         return await self._db.run(lambda c: own.own_ref(c, self._slug, steam_id)) is not None
