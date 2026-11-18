@@ -391,6 +391,14 @@ async def test_the_forms_on_the_children_page_post_back_to_that_childs_section(e
     assert restored.headers["location"] == f"/children#child-{kid}"
     assert await hold_pairs(env, world.kid) == {}
 
+    page = (await world.ann_browser.get("/children")).text
+    revoke_all = rendered_form(section_of(page, kid), f"/children/{kid}/holds", 'value="all"')
+    assert revoke_all["back"] == "children"
+    revoked_all = await world.ann_browser.post(f"/children/{kid}/holds", data=revoke_all)
+    assert revoked_all.status_code == 303
+    assert revoked_all.headers["location"] == f"/children#child-{kid}"
+    assert fluxer in await hold_pairs(env, world.kid)
+
 
 async def test_the_forms_on_the_child_page_post_back_to_the_child_page(env: Env):
     world = await build_world(env)

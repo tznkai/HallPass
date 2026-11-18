@@ -42,8 +42,8 @@ CHILDREN_HELP = ("Each child linked to you is listed here with their services; o
                  "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
                  "Restore lifts your own hold, and another parent's hold too unless your family agreed that each "
                  "parent lifts only their own. "
-                 "On a service that can't be suspended automatically, the administrator carries out a revoke by "
-                 "hand and alone restores it, and only the administrator lifts an administrator hold or a lockdown.")
+                 "Only the administrator lifts an administrator hold or a lockdown, and on a service that can't be "
+                 "suspended automatically the administrator carries out a revoke by hand and alone restores it.")
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
@@ -98,7 +98,7 @@ ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
 # Holds and the conflict rules. Actor labels are what a person sees as "Suspended by ...".
 ACTOR_ADMIN = "the administrator"
 ACTOR_SYSTEM = "the system"
-STRICT_NOT_YOURS = "{names} placed a hold on this service. In strict mode only the parent who placed a hold can lift it."
+STRICT_NOT_YOURS = "{names} placed a hold on this service, and in your family each parent lifts only their own hold."
 RESTORE_NOT_AUTOMATIC = "This service cannot be restored automatically. Ask the administrator."
 NOT_YOUR_CHILD = "You can only change holds for a child linked to you."
 NOT_CHILD_SERVICE = "This child does not have that service, so a hold cannot be placed on it."
