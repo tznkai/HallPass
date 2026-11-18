@@ -4,7 +4,8 @@
 -- bedrock_gamertag that differs from a recorded one only by case. The existing UNIQUE (service_slug, kind, value)
 -- stays as it is. If existing rows already collide, this statement fails and startup stops with an uncaught error
 -- (exit 1), as for any failed migration: the database keeps version 5 and the pre-migration backup is written.
--- Nothing is merged automatically; an operator must remove or correct one row of each colliding pair first.
+-- Nothing is merged automatically; an operator keeps one row of each colliding group and removes or corrects the
+-- others first (the README gives a query that lists the groups).
 CREATE UNIQUE INDEX external_identity_case ON external_identity (
     service_slug,
     kind,
