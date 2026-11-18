@@ -1,15 +1,18 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A small client for the Pterodactyl Client API: a server's files and its resources. The game adapters use it to read and
-write their ban-list files, and to learn how long a server has run since a change.
+"""A small client for the Pterodactyl Client API: a server's files, its resources and its console. The game adapters use
+it to read and write their ban-list files, to send console commands, and to learn how long a server has run since a
+change.
 
 Every failure raises PteroError with a fixed reason: auth (401 or 403), not_found (404), http (any other status, or a
-reply that is not the expected shape) or unreachable (a transport failure). A message never carries the key, the file
-text or the server id.
+reply that is not the expected shape) or unreachable (a transport failure). A console command also answers 409 and 502
+(the server is offline, or Wings cannot reach it) with unreachable. A message never carries the key, the file text,
+the command text or the server id.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -19,6 +22,8 @@ Reason = Literal["unreachable", "auth", "not_found", "http"]
 REQUEST_TIMEOUT_SECONDS = 30.0
 MILLISECONDS_PER_SECOND = 1000
 RUNNING = "running"
+# Statuses a console command gets when the server is offline or Wings cannot reach it.
+COMMAND_UNREACHABLE_STATUSES = (409, 502)
 
 
 class PteroError(Exception):
@@ -29,12 +34,14 @@ class PteroError(Exception):
         self.reason = reason
 
 
-def _check_status(response: httpx.Response) -> None:
+def _check_status(response: httpx.Response, *, offline_is_unreachable: bool = False) -> None:
     status = response.status_code
     if status in (401, 403):
         raise PteroError("auth")
     if status == 404:
         raise PteroError("not_found")
+    if offline_is_unreachable and status in COMMAND_UNREACHABLE_STATUSES:
+        raise PteroError("unreachable")
     if not 200 <= status < 300:
         raise PteroError("http")
 
@@ -60,7 +67,8 @@ class PteroFiles:
         self.base_url = self.base_url.rstrip("/")
 
     async def _request(self, method: str, action: str, *, params: dict[str, str] | None = None,
-                       headers: dict[str, str] | None = None, content: bytes | None = None) -> httpx.Response:
+                       headers: dict[str, str] | None = None, content: bytes | None = None,
+                       offline_is_unreachable: bool = False) -> httpx.Response:
         request_headers = {"Authorization": f"Bearer {self.key}", "Accept": "application/json", **(headers or {})}
         try:
             response = await self.http.request(method, f"{self.base_url}/api/client/servers/{self.server}{action}",
@@ -68,8 +76,17 @@ class PteroFiles:
                                                timeout=REQUEST_TIMEOUT_SECONDS)
         except httpx.HTTPError:
             raise PteroError("unreachable") from None
-        _check_status(response)
+        _check_status(response, offline_is_unreachable=offline_is_unreachable)
         return response
+
+    async def command(self, text: str) -> None:
+        """Sends one console command to the server. The server answers 204 on success; any other 2xx is an `http`
+        failure. A 409 or 502 means the server is offline or Wings cannot reach it: `unreachable`."""
+        body = json.dumps({"command": text}).encode("utf-8")
+        response = await self._request("POST", "/command", headers={"Content-Type": "application/json"},
+                                       content=body, offline_is_unreachable=True)
+        if response.status_code != 204:
+            raise PteroError("http")
 
     async def read(self, path: str) -> str:
         """The text of one file in the server."""

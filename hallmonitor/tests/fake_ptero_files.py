@@ -1,24 +1,26 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A fake Pterodactyl Client API for the file and resource routes, served through an httpx MockTransport.
+"""A fake Pterodactyl Client API for the file, resource and console routes, served through an httpx MockTransport.
 
-`handle(state, request)` answers the three routes a server's files and resources need, and returns None for any path
+`handle(state, request)` answers the routes a server's files, resources and console need, and returns None for any path
 it does not own, so a fake that serves more than one API can compose this handler with its own. `make_transport`
-serves this handler alone, with a 404 for anything else.
+serves this handler alone, with a 404 for anything else. A console command is recorded in `state.commands`, and
+`state.console`, when set, is called with each one so a test can play the server's side of it.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 PTERO_KEY = "p" * 40
-ROUTE = re.compile(r"/api/client/servers/([^/]+)/(files/contents|files/write|resources)")
-ROUTE_NAMES = {"files/contents": "contents", "files/write": "write", "resources": "resources"}
+ROUTE = re.compile(r"/api/client/servers/([^/]+)/(files/contents|files/write|resources|command)")
+ROUTE_NAMES = {"files/contents": "contents", "files/write": "write", "resources": "resources", "command": "command"}
 
 
 @dataclass
@@ -29,6 +31,10 @@ class FakePteroState:
     key: str = PTERO_KEY
     requests: list[tuple[str, str]] = field(default_factory=list)      # (method, path) of the routes it owns
     fail_next: dict[str, int] = field(default_factory=dict)            # route name -> status, once each
+    commands: list[str] = field(default_factory=list)                  # the text of each console command accepted
+    command_bodies: list[bytes] = field(default_factory=list)          # the raw body of each command request
+    command_types: list[str] = field(default_factory=list)             # the content-type of each command request
+    console: Callable[[FakePteroState, str], None] | None = None       # called with each accepted command
 
 
 def _json(status: int, body: Any) -> httpx.Response:
@@ -55,7 +61,24 @@ def handle(state: FakePteroState, request: httpx.Request) -> httpx.Response | No
         return _write(state, server, request)
     if route == "resources" and request.method == "GET":
         return _resources(state)
+    if route == "command" and request.method == "POST":
+        return _command(state, request)
     return _error(405, "MethodNotAllowedHttpException")
+
+
+def _command(state: FakePteroState, request: httpx.Request) -> httpx.Response:
+    state.command_bodies.append(request.content)
+    state.command_types.append(request.headers.get("content-type", ""))
+    try:
+        text = json.loads(request.content)["command"]
+    except (ValueError, KeyError, TypeError):
+        return _error(422, "ValidationException")
+    if not isinstance(text, str):
+        return _error(422, "ValidationException")
+    state.commands.append(text)
+    if state.console is not None:
+        state.console(state, text)
+    return httpx.Response(204)
 
 
 def _read(state: FakePteroState, server: str, request: httpx.Request) -> httpx.Response:

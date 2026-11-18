@@ -83,7 +83,8 @@ The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the
 
 ## Pterodactyl client
 
-- `src/hallmonitor/pterodactyl.py:34` `if status in (401, 403):` — a wrong or under-permissioned key is `auth`, which fails every subject of the service
-- `src/hallmonitor/pterodactyl.py:36` `if status == 404:` — a missing ban-list file is `not_found`, an error and never an empty ban list
-- `src/hallmonitor/pterodactyl.py:38` `if not 200 <= status < 300:` — any other non-2xx status is `http`, so an error body is never read as a file's text
-- `src/hallmonitor/pterodactyl.py:70` `raise PteroError("unreachable") from None` — a transport failure is `unreachable`, the service-wide reason that stops the service's remaining applies
+- `src/hallmonitor/pterodactyl.py:39` `if status in (401, 403):` — a wrong or under-permissioned key is `auth`, which fails every subject of the service
+- `src/hallmonitor/pterodactyl.py:41` `if status == 404:` — a missing ban-list file is `not_found`, an error and never an empty ban list
+- `src/hallmonitor/pterodactyl.py:45` `if not 200 <= status < 300:` — any other non-2xx status is `http`, so an error body is never read as a file's text
+- `src/hallmonitor/pterodactyl.py:78` `raise PteroError("unreachable") from None` — a transport failure is `unreachable`, the service-wide reason that stops the service's remaining applies
+- `src/hallmonitor/pterodactyl.py:43` `if offline_is_unreachable and status in COMMAND_UNREACHABLE_STATUSES:` — a console command against an offline server (409 or 502) is `unreachable`, so the service's remaining applies stop, and no other route maps those statuses this way

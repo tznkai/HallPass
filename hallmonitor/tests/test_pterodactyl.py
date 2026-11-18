@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -132,3 +133,77 @@ async def test_the_client_repr_hides_the_key_and_the_server_id():
 def test_a_path_the_fake_does_not_own_is_left_to_another_handler():
     request = httpx.Request("GET", f"{BASE}/v1/api/players")
     assert handle(FakePteroState(), request) is None
+
+
+# Console commands: POST /command with a JSON body, 204 on success --------------------------------------
+
+COMMAND_TEXT = "banid 0 STEAM_0:1:500"
+
+
+async def test_a_command_posts_its_text_as_json_and_a_204_is_success():
+    state = FakePteroState()
+    async with ptero(state) as client:
+        await client.command(COMMAND_TEXT)
+    assert state.commands == [COMMAND_TEXT]
+    assert json.loads(state.command_bodies[0]) == {"command": COMMAND_TEXT}
+    assert state.command_types == ["application/json"]
+    assert state.requests == [("POST", f"/api/client/servers/{SERVER}/command")]
+
+
+async def test_a_command_with_a_wrong_key_is_an_auth_error_and_is_not_run():
+    state = FakePteroState()
+    async with ptero(state, key=WRONG_KEY) as client:
+        with pytest.raises(PteroError) as info:
+            await client.command(COMMAND_TEXT)
+    assert info.value.reason == "auth"
+    assert state.commands == []
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [(401, "auth"), (403, "auth"), (404, "not_found"), (409, "unreachable"), (502, "unreachable"),
+     (500, "http"), (503, "http"), (422, "http")],
+)
+async def test_a_failed_command_maps_to_a_reason_and_is_not_run(status: int, reason: str):
+    state = FakePteroState(fail_next={"command": status})
+    async with ptero(state) as client:
+        with pytest.raises(PteroError) as info:
+            await client.command(COMMAND_TEXT)
+    assert info.value.reason == reason
+    assert state.commands == []
+
+
+@pytest.mark.parametrize("status", [200, 202, 206])
+async def test_a_command_answer_that_is_not_204_is_an_http_error(status: int):
+    state = FakePteroState(fail_next={"command": status})
+    async with ptero(state) as client:
+        with pytest.raises(PteroError) as info:
+            await client.command(COMMAND_TEXT)
+    assert info.value.reason == "http"
+
+
+async def test_a_command_transport_failure_is_unreachable():
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
+        client = PteroFiles(BASE, PTERO_KEY, SERVER, http=http)
+        with pytest.raises(PteroError) as info:
+            await client.command(COMMAND_TEXT)
+    assert info.value.reason == "unreachable"
+
+
+async def test_a_409_on_a_file_read_is_still_http_not_unreachable():
+    state = FakePteroState(files={(SERVER, PATH): "one\n"}, fail_next={"contents": 409})
+    async with ptero(state) as client:
+        with pytest.raises(PteroError) as info:
+            await client.read(PATH)
+    assert info.value.reason == "http"
+
+
+async def test_a_command_error_never_carries_the_command_text_or_the_key():
+    state = FakePteroState(fail_next={"command": 500})
+    async with ptero(state) as client:
+        with pytest.raises(PteroError) as info:
+            await client.command(COMMAND_TEXT)
+    assert COMMAND_TEXT not in str(info.value) and PTERO_KEY not in str(info.value) and SERVER not in str(info.value)
