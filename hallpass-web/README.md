@@ -41,11 +41,13 @@ these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
   `<public_url>/signed-out`, which the end-session request returns the browser to.
 - Logout method: Back-channel, with the Logout URI `<public_url>/auth/backchannel-logout`.
 - Authentik's worker must reach `<public_url>/auth/backchannel-logout`. The worker posts the logout token to it, not the
-  browser. Delivery is queued and is not retried, so a token that fails to arrive is never sent again.
+  browser. Delivery is queued and, by the research, not retried, so a token that fails to arrive is not sent again
+  (a pending live check in `docs/authentik-notes.md`).
 
 The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
-and 400 for anything else, with no body. If the provider's keys cannot be fetched and none are cached, logout tokens
-are refused for up to 60 seconds, and the sessions they name end at max age or at sign-out instead.
+and 400 for anything else, with no body. If a fetch of the provider's keys fails and none are cached, logout tokens are
+refused until the provider answers again and for up to 60 seconds after the failed fetch; the sessions they name end at
+max age or at sign-out instead.
 
 ## Caddy
 
