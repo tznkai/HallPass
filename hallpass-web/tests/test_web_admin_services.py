@@ -197,6 +197,7 @@ async def test_the_service_form_suggests_the_known_adapter_names_without_enforci
 
     assert '<datalist id="adapter-names">' in page
     assert '<option value="source_rcon"></option>' in page
+    assert '<option value="source_panel"></option>' in page
     assert 'list="adapter-names"' in page
     await create_service_form(env, "unknown-game", "game", adapter="not-a-known-adapter")
     assert await service_for(env, "unknown-game") is not None
