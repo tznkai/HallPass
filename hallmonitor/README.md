@@ -39,12 +39,12 @@ The same change also updates `REVIEW.md` (see the last rule below).
 
 ### The design is opinionated
 
-Hallmonitor prefers allowlists to ban lists. Where a game has an allowlist (a whitelist or permitted list), the
-adapter controls it: hallpass decides who is on it, and a hold takes the person off. A ban list is used only for a
-game that has no allowlist, and then only for bans hallmonitor placed itself. The existing adapters, the rules
-below and the tests all assume this. A ban-first approach, such as banning on a game that has an allowlist, or
-lifting bans that hallmonitor did not place, is not supported as a setting and needs changes to the adapter, its
-tests and `REVIEW.md`.
+Hallmonitor prefers allowlists to ban lists. Where a game has an allowlist (a whitelist or permitted list), the adapter
+controls it: hallpass decides who is on it, and a hold takes the person off. Hallmonitor places bans only on a game that
+has no allowlist, and lifts only the bans it placed itself. Where it reads a game's ban list, a ban it did not place is
+left alone and reported as `banned_external`. The existing adapters, the rules below and the tests all assume this. A
+ban-first approach, such as banning on a game that has an allowlist, or lifting bans that hallmonitor did not place, is
+not supported as a setting and needs changes to the adapter, its tests and `REVIEW.md`.
 
 ### The plugin
 

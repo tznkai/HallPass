@@ -93,7 +93,7 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 ## Minecraft
 
-Only the setup note at the end is from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
+Only the last two notes are from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
 follows the plan's defaults, and each other item below is pending live confirmation. Hosts and names are
 placeholders such as `<mc-host>`.
 
@@ -112,7 +112,11 @@ placeholders such as `<mc-host>`.
   failed as `unreachable` though the port was open. `PORT` is `rcon.port`, not the game port, and on Pterodactyl it
   must be one of the server's allocations. A hold does not keep an op (an account in `ops.json`) out: ops skip the
   whitelist, so a held op is kicked but can rejoin at once while the adapter reports `suspended`. Keep op status off
-  accounts that hallpass may hold, and test a hold with an account that is not an op.
+  accounts that hallpass may hold, and test a hold with an account that is not an op. Changing op status is out of
+  scope for the adapter.
+- **Holds end to end (2026-11-18).** Through hallpass, a hold removed a Java name and a Bedrock gamertag (entered
+  without the Floodgate prefix) from the whitelist, and lifting it added each back. The sentinel, parsing and kick
+  details above were not checked one by one.
 
 ## Palworld
 
