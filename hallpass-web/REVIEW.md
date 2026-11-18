@@ -33,7 +33,7 @@ as the code they cite.
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:384` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:401` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 
@@ -83,7 +83,7 @@ as the code they cite.
 - `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
 - `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
 - `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
-- `src/hallpass/web/routes_admin.py:939` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/web/routes_admin.py:948` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
 - `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 
 ## Outbox
@@ -102,7 +102,11 @@ as the code they cite.
 - `src/hallpass/monitor_api.py:158` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
 - `src/hallpass/monitor_api.py:162` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
 
+## Shared identities
+
+- `src/hallpass/desired.py:145` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
+
 ## Generations
 
-- `src/hallpass/desired.py:114` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject of every monitored service passes through it on each refresh
-- `src/hallpass/desired.py:71` `UPDATE desired_state SET desired` — the bump: a generation goes up by one only when the recomputed value differs from the stored one, so an unchanged value keeps its generation
+- `src/hallpass/desired.py:170` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
+- `src/hallpass/desired.py:73` `UPDATE desired_state SET desired` — the bump: a generation goes up by one only when the recomputed value differs from the stored one, so an unchanged value keeps its generation

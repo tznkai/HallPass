@@ -174,7 +174,9 @@ def _person_context(conn, person: Person) -> dict:
         "children": children,
         "parent_choices": [p for p in others if p.account_type != "child"] if is_child else [],
         "child_choices": [] if is_child else [p for p in others if p.account_type == "child"],
-        "identities": registry.identities_of(conn, person.id),
+        "identities": [(identity, [holder.display_name for holder in registry.other_holders(conn, identity)])
+                      for identity in registry.identities_of(conn, person.id)],
+        "identity_also_held": text.IDENTITY_ALSO_HELD,
         "identity_kinds": registry.IDENTITY_KINDS,
         "identity_note": text.IDENTITY_REMOVE_NOTE,
         "hold_rows": _hold_rows(conn, person.id),
@@ -213,7 +215,14 @@ def _load_person(conn, person_id: int, now: datetime) -> dict:
     if person is None:
         raise registry.NoSuchPerson()
     desired.refresh(conn, now)
-    return {**_person_context(conn, person), "service_rows": service_rows(conn, person)}
+    rows = service_rows(conn, person)
+    for row in rows:
+        pause = row["shared_pause"]
+        if pause is not None and pause.causes:
+            holders = [holder.display_name for holder in map(lambda i: registry.get_person(conn, i), pause.causes)
+                       if holder is not None]
+            row["shared_pause_note"] = f"{text.SHARED_PAUSE_CAUSES} {', '.join(holders)}"
+    return {**_person_context(conn, person), "service_rows": rows}
 
 
 async def _person_page(request: Request, admin: Person, person_id: int, *, status: int = 200,

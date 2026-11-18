@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Desired state for hallmonitor: each monitored (service, subject) pair with its desired value and generation.
 
-`refresh` recomputes `access.evaluate` for every subject of every monitored service and stores the result. A pair gets
-generation 1 the first time it is seen, and goes up by one each time its desired value changes. A report carrying an
-older generation therefore shows that the current value is not yet confirmed. `report_status` maps a report onto the
-text a row shows. Plain functions over a sqlite3 connection; callers run them inside `Database.run`. Nothing here logs.
+`refresh` recomputes `access.evaluate` for every subject of every monitored service and stores the result. A
+shared identity (several people hold it on one service) is paused while any holder is suspended, and is then
+sent only on the suspended holders' subjects (`_sent_identities`). A pair gets generation 1 the first time it is
+seen, and goes up by one each time its desired value changes. A report carrying an older generation therefore
+shows that the current value is not yet confirmed. `report_status` maps a report onto the text a row shows.
+Plain functions over a sqlite3 connection; callers run them inside `Database.run`. Nothing here logs.
 """
 
 from __future__ import annotations
@@ -95,9 +97,61 @@ def _prune(conn: sqlite3.Connection, subjects: set[tuple[int, int]], monitored_i
             conn.execute("DELETE FROM service_unmanaged WHERE service_id = ?", (service_id,))
 
 
+@dataclass(frozen=True)
+class _Subject:
+    person: Person
+    identities: tuple[tuple[str, str], ...]
+    desired: str
+
+
+@dataclass(frozen=True)
+class SharedPause:
+    """A paused shared identity of one person on one service. `causes` are the ids of the other holders who are
+    suspended, and so pause it. It is empty when this person's own suspension is the only cause. Ids only: the pages
+    look up the names, and only the administrator's page shows them."""
+    causes: tuple[int, ...]
+
+
+def _evaluated_subjects(conn: sqlite3.Connection, service: Service) -> list[_Subject]:
+    found: list[_Subject] = []
+    for person_id, identities in _subjects(conn, service):
+        person = registry.get_person(conn, person_id)
+        assert person is not None
+        found.append(_Subject(person=person, identities=identities,
+                              desired=access.evaluate(conn, person, service).desired))
+    return found
+
+
+def _shared_holders(subjects: list[_Subject]) -> dict[tuple[str, str], list[_Subject]]:
+    """Each identity that two or more subjects hold on the service, keyed by (kind, identity_key). The SSO subject is
+    the hallmonitor record of one person's account, never shared, so it is left out."""
+    holders: dict[tuple[str, str], list[_Subject]] = {}
+    for subject in subjects:
+        for kind, value in subject.identities:
+            if kind != SSO_SUBJECT_KIND:
+                holders.setdefault((kind, registry.identity_key(kind, value)), []).append(subject)
+    return {key: found for key, found in holders.items() if len(found) > 1}
+
+
+def _paused_keys(shared: dict[tuple[str, str], list[_Subject]]) -> set[tuple[str, str]]:
+    """A shared identity is paused while any of its holders is suspended, for any reason."""
+    return {key for key, found in shared.items() if any(s.desired == "suspended" for s in found)}
+
+
+def _sent_identities(subject: _Subject, paused: set[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+    """The identities hallmonitor is sent for a subject. A paused identity is kept only on a suspended subject, so that
+    hallmonitor removes it there. An allowed subject never gets it, so hallmonitor never adds it back."""
+    return tuple((kind, value) for kind, value in subject.identities
+                 if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"
+                 or (kind, registry.identity_key(kind, value)) not in paused)
+
+
 def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
     """Recomputes and stores the desired state of every subject of every monitored service, then prunes the rows that
     no longer belong (see `_prune`). Returns the rows ordered by service slug, then person id.
+
+    A subject whose identities are all paused (see `_sent_identities`) is not a subject for this round: hallmonitor is
+    not sent it, so it gets no desired row and no report, and a later restore starts it again at generation 1.
 
     Cost: every subject of every monitored service is recomputed on each call, so the work grows with services times
     people. That is fine at neighbourhood scale. It could later be limited to the person being viewed. Callers run it
@@ -107,16 +161,35 @@ def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
     subjects: set[tuple[int, int]] = set()
     monitored = monitored_services(conn)
     for service in monitored:
-        for person_id, identities in _subjects(conn, service):
-            person = registry.get_person(conn, person_id)
-            assert person is not None
-            value = access.evaluate(conn, person, service).desired
-            generation = _store_generation(conn, person_id=person_id, service_id=service.id, value=value, now=now)
-            subjects.add((person_id, service.id))
-            rows.append(DesiredRow(person=person, service=service, desired=value, generation=generation,
-                                   identities=identities))
+        candidates = _evaluated_subjects(conn, service)
+        paused = _paused_keys(_shared_holders(candidates))
+        for subject in candidates:
+            identities = _sent_identities(subject, paused)
+            if not identities:
+                continue
+            generation = _store_generation(conn, person_id=subject.person.id, service_id=service.id,
+                                           value=subject.desired, now=now)
+            subjects.add((subject.person.id, service.id))
+            rows.append(DesiredRow(person=subject.person, service=service, desired=subject.desired,
+                                   generation=generation, identities=identities))
     _prune(conn, subjects, {service.id for service in monitored})
     return rows
+
+
+def shared_pause(conn: sqlite3.Connection, person: Person, service: Service) -> SharedPause | None:
+    """The shared identities of this person that are paused on the service, or None when none is. Only monitored
+    services can pause, because hallmonitor is the one that removes an identity. Callers may run it without
+    `refresh`."""
+    if service.retired or service.kind not in MONITORED_KINDS:
+        return None
+    shared = _shared_holders(_evaluated_subjects(conn, service))
+    paused = _paused_keys(shared)
+    mine = [key for key in paused if any(s.person.id == person.id for s in shared[key])]
+    if not mine:
+        return None
+    causes = {s.person.id for key in mine for s in shared[key]
+              if s.desired == "suspended" and s.person.id != person.id}
+    return SharedPause(causes=tuple(sorted(causes)))
 
 
 def desired_for(conn: sqlite3.Connection, person_id: int, service_id: int) -> tuple[str, int] | None:

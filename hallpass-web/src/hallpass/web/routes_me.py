@@ -35,8 +35,10 @@ REASON_TEXT = {
 
 def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
-    who placed each hold, a note when a game service has no external identity for the person, and the report status
-    hallmonitor's last report gives (None for a service it does not monitor). Callers run `desired.refresh` first."""
+    who placed each hold, a note when a game service has no external identity for the person, the report status
+    hallmonitor's last report gives (None for a service it does not monitor), and whether one of the person's shared
+    identities is paused. The pause carries holder ids only, and the member's wording never names the other holder.
+    Callers run `desired.refresh` first."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
     marked = holds.marked_service_ids(conn, person.id)
     rows = []
@@ -46,6 +48,7 @@ def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
         is_marked = service.id in marked
         report_status = desired.report_status(desired.desired_for(conn, person.id, service.id),
                                               desired.report_for(conn, person.id, service.id), is_marked)
+        pause = desired.shared_pause(conn, person, service)
         if service.auto_suspendable:
             suspendable = text.CAN_AUTO_SUSPEND
         elif holders and is_marked:
@@ -62,6 +65,8 @@ def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
             "holders": holders,
             "identity_note": text.NO_GAME_IDENTITY if missing_identity else "",
             "report_status": report_status,
+            "shared_pause": pause,
+            "shared_identity_note": text.SHARED_IDENTITY_PAUSED if pause is not None else "",
         })
     return rows
 

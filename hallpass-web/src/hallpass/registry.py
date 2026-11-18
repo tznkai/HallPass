@@ -379,6 +379,23 @@ def identities_of(conn: sqlite3.Connection, person_id: int) -> list[ExternalIden
     return [ExternalIdentity(*row) for row in rows]
 
 
+def other_holders(conn: sqlite3.Connection, identity: ExternalIdentity) -> list[Person]:
+    """The other people who hold the same identity on the same service, by identity_key, in person id order."""
+    key = identity_key(identity.kind, identity.value)
+    rows = conn.execute(
+        "SELECT person_id, value FROM external_identity WHERE service_slug = ? AND kind = ? AND person_id <> ? "
+        "ORDER BY person_id, id",
+        (identity.service_slug, identity.kind, identity.person_id),
+    ).fetchall()
+    found: list[Person] = []
+    for person_id, value in rows:
+        if identity_key(identity.kind, value) == key:
+            person = get_person(conn, person_id)
+            if person is not None and person.id not in {p.id for p in found}:
+                found.append(person)
+    return found
+
+
 # Fluxer address ---------------------------------------------------------------------------------------
 
 def fluxer_address(conn: sqlite3.Connection, person: Person) -> str | None:

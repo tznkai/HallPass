@@ -127,11 +127,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <table>
     <thead><tr><th>Service</th><th>Kind</th><th>Value</th><th></th></tr></thead>
     <tbody>
-      {% for identity in identities %}
+      {% for identity, others in identities %}
       <tr>
         <td>{{ identity.service_slug }}</td>
         <td>{{ identity.kind }}</td>
-        <td>{{ identity.value }}</td>
+        <td>{{ identity.value }}{% if others %}<br><span>{{ identity_also_held }} {{ others|join(", ") }}</span>{% endif %}</td>
         <td>
           <form method="post" action="/admin/identities/{{ identity.id }}/remove" class="inline">
             <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">

@@ -65,6 +65,12 @@ SERVICE_RETIRE_NOTE = ("Retiring a service stops hallmonitor from managing it, a
 IDENTITY_REMOVE_NOTE = ("Removing an identity stops hallmonitor from managing this person on that service, and it leaves "
                         "the last state it applied in place. Before you remove a game identity, lift the holds on that "
                         "service first, and clean up the game server by hand if it needs it.")
+# A shared identity (several people hold the same id on one service). Members and parents are not told who the other
+# holder is; the administrator's page names the holders who caused the pause.
+SHARED_IDENTITY_PAUSED = ("Someone who shares one of your ids on this service can't use it right now, so that id is "
+                          "paused for everyone who uses it.")
+SHARED_PAUSE_CAUSES = "Paused because of the suspension of"
+IDENTITY_ALSO_HELD = "Also held by"
 ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
 # Holds and the conflict rules. Actor labels are what a person sees as "Suspended by ...".
 ACTOR_ADMIN = "the administrator"
