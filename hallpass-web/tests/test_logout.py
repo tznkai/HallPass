@@ -5,7 +5,8 @@ supplies the discovery document, the keys and the ID token's sid. The keys and t
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -15,6 +16,7 @@ from joserfc.jwk import OctKey
 
 from hallpass.auth import AuthlibOidc
 from hallpass.logout import (
+    CLOCK_SKEW_SECONDS,
     LogoutClaims,
     LogoutTokenRefused,
     Provider,
@@ -46,15 +48,15 @@ def verify(token: str, keys: dict | None = None) -> LogoutClaims:
 
 
 def test_a_valid_token_with_sid_and_sub_gives_both():
-    assert verify(logout_token(NOW)) == LogoutClaims(sid=SID, sub=SUB)
+    assert verify(logout_token(NOW)) == LogoutClaims(sid=SID, sub=SUB, issued_at=NOW)
 
 
 def test_a_valid_token_with_only_sub_gives_no_sid():
-    assert verify(logout_token(NOW, sid=None)) == LogoutClaims(sid=None, sub=SUB)
+    assert verify(logout_token(NOW, sid=None)) == LogoutClaims(sid=None, sub=SUB, issued_at=NOW)
 
 
 def test_an_audience_list_that_contains_the_client_id_is_accepted():
-    assert verify(logout_token(NOW, aud=["other-client", CLIENT_ID])) == LogoutClaims(sid=SID, sub=SUB)
+    assert verify(logout_token(NOW, aud=["other-client", CLIENT_ID])) == LogoutClaims(sid=SID, sub=SUB, issued_at=NOW)
 
 
 @pytest.mark.parametrize(("token", "reason"), [
@@ -66,8 +68,10 @@ def test_an_audience_list_that_contains_the_client_id_is_accepted():
     pytest.param(lambda: logout_token(NOW, aud=None), "bad_audience", id="no-audience"),
     pytest.param(lambda: logout_token(NOW, iat=None), "missing_iat", id="no-iat"),
     pytest.param(lambda: logout_token(NOW, exp=None), "missing_exp", id="no-exp"),
-    pytest.param(lambda: logout_token(NOW, exp=int(NOW.timestamp())), "expired", id="expired-now"),
-    pytest.param(lambda: logout_token(NOW, exp=int(NOW.timestamp()) - 1), "expired", id="expired"),
+    pytest.param(lambda: logout_token(NOW, iat=int(NOW.timestamp()) - 120, exp=int(NOW.timestamp()) - 60),
+                 "expired", id="expired-at-the-skew"),
+    pytest.param(lambda: logout_token(NOW, iat=int(NOW.timestamp()) + 61, exp=int(NOW.timestamp()) + 181),
+                 "issued_in_future", id="issued-beyond-the-skew"),
     pytest.param(lambda: logout_token(NOW, events=None), "missing_event", id="no-events"),
     pytest.param(lambda: logout_token(NOW, events={"http://schemas.openid.net/event/other": {}}),
                  "missing_event", id="other-event"),
@@ -144,3 +148,42 @@ async def test_authlib_adapter_leaves_the_sid_empty_when_the_id_token_has_none()
 
     assert identity.sid is None
     assert identity.id_token == "raw.id.token"
+
+
+async def test_concurrent_forced_key_refetches_share_one_fetch():
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION}, jwks=jwks("k1"))
+    oidc = AuthlibOidc(metadata_url="https://authentik.test/.well-known", client_id=CLIENT_ID, client_secret="s",
+                       monotonic=lambda: 0.0)
+    oidc._client = stub
+
+    await asyncio.gather(oidc.provider(refresh_keys=True), oidc.provider(refresh_keys=True))
+
+    assert stub.jwks_calls == [True, False]
+
+
+def test_a_token_expired_just_inside_the_clock_skew_is_accepted():
+    now = int(NOW.timestamp())
+
+    claims = verify(logout_token(NOW, iat=now - 120, exp=now - CLOCK_SKEW_SECONDS + 1))
+
+    assert claims.sub == SUB
+
+
+def test_a_token_issued_at_the_edge_of_the_clock_skew_ahead_is_accepted_and_its_time_is_kept():
+    now = int(NOW.timestamp())
+
+    claims = verify(logout_token(NOW, iat=now + CLOCK_SKEW_SECONDS, exp=now + 180))
+
+    assert claims.issued_at == NOW + timedelta(seconds=CLOCK_SKEW_SECONDS)
+
+
+def test_a_token_longer_than_8192_characters_is_too_large_before_any_key_is_read():
+    with pytest.raises(LogoutTokenRefused) as refused:
+        verify("x" * 8193, keys={"keys": "not-a-list"})
+    assert refused.value.reason == "too_large"
+
+
+def test_a_token_of_exactly_8192_characters_is_not_called_too_large():
+    with pytest.raises(LogoutTokenRefused) as refused:
+        verify("x" * 8192)
+    assert refused.value.reason == "malformed"

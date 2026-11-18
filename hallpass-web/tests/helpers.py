@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -86,13 +89,14 @@ class FakeOidc:
             raise RuntimeError("no identity queued for this sign-in")
         return self.next_identity
 
-    async def provider(self, *, refresh_keys: bool = False) -> Provider:
+    async def provider(self, *, keys: bool = True, refresh_keys: bool = False) -> Provider:
         self.provider_calls.append(refresh_keys)
         if self.provider_error is not None:
             raise self.provider_error
         if refresh_keys and self.jwks_after_refresh is not None:
             self.jwks = self.jwks_after_refresh
-        return Provider(issuer=self.issuer, end_session_endpoint=self.end_session_endpoint, jwks=self.jwks)
+        return Provider(issuer=self.issuer, end_session_endpoint=self.end_session_endpoint,
+                        jwks=self.jwks if keys else None)
 
 
 class StubOidcClient:
@@ -101,14 +105,21 @@ class StubOidcClient:
 
     def __init__(self, *, redirect_error: Exception | None = None, token: object = None,
                  token_error: Exception | None = None, metadata: dict | None = None,
-                 metadata_error: Exception | None = None, jwks: dict | None = None) -> None:
+                 metadata_error: Exception | None = None, jwks: dict | None = None,
+                 jwks_error: Exception | None = None) -> None:
         self._redirect_error = redirect_error
         self._token = token
         self._token_error = token_error
         self._metadata = metadata
         self._metadata_error = metadata_error
         self._jwks = jwks
+        self._jwks_error = jwks_error
+        self._cached_jwks: dict | None = None
         self.jwks_calls: list[bool] = []
+
+    def rotate(self, jwks: dict) -> None:
+        """Publishes a new key set, as the provider does when it rotates its keys."""
+        self._jwks = jwks
 
     async def authorize_redirect(self, request, redirect_uri: str):
         if self._redirect_error is not None:
@@ -126,14 +137,22 @@ class StubOidcClient:
         return self._metadata or {}
 
     async def fetch_jwk_set(self, force: bool = False) -> dict:
+        """As Authlib does: the cached key set, read from the provider again only when forced."""
         self.jwks_calls.append(force)
-        return self._jwks or {"keys": []}
+        await asyncio.sleep(0)     # a real fetch yields, so concurrent callers really do overlap
+        if force or self._cached_jwks is None:
+            if self._jwks_error is not None:
+                raise self._jwks_error
+            self._cached_jwks = self._jwks or {"keys": []}
+        return self._cached_jwks
 
 
-def use_oidc_client(env: Env, client: StubOidcClient) -> None:
-    """Puts a real AuthlibOidc, built over the stub client, into the running app's dependencies."""
+def use_oidc_client(env: Env, client: StubOidcClient, *,
+                    monotonic: Callable[[], float] = time.monotonic) -> None:
+    """Puts a real AuthlibOidc, built over the stub client and the given monotonic clock, into the app's
+    dependencies."""
     oidc = AuthlibOidc(metadata_url=env.config.oidc_metadata_url, client_id=env.config.oidc_client_id,
-                       client_secret=env.config.oidc_client_secret)
+                       client_secret=env.config.oidc_client_secret, monotonic=monotonic)
     oidc._client = client
     env.application.state.deps = dataclasses.replace(env.application.state.deps, oidc=oidc)
 

@@ -83,8 +83,8 @@ def _session_revoked(conn: sqlite3.Connection, session: Mapping[str, object], pe
     person = registry.get_person(conn, person_id)
     if person is None:
         return False
-    return revocation.session_revoked(conn, sid=session.get("sid"), sub=person.authentik_uuid,
-                                      started_at=session.get("started_at"))
+    return revocation.session_ended(conn, sid=session.get("sid"), sub=person.authentik_uuid,
+                                    started_at=session.get("started_at"))
 
 
 def _session_verdict(conn: sqlite3.Connection, service: Service, person_id: int) -> Verdict:

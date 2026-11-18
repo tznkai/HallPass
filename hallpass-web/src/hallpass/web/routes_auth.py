@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, grants, logout, registry, revocation, terms, text
+from hallpass import authentik_sync, grants, logout, oidc_session, registry, revocation, terms, text
 from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
 from hallpass.logout import LogoutClaims, LogoutTokenRefused, ProviderError
@@ -96,12 +97,32 @@ async def callback(request: Request) -> Response:
     person = settled
     destination = request.session.get("next") or "/"
     state = await deps.db.run(lambda c: terms.state_for(c, person.id))
-    start_session(request, person.id, sid=identity.sid, id_token=identity.id_token, started_at=deps.clock())
+    handle = await _keep_id_token(deps, identity.id_token)
+    start_session(request, person.id, sid=identity.sid, handle=handle, started_at=deps.clock())
     log_event(logger, "sign_in", outcome="ok", person_id=person.id)
     # A child is never sent to /terms: a linked parent's acceptance covers them.
     if person.account_type != "child" and not state.accepted_current:
         return RedirectResponse(f"/terms?{urlencode({'next': destination})}", status_code=303)
     return RedirectResponse(destination, status_code=303)
+
+
+async def _keep_id_token(deps, id_token: str | None) -> str | None:
+    """Stores the raw ID token on the server and returns the handle the session cookie carries. No token, no handle."""
+    if id_token is None:
+        return None
+    handle = secrets.token_urlsafe(32)
+    now = deps.clock()
+    max_age = deps.config.session_max_age_seconds
+    await deps.db.run(lambda c: oidc_session.store(c, handle=handle, id_token=id_token, now=now,
+                                                   max_age_seconds=max_age))
+    return handle
+
+
+async def _take_id_token(deps, handle: object) -> str | None:
+    """The ID token stored under the session's handle, deleted as it is taken. None when there is no handle or row."""
+    if not isinstance(handle, str) or not handle:
+        return None
+    return await deps.db.run(lambda c: oidc_session.take(c, handle))
 
 
 async def _sign_out_target(deps, id_token: object) -> str:
@@ -112,7 +133,7 @@ async def _sign_out_target(deps, id_token: object) -> str:
         log_event(logger, "sign_out", outcome="local", reason="no_id_token")
         return SIGNED_OUT
     try:
-        provider = await deps.oidc.provider()
+        provider = await deps.oidc.provider(keys=False)
     except ProviderError as error:
         log_event(logger, "sign_out", outcome="local", reason=error.reason)
         return SIGNED_OUT
@@ -127,7 +148,7 @@ async def _sign_out_target(deps, id_token: object) -> str:
 @router.post("/logout", dependencies=[Depends(require_csrf)])
 async def logout_route(request: Request) -> RedirectResponse:
     deps = request.app.state.deps
-    id_token = request.session.get("id_token")
+    id_token = await _take_id_token(deps, request.session.get("id_token_handle"))
     end_session(request)
     return RedirectResponse(await _sign_out_target(deps, id_token), status_code=303)
 
@@ -145,7 +166,9 @@ def _verify(deps, provider: logout.Provider, token: str) -> LogoutClaims:
 
 
 async def _verified_claims(deps, token: str) -> LogoutClaims:
-    """Checks the token against the provider's keys. An unknown kid fetches the keys once more and tries again."""
+    """Checks the token against the provider's keys. An unknown kid fetches the keys once more and tries again. A token
+    too large to be one is refused before the provider is asked for anything."""
+    logout.check_size(token)
     try:
         return _verify(deps, await deps.oidc.provider(), token)
     except LogoutTokenRefused as error:
@@ -167,7 +190,8 @@ async def _accept_logout_token(deps, raw: object) -> str | None:
     if claims.sid is not None:
         await deps.db.run(lambda c: revocation.revoke_session(c, sid=claims.sid, now=now, max_age_seconds=max_age))
     else:
-        await deps.db.run(lambda c: revocation.revoke_subject(c, sub=claims.sub, now=now, max_age_seconds=max_age))
+        await deps.db.run(lambda c: revocation.revoke_subject(c, sub=claims.sub, issued_at=claims.issued_at, now=now,
+                                                              max_age_seconds=max_age))
     return None
 
 

@@ -13,9 +13,29 @@ import pytest
 
 from hallpass import registry
 from hallpass.logs import FIELDS_ATTR
-from hallpass.logout import ProviderError
-from tests.helpers import Env, accept_for, new_client, publish_terms, sign_in, store_person
-from tests.logout_tokens import SID, SUB, jwks, logout_claims, logout_token, sign, signing_key
+from hallpass.logout import CLOCK_SKEW_SECONDS, MAX_TOKEN_CHARS, ProviderError
+from tests.helpers import (
+    NOW,
+    Env,
+    StubOidcClient,
+    accept_for,
+    new_client,
+    publish_terms,
+    sign_in,
+    store_person,
+    use_oidc_client,
+)
+from tests.logout_tokens import (
+    END_SESSION,
+    ISSUER,
+    SID,
+    SUB,
+    jwks,
+    logout_claims,
+    logout_token,
+    sign,
+    signing_key,
+)
 
 SECOND_SID = "sid-test-session-two"
 ENDPOINT = "/auth/backchannel-logout"
@@ -110,7 +130,11 @@ async def test_a_token_with_sid_and_sub_revokes_by_sid_and_keeps_the_others(env:
     pytest.param(lambda now: sign(logout_claims(now), key=signing_key("other")), "bad signature", id="bad-sig"),
     pytest.param(lambda now: logout_token(now, iss="https://elsewhere.invalid/"), "wrong iss", id="wrong-iss"),
     pytest.param(lambda now: logout_token(now, aud="another-client"), "wrong aud", id="wrong-aud"),
-    pytest.param(lambda now: logout_token(now, exp=int(now.timestamp()) - 1), "expired", id="expired"),
+    pytest.param(lambda now: logout_token(now, exp=int(now.timestamp()) - CLOCK_SKEW_SECONDS), "expired",
+                 id="expired"),
+    pytest.param(lambda now: logout_token(now, iat=int(now.timestamp()) + 61, exp=int(now.timestamp()) + 181),
+                 "issued in the future", id="issued-in-future"),
+    pytest.param(lambda now: "x" * (MAX_TOKEN_CHARS + 1), "too large", id="too-large"),
     pytest.param(lambda now: logout_token(now, exp=None), "no exp", id="no-exp"),
     pytest.param(lambda now: logout_token(now, iat=None), "no iat", id="no-iat"),
     pytest.param(lambda now: logout_token(now, events={"http://schemas.openid.net/event/other": {}}),
@@ -192,3 +216,80 @@ async def test_an_empty_logout_token_is_a_400(env: Env):
 
     assert response.status_code == 400
     assert await revocation_rows(env) == (0, 0)
+
+
+def ticking(ticks: list[float]):
+    """A monotonic clock the test moves by hand, for the forced-refetch cooldown."""
+    return lambda: ticks[0]
+
+
+async def test_two_unknown_kid_deliveries_in_a_row_force_one_key_fetch(env: Env):
+    ticks = [0.0]
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION}, jwks=jwks("test-key"))
+    use_oidc_client(env, stub, monotonic=ticking(ticks))
+    unknown = sign(logout_claims(env.clock.now()), kid="never-published")
+
+    first = await deliver(env, unknown)
+    second = await deliver(env, unknown)
+
+    assert (first.status_code, second.status_code) == (400, 400)
+    assert stub.jwks_calls.count(True) == 1
+
+
+@pytest.mark.parametrize(("elapsed", "status", "forced_fetches"), [
+    pytest.param(59, 400, 1, id="inside-the-cooldown"),
+    pytest.param(60, 200, 2, id="at-the-cooldown"),
+])
+async def test_a_rotated_key_is_fetched_again_only_after_the_cooldown(env: Env, elapsed: int, status: int,
+                                                                      forced_fetches: int):
+    await bound_adult(env)
+    browser = await browser_signed_in(env, sid=SID)
+    ticks = [0.0]
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION}, jwks=jwks("test-key"))
+    use_oidc_client(env, stub, monotonic=ticking(ticks))
+    await deliver(env, sign(logout_claims(env.clock.now()), kid="rotated"))
+    stub.rotate(jwks("test-key", "rotated"))
+
+    ticks[0] = float(elapsed)
+    response = await deliver(env, sign(logout_claims(env.clock.now()), kid="rotated"))
+
+    assert response.status_code == status
+    assert stub.jwks_calls.count(True) == forced_fetches
+    assert await is_signed_in(browser) is (status == 400)
+
+
+async def test_a_token_is_stamped_with_its_issue_time_so_a_session_started_after_the_event_survives(env: Env):
+    await bound_adult(env)
+    env.clock.set(NOW - timedelta(seconds=20))
+    before_the_event = await browser_signed_in(env, sid=None)
+    env.clock.set(NOW + timedelta(seconds=10))
+    after_the_event = await browser_signed_in(env, sid=SECOND_SID)
+    env.clock.set(NOW + timedelta(seconds=30))
+
+    response = await deliver(env, logout_token(NOW, sid=None))
+
+    assert response.status_code == 200
+    assert not await is_signed_in(before_the_event)
+    assert await is_signed_in(after_the_event)
+
+
+async def test_a_replayed_token_changes_nothing(env: Env):
+    await bound_adult(env)
+    token = logout_token(NOW, sid=None)
+    env.clock.set(NOW + timedelta(seconds=30))
+    await deliver(env, token)
+    env.clock.set(NOW + timedelta(seconds=40))
+    survivor = await browser_signed_in(env, sid=SECOND_SID)
+
+    env.clock.set(NOW + timedelta(seconds=50))
+    response = await deliver(env, token)
+
+    assert response.status_code == 200
+    assert await is_signed_in(survivor)
+
+
+async def test_an_oversized_token_is_refused_before_the_provider_is_asked_for_keys(env: Env):
+    response = await deliver(env, "x" * (MAX_TOKEN_CHARS + 1))
+
+    assert response.status_code == 400
+    assert env.oidc.provider_calls == []

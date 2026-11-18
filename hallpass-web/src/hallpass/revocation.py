@@ -32,11 +32,22 @@ def revoke_session(conn: sqlite3.Connection, *, sid: str, now: datetime, max_age
                  (sid, stamp(now)))
 
 
-def revoke_subject(conn: sqlite3.Connection, *, sub: str, now: datetime, max_age_seconds: int) -> None:
+def revoke_subject(conn: sqlite3.Connection, *, sub: str, issued_at: datetime, now: datetime,
+                   max_age_seconds: int) -> None:
+    """Records when the person's Authentik sessions ended, which is the logout token's issue time, never later than
+    now. A late or replayed delivery cannot move the time forward, because the stored time only ever goes up."""
     prune(conn, now=now, max_age_seconds=max_age_seconds)
+    ended_at = min(issued_at, now)
     conn.execute("INSERT INTO revoked_subject (sub, revoked_at) VALUES (?, ?) "
                  "ON CONFLICT(sub) DO UPDATE SET revoked_at = MAX(revoked_at, excluded.revoked_at)",
-                 (sub, stamp(now)))
+                 (sub, stamp(ended_at)))
+
+
+def session_ended(conn: sqlite3.Connection, *, sid: str | None, sub: str | None, started_at: str | None) -> bool:
+    """Whether a request must end its session. A session with no start time was made before the start time was kept,
+    so it ends for every request: everyone signs in once after the upgrade. Any other session is ended as
+    session_revoked says."""
+    return started_at is None or session_revoked(conn, sid=sid, sub=sub, started_at=started_at)
 
 
 def session_revoked(conn: sqlite3.Connection, *, sid: str | None, sub: str | None, started_at: str | None) -> bool:

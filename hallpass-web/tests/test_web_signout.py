@@ -5,16 +5,33 @@ from the discovery document, the stored ID token and the public URL. A request c
 
 from __future__ import annotations
 
+import base64
+import json
+from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
 from hallpass import registry
 from hallpass.logout import ProviderError
-from tests.helpers import BASE_URL, Env, accept_for, form, new_client, publish_terms, sign_in, store_person
-from tests.logout_tokens import END_SESSION, SID, SUB
+from tests.helpers import (
+    BASE_URL,
+    Env,
+    StubOidcClient,
+    accept_for,
+    form,
+    new_client,
+    publish_terms,
+    sign_in,
+    store_person,
+    use_oidc_client,
+)
+from tests.logout_tokens import END_SESSION, ISSUER, SID, SUB
 
 ID_TOKEN = "header.payload.signature"
+CLAIMS_MARKER = "claims-marker-7f3a"
+ID_TOKEN_WITH_CLAIMS = f"header.payload-{CLAIMS_MARKER}.signature"
+SESSION = "hallpass_session"
 
 
 async def bound_adult(env: Env) -> None:
@@ -120,3 +137,71 @@ async def test_signed_out_is_not_behind_the_sign_in_gate(env: Env):
 
     assert response.status_code != 303
     assert "location" not in response.headers
+
+
+def session_cookie(response: httpx.Response) -> str:
+    """The raw value of the session cookie a response sets, with the cookie's own quoting removed."""
+    jar: SimpleCookie = SimpleCookie()
+    for header in response.headers.get_list("set-cookie"):
+        jar.load(header)
+    return jar[SESSION].value
+
+
+def session_contents(raw: str) -> dict:
+    """What the signed session cookie holds: the value is base64 JSON, then a timestamp and a signature."""
+    return json.loads(base64.b64decode(raw.split(".")[0]))
+
+
+async def stored_tokens(env: Env) -> int:
+    return await env.db.run(lambda c: c.execute("SELECT count(*) FROM oidc_session").fetchone()[0])
+
+
+async def test_the_session_cookie_holds_a_handle_and_no_id_token_or_name(env: Env):
+    await bound_adult(env)
+    browser = new_client(env)
+
+    response = await sign_in(env, sub=SUB, username="kid1", sid=SID, id_token=ID_TOKEN_WITH_CLAIMS, client=browser)
+
+    assert response.status_code == 303
+    raw = session_cookie(response)
+    contents = session_contents(raw)
+    assert "id_token" not in contents
+    assert "name" not in contents and "username" not in contents
+    assert CLAIMS_MARKER not in raw
+    assert len(contents["id_token_handle"]) >= 32
+    assert await stored_tokens(env) == 1
+
+
+async def test_sign_out_sends_the_stored_token_and_deletes_its_row(env: Env):
+    await bound_adult(env)
+    browser = await signed_in(env, id_token=ID_TOKEN_WITH_CLAIMS)
+
+    response = await sign_out(browser, env)
+
+    assert parse_qs(urlsplit(response.headers["location"]).query)["id_token_hint"] == [ID_TOKEN_WITH_CLAIMS]
+    assert await stored_tokens(env) == 0
+
+
+async def test_sign_out_without_a_stored_token_signs_out_to_signed_out(env: Env):
+    await bound_adult(env)
+    browser = await signed_in(env)
+    await env.db.run(lambda c: c.execute("DELETE FROM oidc_session"))
+
+    response = await sign_out(browser, env)
+
+    assert response.headers["location"] == "/signed-out"
+
+
+async def test_sign_out_reaches_the_end_session_endpoint_even_when_the_keys_cannot_be_fetched(env: Env):
+    await bound_adult(env)
+    browser = await signed_in(env)
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION},
+                          jwks_error=httpx.ConnectError("unreachable"))
+    use_oidc_client(env, stub)
+
+    response = await sign_out(browser, env)
+
+    assert response.status_code == 303
+    parts = urlsplit(response.headers["location"])
+    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == END_SESSION
+    assert stub.jwks_calls == []

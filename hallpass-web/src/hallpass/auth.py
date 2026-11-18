@@ -4,14 +4,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import secrets
 import sqlite3
+import time
 import warnings
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Protocol
+from typing import Annotated, Any, Protocol
 from urllib.parse import urlsplit
 
 # Authlib 1.9.5 warns at import that its httpx integration is deprecated. That is upstream, not hallpass code, so
@@ -40,12 +43,16 @@ from hallpass.registry import Person
 
 logger = logging.getLogger(__name__)
 SESSION_COOKIE = "hallpass_session"
+# A forced key refetch (an unknown kid on a logout token) is honoured at most once in this many seconds, so an
+# unauthenticated sender cannot make hallpass fetch the provider's keys on every request.
+FORCED_REFRESH_COOLDOWN_SECONDS = 60
 
 
 @dataclass(frozen=True)
 class Identity:
-    """What a sign-in tells hallpass. sid and id_token are the handles sign-out and back-channel logout need: sid is
-    the ID token's session id (None when the token has none), and id_token is the raw token, kept as the hint."""
+    """What a sign-in tells hallpass. sid is the ID token's session id (None when the token has none), which
+    back-channel logout matches. id_token is the raw token: it is kept on the server, never in the cookie, and
+    sign-out sends it back as the hint."""
     sub: str
     username: str | None
     enrollment_ref: str | None
@@ -58,7 +65,7 @@ class OidcClient(Protocol):
 
     async def finish(self, request: Request) -> Identity: ...
 
-    async def provider(self, *, refresh_keys: bool = False) -> Provider: ...
+    async def provider(self, *, keys: bool = True, refresh_keys: bool = False) -> Provider: ...
 
 
 class SignInError(Exception):
@@ -87,7 +94,11 @@ def _oidc_failure(error: Exception) -> SignInError:
 class AuthlibOidc:
     """The production OIDC client. Verified against the live IdP, not in unit tests."""
 
-    def __init__(self, *, metadata_url: str, client_id: str, client_secret: str) -> None:
+    def __init__(self, *, metadata_url: str, client_id: str, client_secret: str,
+                 monotonic: Callable[[], float] = time.monotonic) -> None:
+        self._monotonic = monotonic
+        self._keys_lock = asyncio.Lock()
+        self._last_forced_refresh: float | None = None
         oauth = OAuth()
         oauth.register("authentik", server_metadata_url=metadata_url, client_id=client_id,
                        client_secret=client_secret, client_kwargs={"scope": "openid profile hallpass"})
@@ -112,16 +123,28 @@ class AuthlibOidc:
         except _OIDC_ERRORS as error:
             raise _oidc_failure(error) from None
 
-    async def provider(self, *, refresh_keys: bool = False) -> Provider:
-        """The discovery document's issuer and end-session endpoint, and the provider's keys. The keys are fetched
-        again only when refresh_keys is set. A failure is a ProviderError, and its text is dropped."""
+    async def provider(self, *, keys: bool = True, refresh_keys: bool = False) -> Provider:
+        """The discovery document's issuer and end-session endpoint and, when keys is set, the provider's keys.
+        Sign-out asks for no keys, so a JWKS failure cannot stop it. The keys are fetched again only when refresh_keys
+        is set, and then only once per FORCED_REFRESH_COOLDOWN_SECONDS: inside the cooldown the cached keys are
+        returned. A failure is a ProviderError, and its text is dropped."""
         try:
             metadata = await self._client.load_server_metadata()
-            jwks = await self._client.fetch_jwk_set(force=refresh_keys)
+            jwks = await self._fetch_keys(refresh=refresh_keys) if keys else None
             return Provider(issuer=metadata["issuer"], end_session_endpoint=metadata.get("end_session_endpoint"),
                             jwks=jwks)
         except (*_OIDC_ERRORS, RuntimeError):
             raise ProviderError("provider_unavailable") from None
+
+    async def _fetch_keys(self, *, refresh: bool) -> Mapping[str, Any]:
+        """The provider's keys. The lock makes concurrent callers share one forced fetch: the first sets the time, and
+        the rest find the cooldown running and read the cached keys it just refreshed."""
+        async with self._keys_lock:
+            last = self._last_forced_refresh
+            force = refresh and (last is None or self._monotonic() - last >= FORCED_REFRESH_COOLDOWN_SECONDS)
+            if force:
+                self._last_forced_refresh = self._monotonic()
+            return await self._client.fetch_jwk_set(force=force)
 
 
 class RedirectToLogin(Exception):
@@ -178,15 +201,15 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(403, text.CSRF_FAILED)
 
 
-def start_session(request: Request, person_id: int, *, sid: str | None, id_token: str | None,
+def start_session(request: Request, person_id: int, *, sid: str | None, handle: str | None,
                   started_at: datetime) -> None:
-    """Starts a session. It keeps the sid and ID token that sign-out and back-channel logout use, and the start
-    time that a subject-wide revocation is compared with."""
+    """Starts a session. It keeps the sid that back-channel logout matches, the handle of the server-side ID token that
+    sign-out takes, and the start time that a subject-wide revocation is compared with. The cookie holds no token."""
     request.session.clear()
     request.session["person_id"] = person_id
     request.session["csrf"] = secrets.token_urlsafe(32)
     request.session["sid"] = sid
-    request.session["id_token"] = id_token
+    request.session["id_token_handle"] = handle
     request.session["started_at"] = revocation.stamp(started_at)
 
 
@@ -277,8 +300,8 @@ async def current_person_any_terms(request: Request) -> Person:
         end_session(request)
         raise HTTPException(403, text.LOCKED)
     sid, started_at = request.session.get("sid"), request.session.get("started_at")
-    revoked = await deps.db.run(lambda c: revocation.session_revoked(c, sid=sid, sub=person.authentik_uuid,
-                                                                     started_at=started_at))
+    revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid, sub=person.authentik_uuid,
+                                                                    started_at=started_at))
     if revoked:
         end_session(request)
         raise RedirectToLogin(request.url.path)

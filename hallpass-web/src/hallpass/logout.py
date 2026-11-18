@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
@@ -23,6 +23,10 @@ from joserfc.jwk import KeySet
 EVENT_KEY = "http://schemas.openid.net/event/backchannel-logout"
 # The provider signs with RS256. Naming the algorithm stops a token from choosing its own, including "none" and HMAC.
 ALGORITHMS = ["RS256"]
+# A token may be this many seconds past its exp, or this many seconds ahead of now, because clocks differ.
+CLOCK_SKEW_SECONDS = 60
+# A logout token longer than this is refused before anything is verified.
+MAX_TOKEN_CHARS = 8192
 
 
 class LogoutTokenRefused(Exception):
@@ -45,13 +49,14 @@ class ProviderError(Exception):
 class Provider:
     issuer: str
     end_session_endpoint: str | None
-    jwks: Mapping[str, Any]
+    jwks: Mapping[str, Any] | None     # None when the caller asked for no keys
 
 
 @dataclass(frozen=True)
 class LogoutClaims:
     sid: str | None
     sub: str | None
+    issued_at: datetime      # the token's iat: when the logout happened at the provider
 
 
 def _is_number(value: object) -> bool:
@@ -71,8 +76,10 @@ def _check_claims(claims: Mapping[str, Any], *, issuer: str, client_id: str, now
         raise LogoutTokenRefused("missing_exp")
     if not _is_number(claims["iat"]) or not _is_number(claims["exp"]):
         raise LogoutTokenRefused("malformed_claim")
-    if claims["exp"] <= now.timestamp():
+    if claims["exp"] + CLOCK_SKEW_SECONDS <= now.timestamp():
         raise LogoutTokenRefused("expired")
+    if claims["iat"] - CLOCK_SKEW_SECONDS > now.timestamp():
+        raise LogoutTokenRefused("issued_in_future")
     events = claims.get("events")
     if not isinstance(events, dict) or EVENT_KEY not in events:
         raise LogoutTokenRefused("missing_event")
@@ -85,7 +92,17 @@ def _check_claims(claims: Mapping[str, Any], *, issuer: str, client_id: str, now
     sub = claims.get("sub") or None
     if sid is None and sub is None:
         raise LogoutTokenRefused("no_subject")
-    return LogoutClaims(sid=sid, sub=sub)
+    try:
+        issued_at = datetime.fromtimestamp(claims["iat"], UTC)
+    except (OverflowError, OSError, ValueError):
+        raise LogoutTokenRefused("malformed_claim") from None
+    return LogoutClaims(sid=sid, sub=sub, issued_at=issued_at)
+
+
+def check_size(token: str) -> None:
+    """Refuses a token longer than MAX_TOKEN_CHARS, before anything about it is read or verified."""
+    if len(token) > MAX_TOKEN_CHARS:
+        raise LogoutTokenRefused("too_large")
 
 
 def verify_logout_token(token: str, *, jwks: Mapping[str, Any], issuer: str, client_id: str,
@@ -94,6 +111,7 @@ def verify_logout_token(token: str, *, jwks: Mapping[str, Any], issuer: str, cli
 
     An unknown kid is refused as "unknown_kid", so the caller can fetch the keys again and retry once.
     """
+    check_size(token)
     try:
         key_set = KeySet.import_key_set(dict(jwks))
     except (JoseError, TypeError, ValueError, KeyError):

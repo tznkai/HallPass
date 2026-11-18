@@ -364,7 +364,6 @@ async def test_revoked_session_migration_adds_both_tables_and_keeps_rows_on_a_v9
     database = Database.open(path)
     try:
         assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
-        assert dbmod.LATEST_VERSION == 10
         tables = await database.run(lambda c: {row[0] for row in c.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")})
         assert {"revoked_session", "revoked_subject"} <= tables
@@ -375,6 +374,27 @@ async def test_revoked_session_migration_adds_both_tables_and_keeps_rows_on_a_v9
     finally:
         database.close()
 
+
+# OIDC session tokens (migration 0011) ---------------------------------------------------------------
+
+async def test_oidc_session_migration_adds_the_token_table_and_keeps_rows_on_a_v10_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 10)
+    _add_manual_mark(path, 1)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        assert dbmod.LATEST_VERSION == 11
+        columns = await database.run(lambda c: [row[1] for row in c.execute("PRAGMA table_info(oidc_session)")])
+        assert columns == ["handle", "id_token", "created_at"]
+        strict = await database.run(lambda c: c.execute(
+            "SELECT strict FROM pragma_table_list WHERE name = 'oidc_session'").fetchone()[0])
+        assert strict == 1
+        kept = await database.run(lambda c: c.execute("SELECT person_id FROM manual_suspension").fetchall())
+        assert kept == [(1,)]
+    finally:
+        database.close()
 
 # Quarantine -----------------------------------------------------------------------------------------
 

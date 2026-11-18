@@ -49,14 +49,14 @@ async def test_a_revoked_sid_ends_only_that_session(database: Database):
 
 
 async def test_a_subject_revocation_ends_sessions_started_before_it(database: Database):
-    await database.run(lambda c: revoke_subject(c, sub=SUB, now=NOW, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=NOW, now=NOW, max_age_seconds=MAX_AGE))
     before = stamp(NOW - timedelta(seconds=1))
 
     assert await database.run(lambda c: session_revoked(c, sid=None, sub=SUB, started_at=before)) is True
 
 
 async def test_a_subject_revocation_does_not_end_sessions_started_at_or_after_it(database: Database):
-    await database.run(lambda c: revoke_subject(c, sub=SUB, now=NOW, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=NOW, now=NOW, max_age_seconds=MAX_AGE))
 
     at = stamp(NOW)
     after = stamp(NOW + timedelta(seconds=1))
@@ -66,7 +66,7 @@ async def test_a_subject_revocation_does_not_end_sessions_started_at_or_after_it
 
 
 async def test_a_session_with_no_start_time_is_ended_by_any_subject_revocation(database: Database):
-    await database.run(lambda c: revoke_subject(c, sub=SUB, now=NOW, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=NOW, now=NOW, max_age_seconds=MAX_AGE))
 
     assert await database.run(lambda c: session_revoked(c, sid=None, sub=SUB, started_at=None)) is True
 
@@ -78,8 +78,8 @@ async def test_nothing_recorded_means_nothing_is_revoked(database: Database):
 
 async def test_a_second_subject_revocation_keeps_the_later_time(database: Database):
     later = NOW + timedelta(minutes=5)
-    await database.run(lambda c: revoke_subject(c, sub=SUB, now=later, max_age_seconds=MAX_AGE))
-    await database.run(lambda c: revoke_subject(c, sub=SUB, now=NOW, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=later, now=later, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=NOW, now=NOW, max_age_seconds=MAX_AGE))
 
     stored = await database.run(lambda c: c.execute("SELECT revoked_at FROM revoked_subject").fetchall())
 
@@ -89,7 +89,7 @@ async def test_a_second_subject_revocation_keeps_the_later_time(database: Databa
 async def test_rows_older_than_the_session_max_age_are_pruned_on_the_next_insert(database: Database):
     old = NOW - timedelta(seconds=MAX_AGE + 1)
     await database.run(lambda c: revoke_session(c, sid="old-sid", now=old, max_age_seconds=MAX_AGE))
-    await database.run(lambda c: revoke_subject(c, sub="old-sub", now=old, max_age_seconds=MAX_AGE))
+    await database.run(lambda c: revoke_subject(c, sub="old-sub", issued_at=old, now=old, max_age_seconds=MAX_AGE))
 
     await database.run(lambda c: revoke_session(c, sid="new-sid", now=NOW, max_age_seconds=MAX_AGE))
 
@@ -115,3 +115,21 @@ async def test_a_repeated_sid_revocation_is_recorded_once(database: Database):
 
     count = await database.run(lambda c: c.execute("SELECT count(*) FROM revoked_session").fetchone()[0])
     assert count == 1
+
+
+async def test_a_subject_revocation_is_stamped_with_the_token_issue_time_not_the_receipt_time(database: Database):
+    issued = NOW - timedelta(seconds=30)
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=issued, now=NOW, max_age_seconds=MAX_AGE))
+
+    stored = await database.run(lambda c: c.execute("SELECT revoked_at FROM revoked_subject").fetchall())
+
+    assert stored == [(stamp(issued),)]
+
+
+async def test_an_issue_time_ahead_of_now_is_stamped_with_now(database: Database):
+    await database.run(lambda c: revoke_subject(c, sub=SUB, issued_at=NOW + timedelta(seconds=30), now=NOW,
+                                                max_age_seconds=MAX_AGE))
+
+    stored = await database.run(lambda c: c.execute("SELECT revoked_at FROM revoked_subject").fetchall())
+
+    assert stored == [(stamp(NOW),)]
