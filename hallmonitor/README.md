@@ -34,15 +34,16 @@ The three checks, the same ones CI runs:
 ## Adding an adapter
 
 An adapter connects one kind of service to the reconcile loop. Adding one takes one module in
-`src/hallmonitor/adapters/` and one line in `src/hallmonitor/adapters/registry.py`. Nothing else in the loop
-changes.
+`src/hallmonitor/adapters/` and one line in `src/hallmonitor/adapters/registry.py`. The loop itself does not change.
+The same change also updates `REVIEW.md` (see the last rule below).
 
 ### The plugin
 
 The module exposes `create(ctx)`. `ctx` is an `AdapterContext` (`adapters/context.py`) holding the service slug,
-its settings, the config, the database, the shared HTTP client and the clock. `create` returns the adapter, or None
-when a required setting is missing or not valid. The service's subjects then report `no_adapter`, so log
-`adapter_not_configured` and return None; never raise. Register it by name:
+its settings, the config, the database, the shared HTTP client and the clock. `create` returns the adapter. When a
+required setting is missing or not valid, it logs `adapter_not_configured` and returns None, and the service's
+subjects then report `no_adapter`. It never raises: `create` runs outside any per-service guard, so an exception there
+fails the whole cycle for every service. Register it by name:
 
 ```
 "mygame": AdapterPlugin(mygame.create),
@@ -54,8 +55,10 @@ That name is what a hallpass service picks as its adapter. `adapters/manual.py` 
 
 Each service's settings come from `HM_SERVICE_<SLUG>__<KEY>` environment variables. The slug is the hallpass service
 slug, upper-cased, with `-` written as `_`. The key reaches the adapter lower-cased: `HM_SERVICE_MY_GAME__PTERO_URL`
-becomes `ctx.settings["ptero_url"]` for the service `my-game`. An empty value is no setting at all. A key containing
-`password`, `key` or `token` is treated as a secret and removed from the logs. Document every key in `.env.example`.
+becomes `ctx.settings["ptero_url"]` for the service `my-game`. A key is lower-case letters and digits joined by single
+underscores; a malformed name or slug stops startup with a configuration error. An empty value is no setting at all.
+The value of a key whose name contains `password`, `key` or `token` is redacted from the logs, so give every secret
+such a name (for example `rcon_password` or `ptero_key`). Document every key in `.env.example`.
 
 ### The protocol
 
@@ -79,9 +82,15 @@ states are:
 | `banned_external` | Kept out by something hallmonitor did not place. | Never |
 | `error` | The state is unknown, or a change failed. | Never |
 
-When the service itself cannot be asked, raise `AdapterError(reason)`. The reasons `auth`, `timeout` and
-`unreachable` are service-wide, and they stop the rest of that service's pass. Any other reason stays with its
-subject.
+When the service itself cannot be asked, raise `AdapterError(reason)`, with a short reason token. Where it is raised
+matters:
+
+- **From `observe`**, any `AdapterError` fails every subject of the service with that reason. A transport error
+  becomes `unreachable`, and any other exception `adapter_failed`. To fail one subject only, return
+  `Observed("error", reason)` for it and carry on, as `fluxer.py` does.
+- **From `apply`**, the reasons `auth`, `timeout` and `unreachable` are service-wide: they stop that service's
+  remaining applies, and each later subject that needed an apply gets that reason. Any other reason stays with its
+  subject.
 
 `Capabilities` records what the adapter can do: `suspend`, `restore`, `read_state`, and `removes_connected` for
 whether a suspension disconnects a player who is online. It is a declaration: the loop does not read it, so keep it
@@ -93,19 +102,29 @@ true for what the adapter does.
   ban is the fallback, for games with no allowlist.
 - **Ban ownership.** An adapter lifts only bans it placed. Record every ban you place with `own.py`
   (`record_own`, and `forget_own` once it is lifted). A ban with no record is `banned_external`, and nothing lifts it.
+- **Allowlist (permitted-list) mode.** An allowlist is hallpass's to control, so the adapter adds and removes its
+  subjects' entries with no ownership record (`minecraft.py`, `valheim.py`). The game's own ban list stays read-only:
+  an id on it is `banned_external`, and the adapter never writes it. Entries that name no subject are left alone and
+  counted by `unmanaged_count`. Own records may still time a change: when the game reads the file only at start,
+  Valheim records each change and reports `pending_restart` until the server's uptime shows a restart since then.
 - **Identity allowlists.** Before an identity reaches a command or a file line, check it against a strict pattern,
   such as `adapters/steam.py`'s `valid_steam64`. A subject with no identity of the right kind is
   `error`/`no_identity`; one with an unsafe value is `error`/`bad_identity`.
 - **Never empty an allowlist.** If a change would leave the list with no entries and the game reads an empty list
   as open to everyone, write nothing and report `error`/`would_open_server`.
 - **Logging.** Log only through `log_event`, with the slug, event types and outcomes. Never log identities, names,
-  hosts, paths or messages.
+  contacts, addresses, hosts, URLs, paths, tokens or message content.
 - **Tests.** Test against a fake of the service, not a live one. Cover the five states, `create` returning None for
   each missing or invalid setting, every identity check, and the ban-ownership rule. A live check goes in
   `tools/live/`, run by hand, and its results go in `docs/service-notes.md`.
+- **REVIEW.md.** `REVIEW.md` lists the security-sensitive lines as `path:line` references, and
+  `tests/test_review_refs.py` checks every one. In the same change, re-point the registry references that the new
+  line moves, and add entries for the new adapter's identity checks, its ban or ownership branch and any empty-list
+  guard.
 
 The existing adapters show the patterns: `minecraft.py` (RCON whitelist), `palworld.py` (REST bans with a ban file
-read back), `valheim.py` (a permitted list edited through `pterodactyl.py`) and `source_rcon.py` (RCON bans).
+read back), `valheim.py` (a permitted list edited through `pterodactyl.py`), `source_rcon.py` (RCON bans) and
+`fluxer.py` (an HTTP admin API that places no bans and keeps one subject's failure to that subject inside `observe`).
 
 ## Publication
 
