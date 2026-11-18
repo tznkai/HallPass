@@ -133,6 +133,46 @@ async def test_the_mark_can_be_removed_while_the_hold_stands(env: Env):
     assert await hold_kinds(env, ada.id, calendar.id) == ["admin"]
 
 
+async def make_automatic(env: Env, service: services.Service, actor: Person) -> None:
+    await env.db.run(lambda c: services.update_service(
+        c, service.id, name=service.name, adapter="minecraft", auto_suspendable=True, url=None,
+        actor_id=actor.id, now=NOW))
+
+
+async def test_a_mark_on_a_service_later_made_automatic_still_offers_the_unmark(env: Env):
+    await admin_client(env)
+    ada, _ = await signed_in_person(env, account_type="adult", display_name="Ada")
+    calendar = await make_service(env.db, "calendar")
+    await grant_to_adults(env, calendar, ada)
+    await admin_post(env, f"/admin/people/{ada.id}", f"/admin/people/{ada.id}/holds", service_id="all")
+    await admin_post(env, f"/admin/people/{ada.id}", f"/admin/people/{ada.id}/manual/{calendar.id}")
+    await make_automatic(env, calendar, ada)
+
+    page = (await env.client.get(f"/admin/people/{ada.id}")).text
+    assert f"/admin/people/{ada.id}/manual/{calendar.id}/unmark" in page
+
+    cleared = await admin_post(env, f"/admin/people/{ada.id}",
+                               f"/admin/people/{ada.id}/manual/{calendar.id}/unmark")
+    assert cleared.status_code == 303
+    assert await env.db.run(lambda c: holds.marked_service_ids(c, ada.id)) == set()
+
+
+async def test_a_pending_restore_on_a_service_later_made_automatic_can_still_be_cleared(env: Env):
+    await admin_client(env)
+    family, _ = await make_signed_family(env)
+    await env.db.run(lambda c: holds.place(c, actor=holds.Actor("parent", family.ann.id),
+                                           target_id=family.kid.id, service_ids=[family.abiotic.id], now=NOW,
+                                           window=WINDOW, admin_email=None))
+    await admin_post(env, f"/admin/people/{family.kid.id}", f"/admin/people/{family.kid.id}/manual/{family.abiotic.id}")
+    csrf = await form(env, "/", client=family.ann_browser)
+    await family.ann_browser.post(f"/children/{family.kid.id}/holds/{family.abiotic.id}/lift", data=csrf)
+    await make_automatic(env, family.abiotic, family.kid)
+
+    page = (await env.client.get(f"/admin/people/{family.kid.id}")).text
+    assert f"/admin/people/{family.kid.id}/manual/{family.abiotic.id}/unmark" in page
+    assert text.RESTORE_BY_HAND_DONE in page
+
+
 async def test_the_administrator_sees_a_pending_restore_and_clears_it_by_hand(env: Env):
     await admin_client(env)
     family, _ = await make_signed_family(env)

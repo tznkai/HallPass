@@ -189,18 +189,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <td>{% for label in row.labels %}<span>Suspended by {{ label }}</span><br>{% endfor %}</td>
         <td>{{ row.suspendable }}</td>
         <td>
-          {% if not row.service.auto_suspendable %}
           {% if row.marked %}
           <form method="post" action="/admin/people/{{ person.id }}/manual/{{ row.service.id }}/unmark" class="inline">
             <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
             <button type="submit">{% if row.pending %}{{ restore_by_hand_done }}{% else %}Unmark{% endif %}</button>
           </form>
-          {% else %}
+          {% elif not row.service.auto_suspendable %}
           <form method="post" action="/admin/people/{{ person.id }}/manual/{{ row.service.id }}" class="inline">
             <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
             <button type="submit">Mark manually suspended</button>
           </form>
-          {% endif %}
           {% endif %}
         </td>
       </tr>

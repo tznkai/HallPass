@@ -41,10 +41,9 @@ CHILDREN_HELP = ("Each child linked to you is listed here with their services; o
                  "child is active, unless a hold is in place or the service is not open to them. "
                  "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
                  "Restore lifts your own hold, and another parent's hold too unless your family agreed that each "
-                 "parent lifts only their own. "
-                 "Only the administrator lifts an administrator hold or a lockdown; on a service that can't be "
-                 "suspended automatically, a parent can restore it too, and if the administrator had suspended it by "
-                 "hand, the administrator then undoes that by hand.")
+                 "parent lifts only their own; if the administrator had suspended a service by hand, they then undo "
+                 "that by hand. "
+                 "Only the administrator lifts an administrator hold or a lockdown.")
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
@@ -115,6 +114,10 @@ RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in hal
                               "{service} was suspended by hand, so it must be restored by hand too. "
                               "Then mark it restored by hand on the person's page.\n\n"
                               "Sign in to hallpass for details.\n")
+RESTORE_CANCELLED_EMAIL_SUBJECT = "Hallpass: restore of {service} for {child} cancelled"
+RESTORE_CANCELLED_EMAIL_BODY = ("The restore of {service} for {child} is cancelled, because the service was suspended "
+                                "again in hallpass. The suspension made by hand should stay in place.\n\n"
+                                "Sign in to hallpass for details.\n")
 # Notification emails are plain text. The child's display name and the actor label are the only names in them.
 CHANGE_EMAIL_SUBJECT = "Hallpass: access changed for {child}"
 CHANGE_EMAIL_BODY = ("{actor} changed the access of {child} in hallpass.\n\n"

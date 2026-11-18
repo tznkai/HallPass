@@ -633,6 +633,90 @@ async def test_unmarking_a_pending_restore_clears_it_and_logs_the_unmark(db: Dat
     assert len(await decision_rows(w, "manual_unmarked")) == 1
 
 
+RESTORE_SUBJECT = text.RESTORE_PENDING_EMAIL_SUBJECT.format(child="Kid", service="Abiotic")
+CANCELLED_SUBJECT = text.RESTORE_CANCELLED_EMAIL_SUBJECT.format(child="Kid", service="Abiotic")
+
+
+async def pend_abiotic(w: World) -> None:
+    """Ann places a hold on the manual service, the administrator marks it, and Ann lifts it: a pending restore."""
+    await place(w, parent(w.ann), w.child, [w.abiotic], at=NOW - timedelta(hours=2))
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW - timedelta(hours=1))
+
+
+async def test_a_lift_that_is_the_second_reversal_locks_down_and_leaves_no_restore_to_do(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer], at=NOW - timedelta(hours=2))
+    await lift(w, parent(w.ben), w.child, [w.fluxer], at=NOW - timedelta(hours=1))  # reversal 1
+    await place(w, parent(w.ann), w.child, [w.abiotic], at=NOW - timedelta(minutes=30))
+    await mark_abiotic(w)
+    outcome = await lift(w, parent(w.ben), w.child, [w.abiotic], at=NOW)  # reversal 2
+
+    assert outcome.reversal is True
+    assert outcome.lockdown_review_id is not None
+    assert await hold_kinds(w, w.child, w.abiotic) == ["lockdown"]
+    assert await marks(w) == [(w.abiotic, False)]
+    assert RESTORE_SUBJECT not in [subject for subject, _ in await admin_emails(w)]
+    assert await decision_rows(w, "manual_restore_pending") == []
+
+
+async def test_a_parent_revoke_cancels_a_pending_restore_with_one_email(db: Database) -> None:
+    w = await build(db)
+    await pend_abiotic(w)
+    await place(w, parent(w.ben), w.child, [w.abiotic], at=NOW)
+
+    assert await hold_kinds(w, w.child, w.abiotic) == ["parent"]
+    assert await marks(w) == [(w.abiotic, False)]
+    emails = await admin_emails(w)
+    assert [subject for subject, _ in emails] == [RESTORE_SUBJECT, CANCELLED_SUBJECT]
+    cancelled_body = emails[1][1]
+    assert "Kid" in cancelled_body and "Abiotic" in cancelled_body
+    assert "Ben" not in cancelled_body and "Ann" not in cancelled_body
+
+
+async def test_an_admin_place_cancels_a_pending_restore_with_one_email(db: Database) -> None:
+    w = await build(db)
+    await pend_abiotic(w)
+    await place(w, admin(w), w.child, [w.abiotic], at=NOW)
+
+    assert await hold_kinds(w, w.child, w.abiotic) == ["admin"]
+    assert await marks(w) == [(w.abiotic, False)]
+    assert [subject for subject, _ in await admin_emails(w)] == [RESTORE_SUBJECT, CANCELLED_SUBJECT]
+
+
+async def test_a_lockdown_cancels_a_pending_restore_with_one_email(db: Database) -> None:
+    w = await build(db)
+    await pend_abiotic(w)
+    await run_sequence(w, [(w.ann, "place", NOW), (w.ben, "lift", NOW + timedelta(hours=1))])
+    outcome = await place(w, parent(w.ann), w.child, [w.fluxer], at=NOW + timedelta(hours=2))
+
+    assert outcome.lockdown_review_id is not None
+    assert await hold_kinds(w, w.child, w.abiotic) == ["lockdown"]
+    assert [subject for subject, _ in await admin_emails(w)].count(CANCELLED_SUBJECT) == 1
+
+
+async def test_a_hold_with_nothing_pending_cancels_nothing_and_mails_no_administrator(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await place(w, admin(w), w.child, [w.fluxer])
+
+    assert await admin_emails(w) == []
+
+
+async def test_a_mark_on_a_service_later_made_automatic_is_cleared_and_not_pended(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await w.db.run(lambda c: services.update_service(c, w.abiotic, name="Abiotic", adapter="minecraft",
+                                                     auto_suspendable=True, url=None, actor_id=w.admin, now=NOW))
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+
+    assert await marks(w) == []
+    assert await w.db.run(lambda c: holds.pending_service_ids(c, w.child)) == set()
+    assert await admin_emails(w) == []
+    assert await decision_rows(w, "manual_restore_pending") == []
+
+
 async def test_strict_mode_refuses_a_parent_lifting_another_parents_manual_hold(db: Database) -> None:
     w = await build(db, mode="strict")
     await place(w, parent(w.ben), w.child, [w.abiotic])

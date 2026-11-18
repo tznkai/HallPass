@@ -191,22 +191,39 @@ def _clear_orphan_marks(conn: sqlite3.Connection, person_id: int, service_ids: S
     )
 
 
-def _clear_pending(conn: sqlite3.Connection, person_id: int, service_ids: Sequence[int]) -> None:
-    """A new hold on a service ends its pending restore: the person is suspended again and the mark stands."""
-    conn.executemany(
-        "UPDATE manual_suspension SET restore_pending_since = NULL WHERE person_id = ? AND service_id = ?",
-        [(person_id, service_id) for service_id in service_ids],
-    )
+def _clear_pending(conn: sqlite3.Connection, child: Person, service_ids: Sequence[int], now: datetime,
+                   admin_email: str | None) -> list[int]:
+    """A new hold on a service ends its pending restore: the person is suspended again and the mark stands. The
+    administrator may already have undone the suspension by hand, so each cancelled restore is named to them once.
+    Returns the services whose pending restore was cancelled; none is named when nothing was pending."""
+    cancelled = []
+    for service_id in service_ids:
+        cleared = conn.execute(
+            "UPDATE manual_suspension SET restore_pending_since = NULL "
+            "WHERE person_id = ? AND service_id = ? AND restore_pending_since IS NOT NULL",
+            (child.id, service_id),
+        ).rowcount
+        if cleared:
+            cancelled.append(service_id)
+    if admin_email:
+        for service_id in cancelled:
+            service = services.get(conn, service_id)
+            subject = text.RESTORE_CANCELLED_EMAIL_SUBJECT.format(child=child.display_name, service=service.name)
+            body = text.RESTORE_CANCELLED_EMAIL_BODY.format(child=child.display_name, service=service.name)
+            mail.enqueue(conn, to_addr=admin_email, subject=subject, body=body, now=now)
+    return cancelled
 
 
 def _pend_manual_restores(conn: sqlite3.Connection, child: Person, service_ids: Sequence[int], now: datetime,
                           admin_email: str | None) -> list[int]:
     """After a parent's lift, a manually suspended service with no hold left keeps its mark as a pending restore, and
     the administrator is emailed once to undo the suspension by hand. A service already pending is not mailed again.
+    A service that can now be suspended automatically is skipped: its mark clears like any other with no hold.
     Returns the services that became pending."""
     pending = []
     for service_id in service_ids:
-        if access.holds_for(conn, child.id, service_id):
+        service = services.get(conn, service_id)
+        if service is None or service.auto_suspendable or access.holds_for(conn, child.id, service_id):
             continue
         started = conn.execute(
             "UPDATE manual_suspension SET restore_pending_since = ? "
@@ -252,7 +269,7 @@ def _lockdown(conn: sqlite3.Connection, child: Person, now: datetime, admin_emai
             "VALUES (?, ?, 'lockdown', NULL, ?, '', ?)",
             (child.id, service_id, stamp, review_id),
         )
-    _clear_pending(conn, child.id, locked)
+    _clear_pending(conn, child, locked, now, admin_email)
     registry.log_decision(conn, at=now, actor_kind="system", actor_person_id=None, target_person_id=child.id,
                           action="lockdown", services=locked, detail={"review_id": review_id})
     subject = text.LOCKDOWN_EMAIL_SUBJECT.format(child=child.display_name)
@@ -341,7 +358,7 @@ def place(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids
         label = text.ACTOR_ADMIN
     if not changed:
         return _NO_CHANGE
-    _clear_pending(conn, target.id, changed)
+    _clear_pending(conn, target, changed, now, admin_email)
     registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
                           target_person_id=target.id, action="hold_placed", services=changed,
                           reversal=verdict.reversal)
@@ -379,12 +396,13 @@ def _parent_lift_plan(conn: sqlite3.Connection, target: Person, parent_id: int,
 
 def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids: Sequence[int], now: datetime,
          window: timedelta, admin_email: str | None, include_parent: bool = False) -> Outcome:
-    """Lifts holds on the listed services. A parent lifts only parent holds, only on their linked child, and only on
-    services the administrator has marked auto-suspendable. The administrator lifts admin holds, and parent holds when
-    include_parent is set. Lockdown holds are never lifted here; they go when their review is resolved with the lift,
-    or when the administrator lifts them afterwards (`lift_lockdown`)."""
+    """Lifts holds on the listed services. A parent lifts the parent holds the conflict mode allows (see
+    `liftable_parent_holds`), and only on their linked child. A manually suspended service that a parent's lift leaves
+    with no hold becomes a pending restore: its mark is kept, and the administrator is emailed to undo the suspension
+    by hand. The administrator lifts admin holds, and parent holds when include_parent is set. Lockdown holds are never
+    lifted here; they go when their review is resolved with the lift, or when the administrator lifts them afterwards
+    (`lift_lockdown`)."""
     target = _person(conn, target_id)
-    pending: list[int] = []
     if actor.kind == "parent":
         _require_own_child(conn, actor, target)
         plan = _parent_lift_plan(conn, target, actor.person_id, service_ids)
@@ -395,7 +413,6 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
         verdict = conflict.evaluate(target.conflict_mode, _history(conn, target.id),
                                     conflict.Proposed(actor.person_id, "lift", frozenset(changed)), now, window)
         label = _person(conn, actor.person_id).display_name
-        pending = _pend_manual_restores(conn, target, changed, now, admin_email)
     else:
         sql = ("DELETE FROM hold WHERE person_id = ? AND service_id = ? AND kind IN ('admin', 'parent')"
                if include_parent else
@@ -404,17 +421,23 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
                    if conn.execute(sql, (target.id, service_id)).rowcount > 0]
         verdict = conflict.Verdict(reversal=False, lockdown=False)
         label = text.ACTOR_ADMIN
-    _clear_orphan_marks(conn, target.id, service_ids)
     if not changed:
+        _clear_orphan_marks(conn, target.id, service_ids)
         return _NO_CHANGE
     registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
                           target_person_id=target.id, action="hold_lifted", services=changed,
                           reversal=verdict.reversal)
-    if pending:
-        registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
-                              target_person_id=target.id, action="manual_restore_pending", services=pending)
     _queue_change_emails(conn, child=target, actor_id=actor.person_id, label=label, now=now)
+    # The lockdown is decided before any pending restore: it holds every service, so a service it covers is never
+    # left pending and the administrator is not asked to restore what the lockdown suspends again.
     review_id = _maybe_lockdown(conn, target, verdict, now, admin_email)
+    if actor.kind == "parent":
+        pending = _pend_manual_restores(conn, target, changed, now, admin_email)
+        if pending:
+            registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
+                                  target_person_id=target.id, action="manual_restore_pending", services=pending)
+    # After the pending step, so a mark kept as a pending restore is not cleared as an orphan.
+    _clear_orphan_marks(conn, target.id, service_ids)
     return Outcome(tuple(changed), verdict.reversal, review_id)
 
 

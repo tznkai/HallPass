@@ -44,10 +44,8 @@ CHILDREN_HELP_TEXT = (
     "unless a hold is in place or the service is not open to them. "
     "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
     "Restore lifts your own hold, and another parent's hold too unless your family agreed that each parent lifts "
-    "only their own. "
-    "Only the administrator lifts an administrator hold or a lockdown; on a service that can't be suspended "
-    "automatically, a parent can restore it too, and if the administrator had suspended it by hand, the "
-    "administrator then undoes that by hand.")
+    "only their own; if the administrator had suspended a service by hand, they then undo that by hand. "
+    "Only the administrator lifts an administrator hold or a lockdown.")
 ON_BEHALF_HTML = str(escape("on the child's behalf"))
 
 
