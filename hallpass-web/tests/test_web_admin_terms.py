@@ -149,3 +149,32 @@ async def test_a_non_admin_gets_403_on_every_terms_admin_route(env: Env):
     assert await version_count(env) == 1
     assert TERMS_TOS in (await env.client.get("/terms")).text
     assert TERMS_PRIVACY in (await env.client.get("/terms")).text
+
+
+# The version page shows the texts stored with that version, escaped ------------------------------------
+
+async def test_the_version_page_shows_the_texts_of_that_version_and_not_a_newer_one(env: Env):
+    await admin_client(env)
+    first = await env.db.run(terms.current)
+    data = await form(env, "/admin/terms", tos_text="Second terms.", privacy_text="Second privacy.", blocking="on")
+    assert (await env.client.post("/admin/terms", data=data)).status_code == 303
+
+    older = (await env.client.get(f"/admin/terms/{first.id}")).text
+
+    assert "Terms of service" in older and "Privacy disclosure" in older
+    assert TERMS_TOS in older and TERMS_PRIVACY in older
+    assert "Second terms." not in older and "Second privacy." not in older
+    assert older.index("Terms of service") < older.index('id="accepted"')
+
+
+async def test_the_version_page_escapes_html_in_the_stored_texts(env: Env):
+    await admin_client(env)
+    data = await form(env, "/admin/terms", tos_text="<script>alert('tos')</script>",
+                      privacy_text="<b>bold</b>", blocking="on")
+    assert (await env.client.post("/admin/terms", data=data)).status_code == 303
+    current = await env.db.run(terms.current)
+
+    shown = (await env.client.get(f"/admin/terms/{current.id}")).text
+
+    assert "<script>alert(" not in shown and "&lt;script&gt;" in shown
+    assert "<b>bold</b>" not in shown and "&lt;b&gt;bold&lt;/b&gt;" in shown

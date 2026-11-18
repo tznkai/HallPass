@@ -8,6 +8,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <h1>Terms version {{ version.version }}</h1>
 <p>Published {{ version.published_at }}. {{ "Blocking." if version.blocking else "Not blocking." }}
   <a href="/admin/terms">All versions</a></p>
+<section id="texts" class="stack">
+  <h2>Terms of service</h2>
+  <div class="prewrap">{{ version.tos_text }}</div>
+  <h2>Privacy disclosure</h2>
+  <div class="prewrap">{{ version.privacy_text }}</div>
+</section>
 <section id="accepted" class="stack">
   <h2>Accepted ({{ accepted|length }})</h2>
   <ul>
