@@ -93,7 +93,7 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 ## Minecraft
 
-Only the last two notes are from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
+Only the last three notes are from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
 follows the plan's defaults, and each other item below is pending live confirmation. Hosts and names are
 placeholders such as `<mc-host>`.
 
@@ -117,6 +117,8 @@ placeholders such as `<mc-host>`.
 - **Holds end to end (2026-11-18).** Through hallpass, a hold removed a Java name and a Bedrock gamertag (entered
   without the Floodgate prefix) from the whitelist, and lifting it added each back. The sentinel, parsing and kick
   details above were not checked one by one.
+- **Versions (2026-11-18).** Paper 26.3 (build 254) for Minecraft 26.3 on Java 25, Geyser-Spigot 2.12.1-SNAPSHOT and
+  floodgate 2.2.5-SNAPSHOT (b141). The holds above ran on these.
 
 ## Palworld
 

@@ -101,8 +101,8 @@ code updates `REVIEW.md` in the same change.
 Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run only,
 never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and ids.
 Fluxer, Palworld, Valheim, the Pterodactyl permissions and The Ship (`source_panel`, checked 2026-11-18) are recorded.
-The Minecraft section records the RCON setup and Java and Bedrock holds working end to end (2026-11-18), and lists its
-other items (framing, parsing, the kick check, name patterns) as pending. Abiotic Factor is manual for now (adapter
-deferred). The Ship's 204 check for the subuser's console route was recorded on 2026-11-18. Until a service's check is
-recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
-not `file.update`.
+The Minecraft section records the RCON setup, the versions and Java and Bedrock holds working end to end (2026-11-18),
+and lists its other items (framing, parsing, the kick check, name patterns) as pending. Abiotic Factor is manual for now
+(adapter deferred). The Ship's 204 check for the subuser's console route was recorded on 2026-11-18. Until a service's
+check is recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs
+`file.create`, not `file.update`.
