@@ -62,7 +62,7 @@ as the code they cite.
 - `src/hallmonitor/adapters/palworld.py:164` `if _userid(steam_id) in set(await self._ban_entries()):` — a restore with no own record re-reads the list and reports allowed only when the id is unlisted; nothing is sent
 - `src/hallmonitor/adapters/source_rcon.py:134` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — the re-check before a Source ban: a moderator ban that appeared after observe is never taken over, because apply reads the list before it runs `banid`
 - `src/hallmonitor/adapters/source_rcon.py:147` `if not await self._owned(steam_id):` — the removeid gate: a restore runs no `removeid` unless the ban is recorded as ours
-- `src/hallmonitor/adapters/source_rcon.py:151` `listed = sid in await self._listed(client)` — a restore with no own record re-reads the list and reports allowed only when the id is unlisted; nothing is sent
+- `src/hallmonitor/adapters/source_rcon.py:151` `listed = sid in await self._listed(client)` — a restore with no own record re-reads the list and reports allowed only when the id is unlisted; only `listid` is sent
 - `src/hallmonitor/adapters/palworld.py:135` `if self._in_flight(record, now):` — a Palworld ban placed within the grace window that the ban list does not show yet reads as `suspended`, so its record is kept and no second ban is sent
 
 The Palworld forget step relies on the ban-list file reflecting a ban within the grace window; the live check
