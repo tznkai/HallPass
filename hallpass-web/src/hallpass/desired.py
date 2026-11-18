@@ -106,9 +106,8 @@ class _Subject:
 
 @dataclass(frozen=True)
 class SharedPause:
-    """A paused shared identity of one person on one service. `causes` are the ids of the other holders who are
-    suspended, and so pause it. It is empty when this person's own suspension is the only cause. Ids only: the pages
-    look up the names, and only the administrator's page shows them."""
+    """A shared identity of an allowed person that is paused on a service. `causes` are the ids of the suspended holders
+    who pause it, never empty. Ids only: the pages look up the names, and only the administrator's page shows them."""
     causes: tuple[int, ...]
 
 
@@ -146,25 +145,61 @@ def _sent_identities(subject: _Subject, paused: set[tuple[str, str]]) -> tuple[t
                  or (kind, registry.identity_key(kind, value)) not in paused)
 
 
-def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
+@dataclass(frozen=True)
+class _ServiceState:
+    """One service's subjects as the rules see them: the shared identities that are paused, and the pause of each
+    allowed person who has one."""
+    subjects: list[_Subject]
+    paused: set[tuple[str, str]]
+    pauses: dict[int, SharedPause]
+
+
+def _pauses(shared: dict[tuple[str, str], list[_Subject]], paused: set[tuple[str, str]]) -> dict[int, SharedPause]:
+    """The pause of each allowed holder of a paused shared identity, with the suspended holders that cause it. A suspended
+    holder has no pause: its identity is kept on its own subject, so its own suspension is the reason."""
+    causes: dict[int, set[int]] = {}
+    for key in paused:
+        holders = shared[key]
+        suspended = {holder.person.id for holder in holders if holder.desired == "suspended"}
+        for holder in holders:
+            if holder.desired != "suspended":
+                causes.setdefault(holder.person.id, set()).update(suspended)
+    return {person_id: SharedPause(causes=tuple(sorted(ids))) for person_id, ids in causes.items()}
+
+
+def _service_state(conn: sqlite3.Connection, service: Service) -> _ServiceState:
+    """Evaluates every subject of the service once. Both `refresh_with_pauses` and `shared_pause` read from this."""
+    subjects = _evaluated_subjects(conn, service)
+    shared = _shared_holders(subjects)
+    paused = _paused_keys(shared)
+    return _ServiceState(subjects=subjects, paused=paused, pauses=_pauses(shared, paused))
+
+
+PairPauses = dict[tuple[int, int], SharedPause]
+
+
+def refresh_with_pauses(conn: sqlite3.Connection, now: datetime) -> tuple[list[DesiredRow], PairPauses]:
     """Recomputes and stores the desired state of every subject of every monitored service, then prunes the rows that
-    no longer belong (see `_prune`). Returns the rows ordered by service slug, then person id.
+    no longer belong (see `_prune`). Returns the rows ordered by service slug, then person id, and the shared pauses
+    keyed by (service id, person id), so a page can show them without evaluating the services again.
 
     A subject whose identities are all paused (see `_sent_identities`) is not a subject for this round: hallmonitor is
     not sent it, so it gets no desired row and no report, and a later restore starts it again at generation 1.
 
-    Cost: every subject of every monitored service is recomputed on each call, so the work grows with services times
+    Cost: every subject of every monitored service is evaluated once on each call, so the work grows with services times
     people. That is fine at neighbourhood scale. It could later be limited to the person being viewed. Callers run it
     inside one transaction, so the stored state and the pruning always agree.
     """
     rows: list[DesiredRow] = []
     subjects: set[tuple[int, int]] = set()
+    pauses: PairPauses = {}
     monitored = monitored_services(conn)
     for service in monitored:
-        candidates = _evaluated_subjects(conn, service)
-        paused = _paused_keys(_shared_holders(candidates))
-        for subject in candidates:
-            identities = _sent_identities(subject, paused)
+        state = _service_state(conn, service)
+        for subject in state.subjects:
+            if subject.person.id in state.pauses:
+                pauses[(service.id, subject.person.id)] = state.pauses[subject.person.id]
+            identities = _sent_identities(subject, state.paused)
             if not identities:
                 continue
             generation = _store_generation(conn, person_id=subject.person.id, service_id=service.id,
@@ -173,23 +208,22 @@ def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
             rows.append(DesiredRow(person=subject.person, service=service, desired=subject.desired,
                                    generation=generation, identities=identities))
     _prune(conn, subjects, {service.id for service in monitored})
+    return rows, pauses
+
+
+def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
+    """`refresh_with_pauses` for callers that need only the rows."""
+    rows, _ = refresh_with_pauses(conn, now)
     return rows
 
 
 def shared_pause(conn: sqlite3.Connection, person: Person, service: Service) -> SharedPause | None:
-    """The shared identities of this person that are paused on the service, or None when none is. Only monitored
-    services can pause, because hallmonitor is the one that removes an identity. Callers may run it without
-    `refresh`."""
+    """The pause of this person's shared identities on the service, or None when none is paused. Only a monitored service
+    can pause, because hallmonitor is the one that removes an identity. Pages should prefer the pauses that
+    `refresh_with_pauses` returns, which cost no extra evaluation."""
     if service.retired or service.kind not in MONITORED_KINDS:
         return None
-    shared = _shared_holders(_evaluated_subjects(conn, service))
-    paused = _paused_keys(shared)
-    mine = [key for key in paused if any(s.person.id == person.id for s in shared[key])]
-    if not mine:
-        return None
-    causes = {s.person.id for key in mine for s in shared[key]
-              if s.desired == "suspended" and s.person.id != person.id}
-    return SharedPause(causes=tuple(sorted(causes)))
+    return _service_state(conn, service).pauses.get(person.id)
 
 
 def desired_for(conn: sqlite3.Connection, person_id: int, service_id: int) -> tuple[str, int] | None:

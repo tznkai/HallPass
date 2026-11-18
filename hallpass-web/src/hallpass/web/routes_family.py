@@ -58,8 +58,8 @@ def _child_context(conn, parent: Person, child_id: int, now: datetime) -> dict |
     if child_id not in {child.id for child in registry.children_of(conn, parent.id)}:
         return None
     child = registry.get_person(conn, child_id)
-    desired.refresh(conn, now)
-    rows = service_rows(conn, child)
+    _, pauses = desired.refresh_with_pauses(conn, now)
+    rows = service_rows(conn, child, pauses)
     held = holds.services_with_holds(conn, child.id)
     for row in rows:
         liftable = holds.liftable_parent_holds(child.conflict_mode, parent.id, held.get(row["service_id"], []))

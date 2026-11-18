@@ -16,6 +16,7 @@ from hallpass.registry import Person
 from tests.helpers import ADMIN_SUB, MONITOR_TOKEN, NOW, Env, admin_client, make_service, signed_in_person
 
 REPORTS_PATH = "/api/monitor/v1/reports"
+DESIRED_PATH = "/api/monitor/v1/desired"
 REPORT_LINE = 'class="report-status">'
 
 
@@ -49,6 +50,8 @@ async def admin_hold(env: Env, person: Person) -> None:
 
 async def post_report(env: Env, *, slug: str, ref: str, observed: str, generation: int,
                       detail: str | None = None) -> httpx.Response:
+    # Hallmonitor reads the desired state before it reports, and a report is stored only for a pair that read sent.
+    await env.monitor_client.get(DESIRED_PATH, headers=authorized())
     body = {"reports": [{"slug": slug, "ref": ref, "observed": observed, "detail": detail,
                          "generation": generation, "at": NOW.isoformat()}], "unmanaged": []}
     return await env.monitor_client.post(REPORTS_PATH, json=body, headers=authorized())

@@ -33,12 +33,12 @@ REASON_TEXT = {
 }
 
 
-def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
+def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairPauses) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
     who placed each hold, a note when a game service has no external identity for the person, the report status
     hallmonitor's last report gives (None for a service it does not monitor), and whether one of the person's shared
-    identities is paused. The pause carries holder ids only, and the member's wording never names the other holder.
-    Callers run `desired.refresh` first."""
+    identities is paused. `pauses` is the second result of `desired.refresh_with_pauses`, which the caller runs first.
+    The pause carries holder ids only, and the member's wording never names the other holder."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
     marked = holds.marked_service_ids(conn, person.id)
     rows = []
@@ -48,7 +48,7 @@ def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
         is_marked = service.id in marked
         report_status = desired.report_status(desired.desired_for(conn, person.id, service.id),
                                               desired.report_for(conn, person.id, service.id), is_marked)
-        pause = desired.shared_pause(conn, person, service)
+        pause = pauses.get((service.id, person.id))
         if service.auto_suspendable:
             suspendable = text.CAN_AUTO_SUSPEND
         elif holders and is_marked:
@@ -72,9 +72,9 @@ def service_rows(conn: sqlite3.Connection, person: Person) -> list[dict]:
 
 
 def _me_context(conn: sqlite3.Connection, person: Person, now: datetime) -> dict:
-    desired.refresh(conn, now)
+    _, pauses = desired.refresh_with_pauses(conn, now)
     return {
-        "rows": service_rows(conn, person),
+        "rows": service_rows(conn, person, pauses),
         "visible_tokens": tokens.visible_to(conn, person),
         "feed_services": tokens.feed_services_for(conn, person),
     }

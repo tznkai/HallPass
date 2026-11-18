@@ -214,13 +214,13 @@ def _load_person(conn, person_id: int, now: datetime) -> dict:
     person = registry.get_person(conn, person_id)
     if person is None:
         raise registry.NoSuchPerson()
-    desired.refresh(conn, now)
-    rows = service_rows(conn, person)
+    _, pauses = desired.refresh_with_pauses(conn, now)
+    rows = service_rows(conn, person, pauses)
     for row in rows:
         pause = row["shared_pause"]
-        if pause is not None and pause.causes:
-            holders = [holder.display_name for holder in map(lambda i: registry.get_person(conn, i), pause.causes)
-                       if holder is not None]
+        if pause is not None:
+            causes = [registry.get_person(conn, cause) for cause in pause.causes]
+            holders = [holder.display_name for holder in causes if holder is not None]
             row["shared_pause_note"] = f"{text.SHARED_PAUSE_CAUSES} {', '.join(holders)}"
     return {**_person_context(conn, person), "service_rows": rows}
 

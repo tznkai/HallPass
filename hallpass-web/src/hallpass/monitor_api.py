@@ -122,10 +122,19 @@ class _Outcome:
     unknown_slug: int = 0
 
 
+def _is_sent(conn: sqlite3.Connection, person_id: int, service_id: int, generation: int) -> bool:
+    """True when the pair has a desired row and the report's generation is not above the stored one. A pair with no row
+    was not sent by the last desired read (it was pruned, or it is not a subject), so a late report for it is stale, and
+    a report above the stored generation answers a value that was never sent."""
+    stored = desired.desired_for(conn, person_id, service_id)
+    return stored is not None and generation <= stored[1]
+
+
 def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> _Outcome:
-    """Stores each report and unmanaged count. A report or count naming an unknown slug is skipped as unknown_slug, and
-    a report for an unknown ref as unknown_ref. A report's time is clamped to now, so a clock running ahead cannot block
-    later reports, since the newest time wins. A report older than the stored one for its pair does not replace it."""
+    """Stores each report and unmanaged count. A report or count naming an unknown slug is skipped as unknown_slug. A
+    report is skipped as unknown_ref when its ref is unknown, or when its pair is not in the desired state (see
+    `_is_sent`). A report's time is clamped to now, so a clock running ahead cannot block later reports, since the newest
+    time wins. A report older than the stored one for its pair does not replace it."""
     outcome = _Outcome()
     for report in body.reports:
         service = services.get_by_slug(conn, report.slug)
@@ -133,7 +142,7 @@ def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> 
             outcome.unknown_slug += 1
             continue
         person = registry.get_by_ref(conn, report.ref)
-        if person is None:
+        if person is None or not _is_sent(conn, person.id, service.id, report.generation):
             outcome.unknown_ref += 1
             continue
         conn.execute(_UPSERT_REPORT, (person.id, service.id, report.observed, report.detail, report.generation,

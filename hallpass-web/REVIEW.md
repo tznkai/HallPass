@@ -99,14 +99,14 @@ as the code they cite.
 
 ## Monitor API
 
-- `src/hallpass/monitor_api.py:158` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
-- `src/hallpass/monitor_api.py:162` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
+- `src/hallpass/monitor_api.py:167` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
+- `src/hallpass/monitor_api.py:171` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
 
 ## Shared identities
 
-- `src/hallpass/desired.py:145` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
+- `src/hallpass/desired.py:144` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
 
 ## Generations
 
-- `src/hallpass/desired.py:170` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
+- `src/hallpass/desired.py:205` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
 - `src/hallpass/desired.py:73` `UPDATE desired_state SET desired` — the bump: a generation goes up by one only when the recomputed value differs from the stored one, so an unchanged value keeps its generation

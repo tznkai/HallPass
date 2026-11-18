@@ -289,3 +289,22 @@ async def test_a_member_row_without_a_shared_identity_shows_no_shared_notice(env
     page = (await browser.get("/")).text
 
     assert SHARED_NOTICE_HTML not in page
+
+
+async def test_a_suspended_holder_of_a_shared_identity_shows_no_notice_and_the_allowed_holder_still_does(env: Env):
+    # The child is not entitled to the service, so the child is suspended and keeps the identity; the adult is allowed
+    # and has the identity paused. Only the adult, who has no hold of their own, is told about the pause.
+    await publish_terms(env)
+    adult, adult_browser = await signed_in_person(env, account_type="adult")
+    minecraft = await create_service(env, "minecraft", "game", actor=adult, auto=True)
+    await grant(env, minecraft, "type", "adult", adult)
+    await env.db.run(lambda c: registry.add_identity(c, adult.id, "minecraft", "java_name", "PlayerOne"))
+    child, child_browser = await signed_in_person(env, account_type="child")
+    await env.db.run(lambda c: registry.add_identity(c, child.id, "minecraft", "java_name", "PlayerOne"))
+
+    child_page = (await child_browser.get("/")).text
+    adult_page = (await adult_browser.get("/")).text
+
+    assert text.REASON_NOT_ENTITLED in child_page
+    assert SHARED_NOTICE_HTML not in child_page
+    assert SHARED_NOTICE_HTML in adult_page

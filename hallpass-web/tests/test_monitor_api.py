@@ -88,6 +88,12 @@ async def stored_report(env: Env, person_id: int, slug: str) -> desired.Report |
     return await env.db.run(read)
 
 
+async def read_desired(env: Env) -> None:
+    """A desired read, which stores the pairs it sends. A report is stored only for a pair that has a desired row."""
+    response = await env.monitor_client.get(DESIRED_PATH, headers=authorized())
+    assert response.status_code == 200
+
+
 # AC9.1 ----------------------------------------------------------------------------------------------
 
 async def test_desired_lists_each_monitored_service_with_its_subjects(env: Env) -> None:
@@ -124,6 +130,7 @@ async def test_each_desired_request_records_the_contact_time(env: Env) -> None:
 
 async def test_reports_are_stored_per_person_and_service_and_unknown_refs_are_skipped(env: Env) -> None:
     ann, _, _ = await seeded(env)
+    await read_desired(env)
     body = {
         "reports": [
             {"slug": "minecraft", "ref": ann.ref, "observed": "allowed", "detail": None, "generation": 1,
@@ -147,7 +154,8 @@ async def test_reports_are_stored_per_person_and_service_and_unknown_refs_are_sk
 
 async def test_an_older_report_does_not_replace_a_newer_one(env: Env) -> None:
     ann, _, _ = await seeded(env)
-    newer = {"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "allowed", "generation": 1,
+    await read_desired(env)
+    newer ={"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "allowed", "generation": 1,
                           "at": "2026-11-13T12:00:00Z"}]}
     older = {"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "suspended", "generation": 1,
                           "at": "2026-11-13T11:00:00Z"}]}
@@ -162,7 +170,8 @@ async def test_an_older_report_does_not_replace_a_newer_one(env: Env) -> None:
 async def test_a_report_dated_ahead_of_the_clock_is_clamped_so_a_later_correct_report_still_replaces_it(
         env: Env) -> None:
     ann, _, _ = await seeded(env)
-    ahead = {"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "suspended", "generation": 1,
+    await read_desired(env)
+    ahead ={"reports": [{"slug": "minecraft", "ref": ann.ref, "observed": "suspended", "generation": 1,
                           "at": "2026-11-14T12:00:00Z"}]}
     assert (await env.monitor_client.post(REPORTS_PATH, json=ahead, headers=authorized())).status_code == 204
     assert (await stored_report(env, ann.id, "minecraft")).reported_at == "2026-11-13T12:00:00+00:00"
@@ -174,6 +183,59 @@ async def test_a_report_dated_ahead_of_the_clock_is_clamped_so_a_later_correct_r
 
     report = await stored_report(env, ann.id, "minecraft")
     assert (report.observed, report.reported_at) == ("allowed", "2026-11-13T12:05:00+00:00")
+
+
+def report_body(ref: str, *, generation: int, observed: str = "allowed") -> dict:
+    return {"reports": [{"slug": "minecraft", "ref": ref, "observed": observed, "generation": generation,
+                         "at": "2026-11-13T12:00:00Z"}]}
+
+
+async def test_a_report_for_a_pair_with_no_desired_row_is_skipped_and_not_stored(env: Env) -> None:
+    ann, _, _ = await seeded(env)
+
+    response = await env.monitor_client.post(REPORTS_PATH, json=report_body(ann.ref, generation=1),
+                                             headers=authorized())
+
+    assert response.status_code == 204
+    assert await stored_report(env, ann.id, "minecraft") is None
+
+
+async def test_a_report_above_the_stored_generation_is_skipped_and_one_at_it_is_stored(env: Env) -> None:
+    ann, _, _ = await seeded(env)
+    await read_desired(env)
+
+    ahead = await env.monitor_client.post(REPORTS_PATH, json=report_body(ann.ref, generation=2),
+                                          headers=authorized())
+    assert ahead.status_code == 204
+    assert await stored_report(env, ann.id, "minecraft") is None
+
+    at = await env.monitor_client.post(REPORTS_PATH, json=report_body(ann.ref, generation=1),
+                                       headers=authorized())
+    assert at.status_code == 204
+    assert (await stored_report(env, ann.id, "minecraft")).generation == 1
+
+
+async def test_a_late_report_for_a_subject_that_was_pruned_and_returned_is_not_stored(env: Env) -> None:
+    ann, _, _ = await seeded(env)
+    await read_desired(env)
+    await env.monitor_client.post(REPORTS_PATH, json=report_body(ann.ref, generation=1), headers=authorized())
+
+    def remove_minecraft(conn) -> None:
+        for identity in registry.identities_of(conn, ann.id):
+            if identity.service_slug == "minecraft":
+                registry.remove_identity(conn, identity.id)
+
+    await env.db.run(remove_minecraft)
+    await read_desired(env)
+    assert await stored_report(env, ann.id, "minecraft") is None
+    await env.db.run(lambda c: registry.add_identity(c, ann.id, "minecraft", "java_name", "Steve"))
+    await read_desired(env)
+
+    late = await env.monitor_client.post(REPORTS_PATH, json=report_body(ann.ref, generation=2, observed="suspended"),
+                                         headers=authorized())
+
+    assert late.status_code == 204
+    assert await stored_report(env, ann.id, "minecraft") is None
 
 
 async def test_skipped_items_are_counted_and_logged_by_reason(env: Env, caplog: pytest.LogCaptureFixture) -> None:
@@ -289,6 +351,7 @@ async def test_the_desired_body_has_the_shape_of_the_recorded_example(env: Env) 
 
 async def test_the_recorded_reports_example_is_accepted_with_its_refs_replaced(env: Env) -> None:
     ann, _, _ = await seeded(env)
+    await read_desired(env)
     body = json.loads(EXAMPLE.read_text("utf-8"))["reports"]
     for report in body["reports"]:
         report["ref"] = ann.ref
@@ -296,4 +359,10 @@ async def test_the_recorded_reports_example_is_accepted_with_its_refs_replaced(e
     response = await env.monitor_client.post(REPORTS_PATH, json=body, headers=authorized())
 
     assert response.status_code == 204
-    assert (await stored_report(env, ann.id, "minecraft")).observed == "allowed"
+    # The example's minecraft report is at generation 3, above the generation 1 this seeded pair holds, so it is
+    # skipped. The unmanaged count in the same body is still stored.
+    assert await stored_report(env, ann.id, "minecraft") is None
+    unmanaged = await env.db.run(lambda c: c.execute(
+        "SELECT count FROM service_unmanaged JOIN service ON service.id = service_id WHERE slug = 'minecraft'"
+    ).fetchone())
+    assert unmanaged == (1,)

@@ -166,7 +166,9 @@ async def test_the_children_link_shows_only_for_a_parent_with_linked_children(en
 
 
 async def test_a_parent_sees_the_shared_identity_notice_on_a_child_row_without_the_other_persons_name(env: Env):
-    # The child holds a gamertag that a non-entitled person also holds, so the gamertag is paused for the child.
+    # The child holds a gamertag that a non-entitled person also holds. The other person is suspended, so the child, who
+    # is allowed once approved, is the holder whose identity is paused. Before the approval the child is suspended, and
+    # a suspended holder gets no notice.
     parent, child, parent_browser, _ = await family(env)
     parent_person = await env.db.run(lambda c: registry.get_person(c, parent))
     minecraft = await env.db.run(lambda c: services.create_service(
@@ -179,6 +181,12 @@ async def test_a_parent_sees_the_shared_identity_notice_on_a_child_row_without_t
     await env.db.run(lambda c: registry.add_identity(c, child, "minecraft", "java_name", "PlayerOne"))
     await env.db.run(lambda c: registry.add_identity(c, other.id, "minecraft", "java_name", "playerone"))
 
+    waiting = await parent_browser.get(f"/children/{child}")
+    assert waiting.status_code == 200
+    assert SHARED_NOTICE_HTML not in waiting.text
+
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
     response = await parent_browser.get(f"/children/{child}")
 
     assert response.status_code == 200

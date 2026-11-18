@@ -550,4 +550,5 @@ async def test_the_admin_page_names_the_suspended_holder_of_a_paused_shared_iden
 
     assert SHARED_NOTICE_HTML in adult_page
     assert f"{text.SHARED_PAUSE_CAUSES} Holder Ann" in adult_page
+    assert SHARED_NOTICE_HTML not in holder_page
     assert text.SHARED_PAUSE_CAUSES not in holder_page

@@ -332,8 +332,8 @@ def _canonical_steam64(value: str) -> bool:
 
 def identity_key(kind: str, value: str) -> str:
     """The form in which two identities of one service and kind count as the same. Minecraft names fold to lower case;
-    every other kind is compared as stored. The unique index on external_identity applies the same rule in SQL
-    (migration 0006), so change both together."""
+    every other kind is compared as stored. The unique index external_identity_person applies the same rule in SQL
+    (migration 0007), so change both together."""
     return value.lower() if kind in CASE_FOLDED_KINDS else value
 
 
