@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -228,7 +228,7 @@ async def test_the_trailing_newline_is_kept_as_it_was(db: Database, before: str,
     assert file_text(fake) == after
 
 
-# Suspending: remove every line that names the id, in either form --------------------------------------------------
+# Suspending: remove every line that names the id, in any of its three forms ---------------------------------------
 
 async def test_suspending_removes_all_three_forms_of_the_id_and_nothing_else(db: Database) -> None:
     fake = ptero_state(PERMITTED_COMMENT + "\n" + OTHER_ID + "\n" + "  " + steam_form(OWN_ID) + "  \n"
@@ -245,6 +245,14 @@ async def test_a_suspension_that_leaves_another_platform_entry_is_written(db: Da
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
     await run(db, hallpass, fake, T0)
     assert file_text(fake) == PERMITTED_COMMENT + "OtherPlatform_placeholder\n"
+    assert outcomes(hallpass) == [("r1", "suspended", PENDING)]
+
+
+async def test_a_suspension_that_leaves_only_another_ids_v_entry_is_written(db: Database) -> None:
+    fake = ptero_state(PERMITTED_COMMENT + OWN_ID + "\n" + v_form(OTHER_ID) + "\n")
+    hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
+    await run(db, hallpass, fake, T0)
+    assert file_text(fake) == PERMITTED_COMMENT + v_form(OTHER_ID) + "\n"
     assert outcomes(hallpass) == [("r1", "suspended", PENDING)]
 
 
@@ -267,11 +275,11 @@ async def test_suspending_the_last_entry_writes_nothing_and_reports_would_open_s
 
 @pytest.mark.parametrize("desired", ["allowed", "suspended"])
 @pytest.mark.parametrize("listed", [True, False], ids=["listed", "unlisted"])
-@pytest.mark.parametrize("form", [OTHER_ID, steam_form(OTHER_ID), v_form(OTHER_ID)], ids=["bare", "steam", "v"])
+@pytest.mark.parametrize("build", [line for _, line in FORMS], ids=[name for name, _ in FORMS])
 async def test_a_ban_list_entry_in_any_form_is_banned_external_and_nothing_is_written(
-        db: Database, form: str, listed: bool, desired: str) -> None:
+        db: Database, build: Callable[[str], str], listed: bool, desired: str) -> None:
     permitted = PERMITTED_COMMENT + (v_form(OTHER_ID) + "\n" if listed else "")
-    fake = ptero_state(permitted, BANNED_COMMENT + form + "\n")
+    fake = ptero_state(permitted, BANNED_COMMENT + build(OTHER_ID) + "\n")
     before = (file_text(fake), file_text(fake, BANNED))
     hallpass = valheim_service(subject("r1", desired, steam(OTHER_ID)))
     await run(db, hallpass, fake, T0)
@@ -504,7 +512,7 @@ async def test_apply_suspended_on_an_unlisted_id_writes_nothing(db: Database) ->
     assert writes(fake) == []
 
 
-# The guard: both forms of one id, blanks and indented comments, an entry-less file ----------------------------------
+# The guard: the forms of one id, blanks and indented comments, an entry-less file ------------------------------------
 
 @pytest.mark.parametrize("lines", [
     OWN_ID + "\n" + steam_form(OWN_ID) + "\n",
@@ -637,10 +645,10 @@ async def test_a_bom_before_the_first_line_id_is_read_as_listed(db: Database) ->
     assert writes(fake) == []
 
 
-@pytest.mark.parametrize("first", [BOM + OWN_ID, BOM + steam_form(OWN_ID), BOM + v_form(OWN_ID)],
-                         ids=["bare", "steam", "v"])
-async def test_suspending_a_bom_first_line_removes_it_and_keeps_the_bom_at_the_start(db: Database, first: str) -> None:
-    fake = ptero_state(first + "\n" + OTHER_ID + "\n")
+@pytest.mark.parametrize("build", [line for _, line in FORMS], ids=[name for name, _ in FORMS])
+async def test_suspending_a_bom_first_line_removes_it_and_keeps_the_bom_at_the_start(
+        db: Database, build: Callable[[str], str]) -> None:
+    fake = ptero_state(BOM + build(OWN_ID) + "\n" + OTHER_ID + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
     await run(db, hallpass, fake, T0)
     assert file_text(fake) == BOM + OTHER_ID + "\n"
