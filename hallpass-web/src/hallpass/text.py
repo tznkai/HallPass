@@ -116,7 +116,8 @@ RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in hal
                               "Sign in to hallpass for details.\n")
 RESTORE_CANCELLED_EMAIL_SUBJECT = "Hallpass: restore of {service} for {child} cancelled"
 RESTORE_CANCELLED_EMAIL_BODY = ("The restore of {service} for {child} is cancelled, because the service was suspended "
-                                "again in hallpass. The suspension made by hand should stay in place.\n\n"
+                                "again in hallpass. If you have not restored it yet, leave the suspension in place. "
+                                "If you already restored it by hand, suspend it by hand again.\n\n"
                                 "Sign in to hallpass for details.\n")
 # Notification emails are plain text. The child's display name and the actor label are the only names in them.
 CHANGE_EMAIL_SUBJECT = "Hallpass: access changed for {child}"

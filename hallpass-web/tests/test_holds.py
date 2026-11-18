@@ -672,6 +672,8 @@ async def test_a_parent_revoke_cancels_a_pending_restore_with_one_email(db: Data
     cancelled_body = emails[1][1]
     assert "Kid" in cancelled_body and "Abiotic" in cancelled_body
     assert "Ben" not in cancelled_body and "Ann" not in cancelled_body
+    assert "If you have not restored it yet, leave the suspension in place." in cancelled_body
+    assert "If you already restored it by hand, suspend it by hand again." in cancelled_body
 
 
 async def test_an_admin_place_cancels_a_pending_restore_with_one_email(db: Database) -> None:
@@ -700,6 +702,28 @@ async def test_a_hold_with_nothing_pending_cancels_nothing_and_mails_no_administ
     await place(w, parent(w.ann), w.child, [w.abiotic])
     await place(w, admin(w), w.child, [w.fluxer])
 
+    assert await admin_emails(w) == []
+
+
+async def test_an_admin_hold_on_a_marked_service_with_nothing_pending_cancels_nothing(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic], at=NOW - timedelta(hours=2))
+    await mark_abiotic(w)
+    await place(w, admin(w), w.child, [w.abiotic], at=NOW)
+
+    assert sorted(await hold_kinds(w, w.child, w.abiotic)) == ["admin", "parent"]
+    assert await marks(w) == [(w.abiotic, False)]
+    assert await admin_emails(w) == []
+
+
+async def test_a_second_parent_hold_in_strict_mode_on_a_marked_service_cancels_nothing(db: Database) -> None:
+    w = await build(db, mode="strict")
+    await place(w, parent(w.ann), w.child, [w.abiotic], at=NOW - timedelta(hours=2))
+    await mark_abiotic(w)
+    await place(w, parent(w.ben), w.child, [w.abiotic], at=NOW)
+
+    assert sorted(await hold_kinds(w, w.child, w.abiotic)) == ["parent", "parent"]
+    assert await marks(w) == [(w.abiotic, False)]
     assert await admin_emails(w) == []
 
 
