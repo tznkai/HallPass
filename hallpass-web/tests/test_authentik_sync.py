@@ -330,3 +330,32 @@ async def test_a_bound_child_set_back_to_invited_with_a_grant_is_active_and_in_t
     settled = await env.db.run(lambda c: registry.get_person(c, child.id))
     assert settled.status == "active"
     assert in_group(env, settled)
+
+
+async def test_locking_the_only_covering_parent_takes_the_child_out_of_the_fluxer_group(env: Env) -> None:
+    await make_fluxer(env)
+    child, parent, _ = await linked_child(env, child_email="kid@example.com")
+    await sync(env, child.id)
+    assert in_group(env, child)
+
+    await admin_client(env)
+    token = (await form(env, f"/admin/people/{parent.id}"))["csrf"]
+    response = await env.client.post(f"/admin/people/{parent.id}/lock", data={"csrf": token})
+
+    assert response.status_code == 303
+    assert not in_group(env, child)
+
+
+async def test_unlinking_the_only_covering_parent_takes_the_child_out_of_the_fluxer_group(env: Env) -> None:
+    await make_fluxer(env)
+    child, parent, _ = await linked_child(env, child_email="kid@example.com")
+    await sync(env, child.id)
+    assert in_group(env, child)
+
+    await admin_client(env)
+    token = (await form(env, f"/admin/people/{child.id}"))["csrf"]
+    response = await env.client.post(f"/admin/people/{child.id}/parents/{parent.id}/remove",
+                                     data={"csrf": token})
+
+    assert response.status_code == 303
+    assert not in_group(env, child)

@@ -54,6 +54,7 @@ as the code they cite.
 - `src/hallpass/grants.py:50` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
 - `src/hallpass/grants.py:52` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
 - `src/hallpass/grants.py:143` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
+- `src/hallpass/grants.py:121` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
 
 ## Entitlement resolution
 
@@ -98,6 +99,7 @@ as the code they cite.
 
 ## Authentik sync
 
+- `src/hallpass/web/routes_terms.py:74` `affected = await deps.db.run(lambda c: authentik_sync.affected_by(c, person.id))` — a parent's acceptance can cover linked children, so the parent and each linked child are synced after it, and a child's Fluxer membership follows the parent's acceptance
 - `src/hallpass/authentik_sync.py:34` `def wanted(conn` — the single definition of what Authentik should hold for a person: group membership, the fluxer_email attribute and the active flag
 - `src/hallpass/authentik_sync.py:43` `access.evaluate(conn, person, fluxer_service).desired == "allowed"` — the membership rule's entitlement test: a held, unentitled or retired-service person is not a member of the Fluxer group
 - `src/hallpass/authentik_sync.py:94` `steps.append(("remove_from_group"` — the restrictive steps run first, so a failed attribute call can never leave a hold or a lock unenforced; each step's failure is logged and the others still run

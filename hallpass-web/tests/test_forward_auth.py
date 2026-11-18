@@ -361,3 +361,31 @@ async def test_the_forward_auth_sign_in_redirect_does_not_keep_a_hostile_next(en
 
     assert callback.status_code == 303
     assert callback.headers["location"] == "/"
+
+
+# Phase 8: an active, entitled child is denied while no linked parent covers them ----------------------------------
+
+async def test_an_active_entitled_child_is_denied_when_no_linked_parent_has_accepted(env: Env):
+    parent, child, parent_browser, child_browser = await family(env)
+    calendar = await make_service(env.db, "calendar")
+    await env.db.run(lambda c: services.add_entitlement(
+        c, calendar.id, "type", "child", "grant", actor_id=parent, now=NOW))
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+    assert (await check(child_browser, "calendar")).status_code == 200
+
+    await publish_terms(env, blocking=True)     # the parent has not accepted this version
+
+    response = await check(child_browser, "calendar")
+    assert response.status_code == 403
+    assert "location" not in response.headers
+    assert (await person_row_status(env, child)) == "active"
+    assert (await check(parent_browser, "calendar")).status_code == 403
+
+    assert (await accept_current(env, parent_browser)).status_code == 303
+    assert (await check(child_browser, "calendar")).status_code == 200
+
+
+async def person_row_status(env: Env, person_id: int) -> str:
+    person = await env.db.run(lambda c: registry.get_person(c, person_id))
+    return person.status
