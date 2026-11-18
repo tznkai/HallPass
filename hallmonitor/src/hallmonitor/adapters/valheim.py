@@ -3,10 +3,11 @@
 """The Valheim adapter: the permitted list, edited through Pterodactyl. Valheim has no console, so the file is the only
 mechanism, and a subject is allowed while an entry of `permittedlist.txt` names its SteamID64.
 
-An entry names a SteamID64 in bare digits (`<digits>`) or with the Steam_ prefix (`Steam_<digits>`). Both forms are
-read, and a change writes the Steam_ form, so the line keeps working if crossplay is turned on later. Comments (`//`)
-and blank lines are never entries. Every other line is kept byte for byte. A leading byte-order mark is ignored when a
-line is classified, and it stays where it is in the file.
+An entry names a SteamID64 in bare digits (`<digits>`), with the Steam_ prefix (`Steam_<digits>`) or with the V_
+prefix (`V_<digits>`). All three forms are read, and a change writes the V_ form, which lets the player in and keeps
+working if crossplay is turned on later. Prefixes are exact (case included), so `steam_` or `v_` names no SteamID64.
+Comments (`//`) and blank lines are never entries. Every other line is kept byte for byte. A leading byte-order mark
+is ignored when a line is classified, and it stays where it is in the file.
 
 Hallmonitor never writes the ban list. `bannedlist.txt` is read only, when it is configured, and an id it names is
 `banned_external`, which is never added or removed. Removing the last entry would open the server to anyone, so a
@@ -41,6 +42,9 @@ from hallmonitor.pterodactyl import PteroError, PteroFiles
 log = logging.getLogger(__name__)
 STEAM_KIND = "steam_id"
 STEAM_PREFIX = "Steam_"
+V_PREFIX = "V_"
+ID_PREFIXES = (STEAM_PREFIX, V_PREFIX)  # the prefixed forms a line may take, besides the bare digits
+WRITE_PREFIX = V_PREFIX                 # the form a restore writes
 BOM = "\ufeff"         # the UTF-8 byte-order mark; str.strip does not remove it, so it is removed before a line is read
 OWN_ADD = "add"        # an own record: hallmonitor added the id's line, so a restart must pass before it takes effect
 OWN_REMOVE = "remove"  # an own record: hallmonitor removed the id's line, likewise
@@ -76,15 +80,16 @@ def _is_entry(line: str) -> bool:
 
 
 def _line_id(line: str) -> str | None:
-    """The digits of the SteamID64 a line names, in either form, or None when it names none. The digits are not checked
-    here: a line whose digits are not a valid id names no subject, and that is decided where the id is compared."""
+    """The digits of the SteamID64 a line names, in any of its three forms, or None when it names none. The digits are
+    not checked here: a line whose digits are not a valid id names no subject, and that is decided where the id is
+    compared."""
     body = _body(line)
-    digits = body[len(STEAM_PREFIX):] if body.startswith(STEAM_PREFIX) else body
+    digits = next((body[len(prefix):] for prefix in ID_PREFIXES if body.startswith(prefix)), body)
     return digits if digits != "" and all("0" <= char <= "9" for char in digits) else None
 
 
 def _ids_named(text: str) -> set[str]:
-    """Every SteamID64 that some line of the file names, in either form."""
+    """Every SteamID64 that some line of the file names, in any of its three forms."""
     return {line_id for line in text.split("\n") if (line_id := _line_id(line)) is not None}
 
 
@@ -109,9 +114,9 @@ def _with_line(text: str, line: str) -> str:
 
 
 def _without_id(text: str, steam_id: str) -> str:
-    """The file with every line that names the id removed, in either form. A leading byte-order mark stays at the start
-    of the file even when the line it sits on is the one removed. Splitting on `\\n` and joining back keeps the trailing
-    newline, or its absence, and every other line byte for byte."""
+    """The file with every line that names the id removed, in any of its three forms. A leading byte-order mark stays at
+    the start of the file even when the line it sits on is the one removed. Splitting on `\\n` and joining back keeps
+    the trailing newline, or its absence, and every other line byte for byte."""
     bom = BOM if text.startswith(BOM) else ""
     kept = [line for line in text[len(bom):].split("\n") if _line_id(line) != steam_id]
     return bom + "\n".join(kept)
@@ -267,7 +272,7 @@ class ValheimAdapter:
         now = self._clock()
         if steam_id in _ids_named(text):
             return Observed("allowed", await self._detail_now(steam_id, True, now))
-        return await self._change(steam_id, OWN_ADD, now, _with_line(text, STEAM_PREFIX + steam_id))
+        return await self._change(steam_id, OWN_ADD, now, _with_line(text, WRITE_PREFIX + steam_id))
 
     async def _detail_now(self, steam_id: str, listed: bool, now: datetime) -> str | None:
         pending = await self._pending_check(now)

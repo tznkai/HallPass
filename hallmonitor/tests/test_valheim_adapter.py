@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The Valheim permitted-list adapter, against the Pterodactyl fake.
 
-A subject is allowed when an entry of permittedlist.txt names its SteamID64, in bare digits or as Steam_ digits. The
-ban list, bannedlist.txt, is read only. Every test runs against FakePteroState on httpx MockTransport, with a fixed
-clock and a set uptime. No test reaches a real server.
+A subject is allowed when an entry of permittedlist.txt names its SteamID64, in bare digits, as Steam_ digits or
+as V_ digits. The ban list, bannedlist.txt, is read only. Every test runs against FakePteroState on httpx
+MockTransport, with a fixed clock and a set uptime. No test reaches a real server.
 
 An autouse guard checks that the ban list is never written: a test that uses a ban list ends with its text unchanged,
 apart from any line that the test added by hand as a moderator would.
@@ -89,6 +89,14 @@ def ptero_state(permitted: str = PERMITTED_COMMENT, banned: str | None = BANNED_
 
 def steam_form(steam_id: str) -> str:
     return "Steam_" + steam_id
+
+
+def v_form(steam_id: str) -> str:
+    return "V_" + steam_id
+
+
+# The three forms Valheim accepts for one id, as (parametrize id, line builder).
+FORMS = [("bare", lambda steam_id: steam_id), ("steam", steam_form), ("v", v_form)]
 
 
 def add_line(fake: FakePteroState, path: str, line: str) -> None:
@@ -181,29 +189,37 @@ async def test_a_steam_prefixed_line_lists_the_subject_as_allowed(db: Database) 
     assert writes(fake) == []
 
 
-async def test_a_subject_named_in_neither_form_is_suspended_and_nothing_is_written(db: Database) -> None:
-    fake = ptero_state(PERMITTED_COMMENT + steam_form(OTHER_ID) + "\n")
+async def test_a_subject_named_in_no_form_is_suspended_and_nothing_is_written(db: Database) -> None:
+    fake = ptero_state(PERMITTED_COMMENT + steam_form(OTHER_ID) + "\n" + v_form(OTHER_ID) + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
     await run(db, hallpass, fake, T0)
     assert outcomes(hallpass) == [("r1", "suspended", None)]
     assert writes(fake) == []
 
 
-# Allowing: append the Steam_ form and keep the rest ----------------------------------------------------------------
+async def test_a_v_prefixed_line_lists_the_subject_as_allowed(db: Database) -> None:
+    fake = ptero_state(PERMITTED_COMMENT + v_form(OWN_ID) + "\n")
+    hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID)))
+    await run(db, hallpass, fake, T0)
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+    assert writes(fake) == []
 
-async def test_allowing_a_suspended_subject_appends_the_steam_form_and_keeps_the_other_lines(db: Database) -> None:
+
+# Allowing: append the V_ form and keep the rest ---------------------------------------------------------------------
+
+async def test_allowing_a_suspended_subject_appends_the_v_form_and_keeps_the_other_lines(db: Database) -> None:
     fake = ptero_state(PERMITTED_COMMENT + "\n" + steam_form(OTHER_ID) + "\n")
     hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID), generation=3))
     await run(db, hallpass, fake, T0)
-    assert file_text(fake) == PERMITTED_COMMENT + "\n" + steam_form(OTHER_ID) + "\n" + steam_form(OWN_ID) + "\n"
+    assert file_text(fake) == PERMITTED_COMMENT + "\n" + steam_form(OTHER_ID) + "\n" + v_form(OWN_ID) + "\n"
     assert await record_of(db, OWN_ID) == ("add", T0)
     assert outcomes(hallpass) == [("r1", "allowed", PENDING)]
 
 
 @pytest.mark.parametrize(("before", "after"), [
-    ("", steam_form(OWN_ID) + "\n"),
-    (PERMITTED_COMMENT, PERMITTED_COMMENT + steam_form(OWN_ID) + "\n"),
-    (PERMITTED_COMMENT.rstrip("\n"), PERMITTED_COMMENT.rstrip("\n") + "\n" + steam_form(OWN_ID)),
+    ("", v_form(OWN_ID) + "\n"),
+    (PERMITTED_COMMENT, PERMITTED_COMMENT + v_form(OWN_ID) + "\n"),
+    (PERMITTED_COMMENT.rstrip("\n"), PERMITTED_COMMENT.rstrip("\n") + "\n" + v_form(OWN_ID)),
 ])
 async def test_the_trailing_newline_is_kept_as_it_was(db: Database, before: str, after: str) -> None:
     fake = ptero_state(before)
@@ -214,9 +230,9 @@ async def test_the_trailing_newline_is_kept_as_it_was(db: Database, before: str,
 
 # Suspending: remove every line that names the id, in either form --------------------------------------------------
 
-async def test_suspending_removes_both_forms_of_the_id_and_nothing_else(db: Database) -> None:
+async def test_suspending_removes_all_three_forms_of_the_id_and_nothing_else(db: Database) -> None:
     fake = ptero_state(PERMITTED_COMMENT + "\n" + OTHER_ID + "\n" + "  " + steam_form(OWN_ID) + "  \n"
-                       + OWN_ID + "\n" + steam_form(THIRD_ID) + "\n")
+                       + OWN_ID + "\n" + v_form(OWN_ID) + "\n" + steam_form(THIRD_ID) + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID), generation=2))
     await run(db, hallpass, fake, T0)
     assert file_text(fake) == PERMITTED_COMMENT + "\n" + OTHER_ID + "\n" + steam_form(THIRD_ID) + "\n"
@@ -251,10 +267,10 @@ async def test_suspending_the_last_entry_writes_nothing_and_reports_would_open_s
 
 @pytest.mark.parametrize("desired", ["allowed", "suspended"])
 @pytest.mark.parametrize("listed", [True, False], ids=["listed", "unlisted"])
-@pytest.mark.parametrize("form", [OTHER_ID, steam_form(OTHER_ID)], ids=["bare", "steam"])
-async def test_a_ban_list_entry_in_either_form_is_banned_external_and_nothing_is_written(
+@pytest.mark.parametrize("form", [OTHER_ID, steam_form(OTHER_ID), v_form(OTHER_ID)], ids=["bare", "steam", "v"])
+async def test_a_ban_list_entry_in_any_form_is_banned_external_and_nothing_is_written(
         db: Database, form: str, listed: bool, desired: str) -> None:
-    permitted = PERMITTED_COMMENT + (steam_form(OTHER_ID) + "\n" if listed else "")
+    permitted = PERMITTED_COMMENT + (v_form(OTHER_ID) + "\n" if listed else "")
     fake = ptero_state(permitted, BANNED_COMMENT + form + "\n")
     before = (file_text(fake), file_text(fake, BANNED))
     hallpass = valheim_service(subject("r1", desired, steam(OTHER_ID)))
@@ -279,7 +295,7 @@ async def test_the_ban_list_is_optional_and_is_not_read_without_its_setting(db: 
     hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID)))
     await run(db, hallpass, fake, T0, settings=NO_BAN_LIST)
     assert outcomes(hallpass) == [("r1", "allowed", PENDING)]
-    assert file_text(fake) == PERMITTED_COMMENT + steam_form(OWN_ID) + "\n"
+    assert file_text(fake) == PERMITTED_COMMENT + v_form(OWN_ID) + "\n"
 
 
 # Live reload on: nothing is pending, and the uptime is not read ----------------------------------------------------
@@ -393,12 +409,13 @@ async def test_a_line_added_by_hand_for_a_suspended_subject_is_removed_again_on_
 # Unmanaged entries ------------------------------------------------------------------------------------------------
 
 async def test_unmanaged_counts_each_entry_that_names_no_known_subject(db: Database) -> None:
-    fake = ptero_state(PERMITTED_COMMENT + "\n" + OWN_ID + "\n" + steam_form(OWN_ID) + "\n" + steam_form(OTHER_ID)
-                       + "\n" + THIRD_ID + "\n" + "OtherPlatform_placeholder\n")
+    fake = ptero_state(PERMITTED_COMMENT + "\n" + OWN_ID + "\n" + steam_form(OWN_ID) + "\n" + v_form(OWN_ID) + "\n"
+                       + steam_form(OTHER_ID) + "\n" + v_form(OTHER_ID) + "\n" + THIRD_ID + "\n"
+                       + "OtherPlatform_placeholder\n")
     async with httpx.AsyncClient(transport=make_ptero_transport(fake)) as http:
         adapter = build_adapter("valheim", ctx(db, http, T0))
         known = [Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 1)]
-        assert await adapter.unmanaged_count(known) == 3
+        assert await adapter.unmanaged_count(known) == 4
 
 
 # Identity and errors ----------------------------------------------------------------------------------------------
@@ -438,7 +455,7 @@ async def test_a_failed_write_is_that_subject_only_and_the_others_still_apply(db
                                subject("r2", "allowed", steam(THIRD_ID)))
     await run(db, hallpass, fake, T0)
     assert outcomes(hallpass) == [("r1", "error", "http"), ("r2", "allowed", PENDING)]
-    assert file_text(fake) == PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n" + steam_form(THIRD_ID) + "\n"
+    assert file_text(fake) == PERMITTED_COMMENT + OWN_ID + "\n" + OTHER_ID + "\n" + v_form(THIRD_ID) + "\n"
     assert await record_of(db, OWN_ID) is None   # no earlier record, so the failed write leaves none
     assert await record_of(db, THIRD_ID) == ("add", T0)
 
@@ -492,9 +509,11 @@ async def test_apply_suspended_on_an_unlisted_id_writes_nothing(db: Database) ->
 @pytest.mark.parametrize("lines", [
     OWN_ID + "\n" + steam_form(OWN_ID) + "\n",
     steam_form(OWN_ID) + "\n" + OWN_ID + "\n",
-], ids=["bare_then_steam", "steam_then_bare"])
-async def test_suspending_when_the_only_entries_are_both_forms_of_the_id_writes_nothing(db: Database,
-                                                                                       lines: str) -> None:
+    v_form(OWN_ID) + "\n" + steam_form(OWN_ID) + "\n" + OWN_ID + "\n",
+    steam_form(OWN_ID) + "\n" + v_form(OWN_ID) + "\n",
+    v_form(OWN_ID) + "\n",
+], ids=["bare_then_steam", "steam_then_bare", "v_steam_bare", "steam_then_v", "v_only"])
+async def test_suspending_when_the_only_entries_are_forms_of_the_id_writes_nothing(db: Database, lines: str) -> None:
     fake = ptero_state(PERMITTED_COMMENT + lines)
     before = file_text(fake)
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
@@ -545,8 +564,10 @@ async def test_removal_keeps_an_id_that_is_a_prefix_or_a_superstring_of_the_subj
     assert outcomes(hallpass) == [("r1", "suspended", PENDING)]
 
 
-@pytest.mark.parametrize("line", [OWN_ID + "0", OWN_ID[:-1], steam_form(OWN_ID + "0"), steam_form(OWN_ID[:-1])],
-                         ids=["bare_superstring", "bare_prefix", "steam_superstring", "steam_prefix"])
+@pytest.mark.parametrize("line", [OWN_ID + "0", OWN_ID[:-1], steam_form(OWN_ID + "0"), steam_form(OWN_ID[:-1]),
+                                  v_form(OWN_ID + "0"), v_form(OWN_ID[:-1])],
+                         ids=["bare_superstring", "bare_prefix", "steam_superstring", "steam_prefix",
+                              "v_superstring", "v_prefix"])
 async def test_a_prefix_or_superstring_line_does_not_list_the_subject(db: Database, line: str) -> None:
     fake = ptero_state(PERMITTED_COMMENT + line + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
@@ -555,25 +576,27 @@ async def test_a_prefix_or_superstring_line_does_not_list_the_subject(db: Databa
     assert writes(fake) == []
 
 
-async def test_a_lower_case_steam_line_does_not_name_the_id(db: Database) -> None:
-    fake = ptero_state(PERMITTED_COMMENT + "steam_" + OWN_ID + "\n")
+@pytest.mark.parametrize("prefix", ["steam_", "v_", "STEAM_"], ids=["steam", "v", "upper_steam"])
+async def test_a_lower_case_or_other_prefix_does_not_name_the_id(db: Database, prefix: str) -> None:
+    fake = ptero_state(PERMITTED_COMMENT + prefix + OWN_ID + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
     await run(db, hallpass, fake, T0)
     assert outcomes(hallpass) == [("r1", "suspended", None)]
     assert writes(fake) == []
 
 
-async def test_allowing_keeps_a_lower_case_steam_line_and_appends_the_steam_form(db: Database) -> None:
+async def test_allowing_keeps_a_lower_case_steam_line_and_appends_the_v_form(db: Database) -> None:
     lower = "steam_" + OWN_ID
     fake = ptero_state(PERMITTED_COMMENT + lower + "\n")
     hallpass = valheim_service(subject("r1", "allowed", steam(OWN_ID)))
     await run(db, hallpass, fake, T0)
-    assert file_text(fake) == PERMITTED_COMMENT + lower + "\n" + steam_form(OWN_ID) + "\n"
+    assert file_text(fake) == PERMITTED_COMMENT + lower + "\n" + v_form(OWN_ID) + "\n"
     assert outcomes(hallpass) == [("r1", "allowed", PENDING)]
 
 
-async def test_a_lower_case_steam_line_counts_as_unmanaged(db: Database) -> None:
-    fake = ptero_state(PERMITTED_COMMENT + "steam_" + OWN_ID + "\n")
+@pytest.mark.parametrize("prefix", ["steam_", "v_"], ids=["steam", "v"])
+async def test_a_lower_case_or_other_prefix_counts_as_unmanaged(db: Database, prefix: str) -> None:
+    fake = ptero_state(PERMITTED_COMMENT + prefix + OWN_ID + "\n")
     async with httpx.AsyncClient(transport=make_ptero_transport(fake)) as http:
         adapter = build_adapter("valheim", ctx(db, http, T0))
         known = [Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 1)]
@@ -614,7 +637,8 @@ async def test_a_bom_before_the_first_line_id_is_read_as_listed(db: Database) ->
     assert writes(fake) == []
 
 
-@pytest.mark.parametrize("first", [BOM + OWN_ID, BOM + steam_form(OWN_ID)], ids=["bare", "steam"])
+@pytest.mark.parametrize("first", [BOM + OWN_ID, BOM + steam_form(OWN_ID), BOM + v_form(OWN_ID)],
+                         ids=["bare", "steam", "v"])
 async def test_suspending_a_bom_first_line_removes_it_and_keeps_the_bom_at_the_start(db: Database, first: str) -> None:
     fake = ptero_state(first + "\n" + OTHER_ID + "\n")
     hallpass = valheim_service(subject("r1", "suspended", steam(OWN_ID)))
@@ -629,8 +653,8 @@ CRLF_TEXT = "// c\r\n" + steam_form(OTHER_ID)
 
 
 @pytest.mark.parametrize(("before", "after"), [
-    (CRLF_TEXT + "\r\n", CRLF_TEXT + "\r\n" + steam_form(OWN_ID) + "\r\n"),
-    (CRLF_TEXT, CRLF_TEXT + "\r\n" + steam_form(OWN_ID)),
+    (CRLF_TEXT + "\r\n", CRLF_TEXT + "\r\n" + v_form(OWN_ID) + "\r\n"),
+    (CRLF_TEXT, CRLF_TEXT + "\r\n" + v_form(OWN_ID)),
 ], ids=["ends_with_newline", "no_final_newline"])
 async def test_allowing_in_a_crlf_file_ends_the_new_line_the_way_the_file_ends_its_lines(
         db: Database, before: str, after: str) -> None:
