@@ -9,11 +9,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Hallpass{% endblock %}</title>
   <style>
-    :root { --bg: #fbfbf9; --fg: #1d1d1b; --muted: #5d5d58; --line: #d8d8d2; --accent: #2f5d50; }
+    :root { color-scheme: light dark; --bg: #fbfbf9; --fg: #1d1d1b; --muted: #5d5d58; --line: #d8d8d2; --accent: #2f5d50; }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) { --bg: #161715; --fg: #ecece6; --muted: #a3a39b; --line: #3a3b37; --accent: #8fc7b4; }
     }
-    :root[data-theme="dark"] { --bg: #161715; --fg: #ecece6; --muted: #a3a39b; --line: #3a3b37; --accent: #8fc7b4; }
+    :root[data-theme="dark"] { color-scheme: dark; --bg: #161715; --fg: #ecece6; --muted: #a3a39b; --line: #3a3b37; --accent: #8fc7b4; }
+    :root[data-theme="light"] { color-scheme: light; }
     body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
     header, main { padding: 0 16px; max-width: 880px; margin: 0 auto; }
     header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding-top: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -22,8 +23,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     nav a { color: var(--accent); }
     main { padding-top: 16px; padding-bottom: 32px; }
     form.inline { display: inline; }
-    button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; }
-    input, select { font: inherit; padding: 6px 8px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); }
+    button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+    input, select, textarea { font: inherit; padding: 6px 8px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+    select, option, optgroup { background: var(--bg); color: var(--fg); }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
     .notice { border-left: 4px solid var(--accent); padding: 8px 12px; margin: 12px 0; }
