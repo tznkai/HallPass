@@ -106,6 +106,11 @@ WHERE kind IN ('java_name', 'bedrock_gamertag') GROUP BY 1, 2, 3 HAVING count(*)
 
 Keep one row of each group, delete the others from `external_identity` by id, then start hallpass again.
 
+Schema version 9 adds a pending restore to manual suspensions. An upgrade from version 8 keeps every manual
+suspension, with no restore pending. When a parent restores a service that was suspended by hand, the administrator is
+emailed to undo that suspension by hand, and the person's page shows the restore as pending until the administrator
+marks it restored.
+
 Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
 by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied
 state in place.

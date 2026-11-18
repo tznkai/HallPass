@@ -325,6 +325,35 @@ async def test_desired_state_migration_on_an_empty_v7_database(tmp_path: Path) -
         database.close()
 
 
+# Manual restores keep their pending state (migration 0009) ---------------------------------------------
+
+def _add_manual_mark(path: Path, person_id: int) -> None:
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        c.execute("INSERT INTO person (id, ref, display_name, account_type, created_at) "
+                  "VALUES (?, ?, 'P', 'child', '2026-11-13T00:00:00Z')", (person_id, f"ref-{person_id}"))
+        c.execute("INSERT INTO service (id, slug, name, kind, adapter, auto_suspendable, url, retired, created_at) "
+                  "VALUES (1, 'abiotic', 'Abiotic', 'game', 'manual', 0, NULL, 0, '2026-11-13T00:00:00Z')")
+        c.execute("INSERT INTO manual_suspension (person_id, service_id, marked_at, marked_by) "
+                  "VALUES (?, 1, '2026-11-13T00:00:00Z', NULL)", (person_id,))
+        c.commit()
+
+
+async def test_manual_restore_migration_keeps_every_mark_with_no_restore_pending_on_a_v8_database(
+        tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 8)
+    _add_manual_mark(path, 1)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        rows = await database.run(lambda c: c.execute(
+            "SELECT person_id, service_id, marked_at, restore_pending_since FROM manual_suspension").fetchall())
+        assert rows == [(1, 1, "2026-11-13T00:00:00Z", None)]
+    finally:
+        database.close()
+
+
 # Quarantine -----------------------------------------------------------------------------------------
 
 async def test_garbage_db_is_quarantined_with_side_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

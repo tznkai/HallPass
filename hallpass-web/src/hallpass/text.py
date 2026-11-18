@@ -42,8 +42,9 @@ CHILDREN_HELP = ("Each child linked to you is listed here with their services; o
                  "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
                  "Restore lifts your own hold, and another parent's hold too unless your family agreed that each "
                  "parent lifts only their own. "
-                 "Only the administrator lifts an administrator hold or a lockdown, and on a service that can't be "
-                 "suspended automatically the administrator carries out a revoke by hand and alone restores it.")
+                 "Only the administrator lifts an administrator hold or a lockdown; on a service that can't be "
+                 "suspended automatically, a parent can restore it too, and if the administrator had suspended it by "
+                 "hand, the administrator then undoes that by hand.")
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
@@ -59,6 +60,10 @@ CAN_AUTO_SUSPEND = "can be automatically suspended"
 CANNOT_AUTO_SUSPEND = "cannot be automatically suspended"
 NO_GAME_IDENTITY = "no game identity on file"
 MANUALLY_SUSPENDED = "manually suspended"
+# A parent restored a manually suspended service, and the administrator has yet to undo the suspension by hand.
+RESTORE_PENDING = "Waiting for the administrator to restore this by hand."
+RESTORE_BY_HAND_PENDING = "restore by hand pending"
+RESTORE_BY_HAND_DONE = "Mark restored by hand"
 # One message per access.Access reason, in the order access.evaluate adds them.
 REASON_RETIRED = "The service has been retired."
 REASON_NOT_ENTITLED = "Not entitled to this service."
@@ -99,13 +104,17 @@ ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."
 ACTOR_ADMIN = "the administrator"
 ACTOR_SYSTEM = "the system"
 STRICT_NOT_YOURS = "{names} placed a hold on this service, and in your family each parent lifts only their own hold."
-RESTORE_NOT_AUTOMATIC = "This service cannot be restored automatically. Ask the administrator."
 NOT_YOUR_CHILD = "You can only change holds for a child linked to you."
 NOT_CHILD_SERVICE = "This child does not have that service, so a hold cannot be placed on it."
 LOCKDOWN_ADMIN_ONLY = ("Only the administrator can lift an administrator hold or a lockdown. "
                        "A lockdown is lifted by resolving its review.")
 MARK_NO_HOLD = "Only a held service can be marked manually suspended."
 MARK_NOT_MANUAL = "Only a service that cannot be automatically suspended can be marked manually suspended."
+RESTORE_PENDING_EMAIL_SUBJECT = "Hallpass: restore {service} for {child} by hand"
+RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in hallpass. "
+                              "{service} was suspended by hand, so it must be restored by hand too. "
+                              "Then mark it restored by hand on the person's page.\n\n"
+                              "Sign in to hallpass for details.\n")
 # Notification emails are plain text. The child's display name and the actor label are the only names in them.
 CHANGE_EMAIL_SUBJECT = "Hallpass: access changed for {child}"
 CHANGE_EMAIL_BODY = ("{actor} changed the access of {child} in hallpass.\n\n"

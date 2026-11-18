@@ -133,6 +133,37 @@ async def test_the_mark_can_be_removed_while_the_hold_stands(env: Env):
     assert await hold_kinds(env, ada.id, calendar.id) == ["admin"]
 
 
+async def test_the_administrator_sees_a_pending_restore_and_clears_it_by_hand(env: Env):
+    await admin_client(env)
+    family, _ = await make_signed_family(env)
+    await env.db.run(lambda c: holds.place(c, actor=holds.Actor("parent", family.ann.id),
+                                           target_id=family.kid.id, service_ids=[family.abiotic.id], now=NOW,
+                                           window=WINDOW, admin_email=None))
+    await admin_post(env, f"/admin/people/{family.kid.id}", f"/admin/people/{family.kid.id}/manual/{family.abiotic.id}")
+    csrf = await form(env, "/", client=family.ann_browser)
+    lifted = await family.ann_browser.post(
+        f"/children/{family.kid.id}/holds/{family.abiotic.id}/lift", data=csrf)
+    assert lifted.status_code == 303
+
+    page = (await env.client.get(f"/admin/people/{family.kid.id}")).text
+    assert text.RESTORE_BY_HAND_PENDING in page
+    assert f"/admin/people/{family.kid.id}/manual/{family.abiotic.id}/unmark" in page
+
+    cleared = await admin_post(env, f"/admin/people/{family.kid.id}",
+                               f"/admin/people/{family.kid.id}/manual/{family.abiotic.id}/unmark")
+
+    assert cleared.status_code == 303
+    page = (await env.client.get(f"/admin/people/{family.kid.id}")).text
+    assert text.RESTORE_BY_HAND_PENDING not in page
+    assert await env.db.run(lambda c: holds.marked_service_ids(c, family.kid.id)) == set()
+    assert len(await decision_rows(env, "manual_unmarked")) == 1
+
+
+async def decision_rows(env: Env, action: str) -> list[tuple]:
+    return await env.db.run(lambda c: c.execute(
+        "SELECT action FROM decision_log WHERE action = ?", (action,)).fetchall())
+
+
 # Families, lockdowns and reviews -------------------------------------------------------------------------
 
 @dataclass

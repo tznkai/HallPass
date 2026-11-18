@@ -42,25 +42,31 @@ def _reason_text(reason: str, person: Person) -> str:
 
 
 def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairPauses, *,
-                 shared_note: str = text.SHARED_IDENTITY_PAUSED) -> list[dict]:
+                 shared_note: str = text.SHARED_IDENTITY_PAUSED,
+                 pending_note: str = text.RESTORE_PENDING) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
     who placed each hold, a note when a game service has no external identity for the person, the report status
     hallmonitor's last report gives (None for a service it does not monitor), and whether one of the person's shared
     identities is paused. `pauses` is the second result of `desired.refresh_with_pauses`, which the caller runs first.
     The pause carries holder ids only, and the member's wording never names the other holder. A parent's view of a
-    child passes its own `shared_note`, which describes the child."""
+    child passes its own `shared_note`, which describes the child. A manual service whose restore waits for the
+    administrator shows `pending_note` in place of "manually suspended"."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
     marked = holds.marked_service_ids(conn, person.id)
+    pending = holds.pending_service_ids(conn, person.id)
     rows = []
     for service, decision in access.services_for(conn, person):
         missing_identity = service.kind == "game" and service.slug not in identity_slugs
         holders = holds.hold_labels(conn, person.id, service.id)
-        is_marked = service.id in marked
+        is_pending = service.id in pending
+        is_marked = service.id in marked and not is_pending
         report_status = desired.report_status(desired.desired_for(conn, person.id, service.id),
                                               desired.report_for(conn, person.id, service.id), is_marked)
         pause = pauses.get((service.id, person.id))
         if service.auto_suspendable:
             suspendable = text.CAN_AUTO_SUSPEND
+        elif is_pending:
+            suspendable = pending_note
         elif holders and is_marked:
             suspendable = text.MANUALLY_SUSPENDED
         else:

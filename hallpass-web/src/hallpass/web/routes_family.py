@@ -22,13 +22,13 @@ router = APIRouter()
 
 def _child_rows(conn, parent: Person, child: Person, pauses: desired.PairPauses) -> list[dict]:
     """The child's service rows with the parent's controls. A parent may revoke where no parent hold they may lift
-    stands, and restore only where one does on an auto-suspendable service. Both pages build their rows here."""
+    stands, and restore where one does, on any service. Both pages build their rows here."""
     rows = service_rows(conn, child, pauses, shared_note=text.SHARED_IDENTITY_PAUSED_PARENT)
     held = holds.services_with_holds(conn, child.id)
     for row in rows:
         liftable = holds.liftable_parent_holds(child.conflict_mode, parent.id, held.get(row["service_id"], []))
         row["revoke"] = not liftable
-        row["restore"] = row["auto_suspendable"] and bool(liftable)
+        row["restore"] = bool(liftable)
     return rows
 
 

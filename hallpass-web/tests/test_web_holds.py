@@ -131,14 +131,14 @@ async def test_a_malformed_service_id_is_refused_and_places_nothing(env: Env):
 
 # AC6.4 and AC6.5: the controls and the row text ------------------------------------------------------------
 
-async def test_restore_is_offered_only_on_the_auto_suspendable_service(env: Env):
+async def test_restore_is_offered_on_every_held_service_whether_or_not_it_is_automatic(env: Env):
     world = await build_world(env)
     await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all")
 
     page = (await world.ann_browser.get(f"/children/{world.kid.id}")).text
 
     assert f"/children/{world.kid.id}/holds/{world.fluxer.id}/lift" in page
-    assert f"/children/{world.kid.id}/holds/{world.abiotic.id}/lift" not in page
+    assert f"/children/{world.kid.id}/holds/{world.abiotic.id}/lift" in page
     assert "cannot be automatically suspended" in page
 
 
@@ -187,15 +187,43 @@ async def test_an_unrelated_parent_cannot_restore_either(env: Env):
 
 # Restore: the refusals ---------------------------------------------------------------------------------
 
-async def test_restoring_a_manual_service_is_refused_with_the_restore_message(env: Env):
+async def test_a_parent_restores_a_manual_service_with_no_mark(env: Env):
     world = await build_world(env)
     await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all")
 
     response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.abiotic.id}/lift")
 
-    assert response.status_code == 403
-    assert text.RESTORE_NOT_AUTOMATIC in response.text
-    assert world.abiotic.id in await hold_pairs(env, world.kid)
+    assert response.status_code == 303
+    assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"]}
+    assert await admin_addresses(env) == []
+
+
+async def admin_addresses(env: Env) -> list[str]:
+    return await env.db.run(lambda c: [row[0] for row in c.execute(
+        "SELECT to_addr FROM outbox WHERE to_addr = 'admin@example.com' ORDER BY id").fetchall()])
+
+
+async def test_a_parent_restore_of_a_marked_manual_service_leaves_a_pending_note_on_every_page(env: Env):
+    world = await build_world(env)
+    await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all")
+    await admin_client(env)
+    mark = await form(env, f"/admin/people/{world.kid.id}")
+    marked = await env.client.post(f"/admin/people/{world.kid.id}/manual/{world.abiotic.id}", data=mark)
+    assert marked.status_code == 303
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.abiotic.id}/lift")
+
+    assert response.status_code == 303
+    assert world.abiotic.id not in await hold_pairs(env, world.kid)
+    assert len(await admin_addresses(env)) == 1
+    parent_page = (await world.ann_browser.get(f"/children/{world.kid.id}")).text
+    child_page = (await world.kid_browser.get("/")).text
+    admin_page = (await env.client.get(f"/admin/people/{world.kid.id}")).text
+    assert text.RESTORE_PENDING in parent_page
+    assert text.RESTORE_PENDING in child_page
+    assert text.RESTORE_BY_HAND_PENDING in admin_page
+    assert text.MANUALLY_SUSPENDED not in child_page
+    assert text.MANUALLY_SUSPENDED not in parent_page
 
 
 async def test_restoring_an_auto_service_with_only_an_admin_hold_is_refused(env: Env):

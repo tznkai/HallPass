@@ -518,13 +518,148 @@ async def test_set_mode_refuses_an_unknown_mode(db: Database) -> None:
 
 # Restore rule and manual marks --------------------------------------------------------------------------
 
-async def test_parent_cannot_restore_a_service_that_is_not_auto_suspendable(db: Database) -> None:
+async def marks(w: World) -> list[tuple[int, bool]]:
+    """Each manual mark as (service id, restore pending)."""
+    return await w.db.run(lambda c: [tuple(r) for r in c.execute(
+        "SELECT service_id, restore_pending_since IS NOT NULL FROM manual_suspension ORDER BY service_id").fetchall()])
+
+
+async def mark_abiotic(w: World) -> None:
+    await w.db.run(lambda c: holds.mark_manual(c, admin_id=w.admin, person_id=w.child, service_id=w.abiotic, now=NOW))
+
+
+async def admin_emails(w: World) -> list[tuple[str, str]]:
+    return [(subject, body) for to, subject, body in await outbox(w) if to == ADMIN_EMAIL]
+
+
+async def test_parent_restores_a_manual_service_with_no_mark_and_nothing_is_pending(db: Database) -> None:
     w = await build(db)
     await place(w, parent(w.ann), w.child, [w.abiotic])
+    await lift(w, parent(w.ann), w.child, [w.abiotic])
+    assert await hold_kinds(w, w.child, w.abiotic) == []
+    assert await marks(w) == []
+    assert await admin_emails(w) == []
+
+
+async def test_parent_lift_of_a_marked_manual_service_keeps_the_mark_as_a_pending_restore(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+
+    assert await hold_kinds(w, w.child, w.abiotic) == []
+    assert await marks(w) == [(w.abiotic, True)]
+    assert await w.db.run(lambda c: holds.pending_service_ids(c, w.child)) == {w.abiotic}
+    assert await w.db.run(lambda c: holds.marked_service_ids(c, w.child)) == {w.abiotic}
+    emails = await admin_emails(w)
+    assert emails == [(text.RESTORE_PENDING_EMAIL_SUBJECT.format(child="Kid", service="Abiotic"),
+                       text.RESTORE_PENDING_EMAIL_BODY.format(child="Kid", service="Abiotic"))]
+    pending = await decision_rows(w, "manual_restore_pending")
+    assert len(pending) == 1
+    assert json.loads(pending[0][4]) == [w.abiotic]
+
+
+async def test_a_second_parent_lift_neither_mails_again_nor_clears_the_pending_restore(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+    await lift(w, parent(w.ben), w.child, [w.abiotic], at=NOW + timedelta(hours=2))
+
+    assert len(await admin_emails(w)) == 1
+    assert await w.db.run(lambda c: holds.pending_service_ids(c, w.child)) == {w.abiotic}
+
+
+async def test_a_parent_lift_that_leaves_another_hold_keeps_the_mark_as_it_was(db: Database) -> None:
+    w = await build(db, mode="strict")
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await place(w, parent(w.ben), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic])
+
+    assert await hold_kinds(w, w.child, w.abiotic) == ["parent"]
+    assert await marks(w) == [(w.abiotic, False)]
+    assert await admin_emails(w) == []
+
+
+async def test_a_new_hold_clears_a_pending_restore_and_the_mark_stands(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+    await place(w, parent(w.ben), w.child, [w.abiotic], at=NOW + timedelta(hours=2))
+
+    assert await marks(w) == [(w.abiotic, False)]
+    assert await w.db.run(lambda c: holds.pending_service_ids(c, w.child)) == set()
+    assert await hold_kinds(w, w.child, w.abiotic) == ["parent"]
+
+
+async def test_a_lockdown_clears_a_pending_restore(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+    # Two cross-parent reversals on fluxer inside the window: Ann places, Ben lifts, Ann places again.
+    outcomes = await run_sequence(w, [(w.ann, "place", NOW + timedelta(hours=2)),
+                                      (w.ben, "lift", NOW + timedelta(hours=3))])
+    locked = await place(w, parent(w.ann), w.child, [w.fluxer], at=NOW + timedelta(hours=4))
+
+    assert outcomes[1].reversal is True
+    assert locked.lockdown_review_id is not None
+    assert await marks(w) == [(w.abiotic, False)]
+    assert await hold_kinds(w, w.child, w.abiotic) == ["lockdown"]
+
+
+async def test_an_admin_lift_does_not_clear_a_pending_restore(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+    await lift(w, admin(w), w.child, [w.abiotic], at=NOW + timedelta(hours=2), include_parent=True)
+
+    assert await marks(w) == [(w.abiotic, True)]
+
+
+async def test_unmarking_a_pending_restore_clears_it_and_logs_the_unmark(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.abiotic])
+    await mark_abiotic(w)
+    await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(hours=1))
+    await w.db.run(lambda c: holds.unmark_manual(c, admin_id=w.admin, person_id=w.child, service_id=w.abiotic,
+                                                 now=NOW + timedelta(hours=2)))
+
+    assert await marks(w) == []
+    assert await w.db.run(lambda c: holds.pending_service_ids(c, w.child)) == set()
+    assert len(await decision_rows(w, "manual_unmarked")) == 1
+
+
+async def test_strict_mode_refuses_a_parent_lifting_another_parents_manual_hold(db: Database) -> None:
+    w = await build(db, mode="strict")
+    await place(w, parent(w.ben), w.child, [w.abiotic])
+    await mark_abiotic(w)
     with pytest.raises(holds.HoldRefused) as refused:
         await lift(w, parent(w.ann), w.child, [w.abiotic])
-    assert refused.value.reason == "restore_not_automatic"
+    assert refused.value.reason == "strict_not_yours"
     assert await hold_kinds(w, w.child, w.abiotic) == ["parent"]
+    assert await marks(w) == [(w.abiotic, False)]
+
+
+async def test_a_parent_cannot_lift_an_admin_hold_on_a_manual_service(db: Database) -> None:
+    w = await build(db)
+    await place(w, admin(w), w.child, [w.abiotic])
+    with pytest.raises(holds.HoldRefused) as refused:
+        await lift(w, parent(w.ann), w.child, [w.abiotic])
+    assert refused.value.reason == "admin_or_lockdown"
+    assert await hold_kinds(w, w.child, w.abiotic) == ["admin"]
+
+
+async def test_a_parent_cannot_lift_a_lockdown_on_a_manual_service(db: Database) -> None:
+    w = await build(db)
+    await lock_child(w)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await lift(w, parent(w.ann), w.child, [w.abiotic], at=NOW + timedelta(days=2))
+    assert refused.value.reason == "admin_or_lockdown"
+    assert await hold_kinds(w, w.child, w.abiotic) == ["lockdown"]
 
 
 async def test_mark_manual_needs_a_hold_on_a_non_auto_service(db: Database) -> None:

@@ -57,7 +57,7 @@ as the code they cite.
 - `src/hallpass/grants.py:125` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
 - `src/hallpass/grants.py:86` `AND p.status != 'locked'` — a grant by a locked parent counts for nothing, so it neither settles a child at sign-in nor blocks another parent's approval
 - `src/hallpass/grants.py:176` `if to_child == (old_type == "child"):` — a change between adult and parent moves no status; an active person made a child waits for a parent's grant, and an awaiting child made an adult becomes active
-- `src/hallpass/web/routes_admin.py:258` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
+- `src/hallpass/web/routes_admin.py:263` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
 
 ## Entitlement resolution
 
@@ -85,15 +85,16 @@ as the code they cite.
 - `src/hallpass/conflict.py:47` `previous.actor_id != proposed.actor_id` — the reversal test: the previous overlapping action must be by a different parent and be the opposite kind (place vs lift), and admin and system actions never reach this history
 - `src/hallpass/conflict.py:52` `now - window < e.at <= now` — the window check: a second reversal locks the child down only when an earlier reversal falls in (now - window, now], so an edge exactly at the window is outside
 - `src/hallpass/holds.py:133` `AND id > ?` — the fresh start after a resolved review: only parent actions logged after the child's latest `review_resolved` row (by id) are history, so earlier reversals do not count
-- `src/hallpass/holds.py:230` `if not verdict.lockdown or _open_review(conn, child.id):` — a further reversal while a review is open is logged, but opens no second review and no second set of lockdown holds
+- `src/hallpass/holds.py:272` `if not verdict.lockdown or _open_review(conn, child.id):` — a further reversal while a review is open is logged, but opens no second review and no second set of lockdown holds
 
 ## Hold permissions
 
-- `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
-- `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
-- `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
-- `src/hallpass/web/routes_admin.py:952` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
-- `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
+- `src/hallpass/holds.py:370` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
+- `src/hallpass/holds.py:373` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
+- `src/hallpass/holds.py:202` `def _pend_manual_restores` — a parent's lift that leaves a marked manual service with no hold keeps the mark as a pending restore and mails the administrator once; the mark is kept, not cleared, so the suspension done by hand is never forgotten
+- `src/hallpass/holds.py:451` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
+- `src/hallpass/web/routes_admin.py:957` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/holds.py:464` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 - `src/hallpass/web/routes_family.py:103` `def hold_return(back` — the open-redirect guard for a hold change: the form's `back` field is honoured only as the fixed value `children`, and any other value goes to the child's page, so no address from the request is ever redirected to
 
 ## Outbox

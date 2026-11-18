@@ -187,26 +187,31 @@ def _person_context(conn, person: Person) -> dict:
         "no_address_flag": text.NO_FLUXER_ADDRESS_FLAG,
         "invitation_not_created": text.INVITATION_NOT_CREATED,
         "invite_hint": text.INVITE_SHOWN_ONCE_HINT,
+        "restore_by_hand_done": text.RESTORE_BY_HAND_DONE,
     }
 
 
 def _hold_rows(conn, person_id: int) -> list[dict]:
-    """One row per service the person is held on: who placed the holds, and whether the service can be suspended
-    automatically, or is marked as suspended by hand."""
+    """One row per service the person is held on, or whose manual restore waits for the administrator: who placed the
+    holds, whether the service can be suspended automatically, is marked as suspended by hand, or is a pending
+    restore that the administrator must still undo by hand."""
     held = holds.services_with_holds(conn, person_id)
     marked = holds.marked_service_ids(conn, person_id)
+    pending = holds.pending_service_ids(conn, person_id)
     rows = []
     for service in services.list_services(conn, include_retired=True):
-        if service.id not in held:
+        if service.id not in held and service.id not in pending:
             continue
         if service.auto_suspendable:
             wording = text.CAN_AUTO_SUSPEND
+        elif service.id in pending:
+            wording = text.RESTORE_BY_HAND_PENDING
         elif service.id in marked:
             wording = text.MANUALLY_SUSPENDED
         else:
             wording = text.CANNOT_AUTO_SUSPEND
         rows.append({"service": service, "labels": holds.hold_labels(conn, person_id, service.id),
-                     "suspendable": wording, "marked": service.id in marked})
+                     "suspendable": wording, "marked": service.id in marked, "pending": service.id in pending})
     return rows
 
 
@@ -215,7 +220,7 @@ def _load_person(conn, person_id: int, now: datetime) -> dict:
     if person is None:
         raise registry.NoSuchPerson()
     _, pauses = desired.refresh_with_pauses(conn, now)
-    rows = service_rows(conn, person, pauses)
+    rows = service_rows(conn, person, pauses, pending_note=text.RESTORE_BY_HAND_PENDING)
     for row in rows:
         pause = row["shared_pause"]
         if pause is not None:

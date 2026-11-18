@@ -155,9 +155,16 @@ def liftable_parent_holds(mode: str, parent_id: int, held: Sequence[Hold]) -> li
 
 
 def marked_service_ids(conn: sqlite3.Connection, person_id: int) -> set[int]:
-    """The services the administrator has marked manually suspended for this person."""
+    """The services the administrator has marked manually suspended for this person, pending restores included."""
     return {row[0] for row in conn.execute(
         "SELECT service_id FROM manual_suspension WHERE person_id = ?", (person_id,)).fetchall()}
+
+
+def pending_service_ids(conn: sqlite3.Connection, person_id: int) -> set[int]:
+    """The marked services whose suspension the administrator must still undo by hand after a parent restored them."""
+    return {row[0] for row in conn.execute(
+        "SELECT service_id FROM manual_suspension WHERE person_id = ? AND restore_pending_since IS NOT NULL",
+        (person_id,)).fetchall()}
 
 
 # Notifications -----------------------------------------------------------------------------------------
@@ -175,12 +182,46 @@ def _queue_change_emails(conn: sqlite3.Connection, *, child: Person, actor_id: i
 
 
 def _clear_orphan_marks(conn: sqlite3.Connection, person_id: int, service_ids: Sequence[int]) -> None:
-    """A manual mark goes when the last hold on that person and service goes."""
+    """A manual mark goes when the last hold on that person and service goes. A pending restore is kept: its mark
+    has no hold on purpose, until the administrator unmarks it or a new hold lands."""
     conn.executemany(
-        "DELETE FROM manual_suspension WHERE person_id = ? AND service_id = ? AND NOT EXISTS "
-        "(SELECT 1 FROM hold WHERE person_id = ? AND service_id = ?)",
+        "DELETE FROM manual_suspension WHERE person_id = ? AND service_id = ? AND restore_pending_since IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM hold WHERE person_id = ? AND service_id = ?)",
         [(person_id, service_id, person_id, service_id) for service_id in service_ids],
     )
+
+
+def _clear_pending(conn: sqlite3.Connection, person_id: int, service_ids: Sequence[int]) -> None:
+    """A new hold on a service ends its pending restore: the person is suspended again and the mark stands."""
+    conn.executemany(
+        "UPDATE manual_suspension SET restore_pending_since = NULL WHERE person_id = ? AND service_id = ?",
+        [(person_id, service_id) for service_id in service_ids],
+    )
+
+
+def _pend_manual_restores(conn: sqlite3.Connection, child: Person, service_ids: Sequence[int], now: datetime,
+                          admin_email: str | None) -> list[int]:
+    """After a parent's lift, a manually suspended service with no hold left keeps its mark as a pending restore, and
+    the administrator is emailed once to undo the suspension by hand. A service already pending is not mailed again.
+    Returns the services that became pending."""
+    pending = []
+    for service_id in service_ids:
+        if access.holds_for(conn, child.id, service_id):
+            continue
+        started = conn.execute(
+            "UPDATE manual_suspension SET restore_pending_since = ? "
+            "WHERE person_id = ? AND service_id = ? AND restore_pending_since IS NULL",
+            (_iso(now), child.id, service_id),
+        ).rowcount
+        if started:
+            pending.append(service_id)
+    if admin_email:
+        for service_id in pending:
+            service = services.get(conn, service_id)
+            subject = text.RESTORE_PENDING_EMAIL_SUBJECT.format(child=child.display_name, service=service.name)
+            body = text.RESTORE_PENDING_EMAIL_BODY.format(child=child.display_name, service=service.name)
+            mail.enqueue(conn, to_addr=admin_email, subject=subject, body=body, now=now)
+    return pending
 
 
 # Lockdown ----------------------------------------------------------------------------------------------
@@ -211,6 +252,7 @@ def _lockdown(conn: sqlite3.Connection, child: Person, now: datetime, admin_emai
             "VALUES (?, ?, 'lockdown', NULL, ?, '', ?)",
             (child.id, service_id, stamp, review_id),
         )
+    _clear_pending(conn, child.id, locked)
     registry.log_decision(conn, at=now, actor_kind="system", actor_person_id=None, target_person_id=child.id,
                           action="lockdown", services=locked, detail={"review_id": review_id})
     subject = text.LOCKDOWN_EMAIL_SUBJECT.format(child=child.display_name)
@@ -299,6 +341,7 @@ def place(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids
         label = text.ACTOR_ADMIN
     if not changed:
         return _NO_CHANGE
+    _clear_pending(conn, target.id, changed)
     registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
                           target_person_id=target.id, action="hold_placed", services=changed,
                           reversal=verdict.reversal)
@@ -318,8 +361,6 @@ def _parent_lift_plan(conn: sqlite3.Connection, target: Person, parent_id: int,
         service = services.get(conn, service_id)
         if service is None:
             raise services.NoSuchService()
-        if not service.auto_suspendable:
-            raise HoldRefused("restore_not_automatic", text.RESTORE_NOT_AUTOMATIC)
         held = access.holds_for(conn, target.id, service_id)
         if strict:
             parent_holds = [hold for hold in held if hold.kind == "parent"]
@@ -343,6 +384,7 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
     include_parent is set. Lockdown holds are never lifted here; they go when their review is resolved with the lift,
     or when the administrator lifts them afterwards (`lift_lockdown`)."""
     target = _person(conn, target_id)
+    pending: list[int] = []
     if actor.kind == "parent":
         _require_own_child(conn, actor, target)
         plan = _parent_lift_plan(conn, target, actor.person_id, service_ids)
@@ -353,6 +395,7 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
         verdict = conflict.evaluate(target.conflict_mode, _history(conn, target.id),
                                     conflict.Proposed(actor.person_id, "lift", frozenset(changed)), now, window)
         label = _person(conn, actor.person_id).display_name
+        pending = _pend_manual_restores(conn, target, changed, now, admin_email)
     else:
         sql = ("DELETE FROM hold WHERE person_id = ? AND service_id = ? AND kind IN ('admin', 'parent')"
                if include_parent else
@@ -367,6 +410,9 @@ def lift(conn: sqlite3.Connection, *, actor: Actor, target_id: int, service_ids:
     registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
                           target_person_id=target.id, action="hold_lifted", services=changed,
                           reversal=verdict.reversal)
+    if pending:
+        registry.log_decision(conn, at=now, actor_kind=actor.kind, actor_person_id=actor.person_id,
+                              target_person_id=target.id, action="manual_restore_pending", services=pending)
     _queue_change_emails(conn, child=target, actor_id=actor.person_id, label=label, now=now)
     review_id = _maybe_lockdown(conn, target, verdict, now, admin_email)
     return Outcome(tuple(changed), verdict.reversal, review_id)
