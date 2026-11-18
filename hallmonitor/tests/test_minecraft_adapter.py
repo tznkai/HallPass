@@ -354,7 +354,7 @@ async def test_a_ban_on_one_line_matches_the_name_whatever_the_case() -> None:
 
 @pytest.mark.parametrize("prefix", [".", "*"])
 async def test_a_bedrock_ban_after_a_default_reason_does_not_ban_the_java_name(prefix: str) -> None:
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             f"{prefix}Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2))
@@ -364,20 +364,20 @@ async def test_a_bedrock_ban_after_a_default_reason_does_not_ban_the_java_name(p
     assert outcomes(hallpass) == [("r1", "allowed", None)]
 
 
-@pytest.mark.parametrize("prefix", [".", "*"])
-async def test_the_bedrock_name_is_still_banned_after_a_default_reason(prefix: str) -> None:
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
-            f"{prefix}Tim was banned by Server: Banned by an operator.")
+async def test_the_bedrock_name_is_still_banned_after_a_default_reason() -> None:
+    # Only the `.` prefix: with `*`, the default reason's `.` is not the prefix, so the Bedrock rule does not see it.
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
+            ".Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
-        await run(hallpass, port, prefix=prefix)
+        await run(hallpass, port)
     assert state.commands == LIST_COMMANDS
     assert outcomes(hallpass) == [("r2", "banned_external", None)]
 
 
 @pytest.mark.parametrize("prefix", [".", "*"])
-@pytest.mark.parametrize("lead", ["ban(s):", "ban(s): "])
+@pytest.mark.parametrize("lead", ["", " "])
 async def test_a_bedrock_ban_as_the_first_entry_or_after_a_space_does_not_ban_the_java_name(
         prefix: str, lead: str) -> None:
     text = f"There are 1 ban(s):{lead}{prefix}Tim was banned by Server: Banned by an operator."
@@ -391,7 +391,7 @@ async def test_a_bedrock_ban_as_the_first_entry_or_after_a_space_does_not_ban_th
 
 @pytest.mark.parametrize("prefix", [".", "*"])
 async def test_a_java_name_after_a_default_reason_is_banned(prefix: str) -> None:
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             "Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2))
@@ -410,7 +410,7 @@ async def test_a_java_name_first_in_the_list_is_banned(prefix: str) -> None:
 
 
 async def test_with_no_prefix_a_name_after_a_dot_is_banned_as_before() -> None:
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             "..Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2))
@@ -421,7 +421,7 @@ async def test_with_no_prefix_a_name_after_a_dot_is_banned_as_before() -> None:
 
 async def test_with_an_underscore_prefix_a_java_name_after_the_prefix_is_not_banned() -> None:
     # `_` is a name character, so a name after it is part of a longer name, as before the Bedrock-twin rule.
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             "_Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2))
@@ -432,7 +432,7 @@ async def test_with_an_underscore_prefix_a_java_name_after_the_prefix_is_not_ban
 
 
 async def test_with_an_underscore_prefix_the_bedrock_name_is_still_banned() -> None:
-    text = ("There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             "_Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
@@ -442,8 +442,8 @@ async def test_with_an_underscore_prefix_the_bedrock_name_is_still_banned() -> N
 
 
 async def test_a_subject_with_a_java_name_and_another_bedrock_name_is_not_banned_by_the_bedrock_twin_ban() -> None:
-    text = ("There are 1 ban(s):Zed was banned by Server: Banned by an operator."
-            "..Tim was banned by Server: Banned by an operator.")
+    text = ("There are 2 ban(s):Zed was banned by Server: Banned by an operator."
+            ".Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), bedrock_identity("Bob"), generation=2))
     async with rcon_server(state) as port:
@@ -453,14 +453,57 @@ async def test_a_subject_with_a_java_name_and_another_bedrock_name_is_not_banned
 
 
 async def test_a_subject_whose_bedrock_twin_is_banned_is_banned_external_from_that_entry() -> None:
-    text = ("There are 1 ban(s):Zed was banned by Server: Banned by an operator."
-            "..Tim was banned by Server: Banned by an operator.")
+    text = ("There are 2 ban(s):Zed was banned by Server: Banned by an operator."
+            ".Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
     assert state.commands == LIST_COMMANDS
     assert outcomes(hallpass) == [("r1", "banned_external", None)]
+
+
+# The same rule for a Bedrock name: with a `.` or `*` prefix, a Bedrock entry counts only after the start of the reply,
+# whitespace, `:`, or the prefix that follows a name character. A Java ban whose reason ends in a non-name character
+# and then the prefix must not ban the Bedrock name.
+
+@pytest.mark.parametrize(("prefix", "reason"), [
+    (".", "...(2nd offence)"),
+    (".", "bye!"),
+    (".", "hmm.."),
+    ("*", "x)"),
+])
+async def test_a_java_ban_whose_reason_ends_before_the_prefix_does_not_ban_the_bedrock_name(
+        prefix: str, reason: str) -> None:
+    text = f"There are 1 ban(s):{reason}{prefix}Tim was banned by Server: Banned by an operator."
+    state = server_state(handler=ban_list_reply(text), prefix=prefix)
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port, prefix=prefix)
+    assert "fwhitelist add Tim" in state.commands
+    assert outcomes(hallpass) == [("r2", "allowed", None)]
+
+
+@pytest.mark.parametrize("lead", ["", " ", "\n"])
+async def test_a_bedrock_entry_first_after_a_space_or_after_a_line_break_is_banned(lead: str) -> None:
+    text = f"There are 1 ban(s):{lead}.Tim was banned by Server: Banned by an operator."
+    state = server_state(handler=ban_list_reply(text))
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert outcomes(hallpass) == [("r2", "banned_external", None)]
+
+
+@pytest.mark.parametrize(("tag", "banned_as"), [("Kim", "\u212aim"), ("Ros", "Ro\u017f")])
+async def test_a_non_ascii_look_alike_letter_does_not_ban_a_bedrock_name(tag: str, banned_as: str) -> None:
+    # The Kelvin sign and the long s fold to k and s under Unicode case folding, but not under ASCII.
+    text = f"There are 1 ban(s):.{banned_as} was banned by Server: Banned by an operator."
+    state = server_state(handler=ban_list_reply(text))
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity(tag), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r2", "allowed", None)]
 
 
 async def test_a_hold_is_applied_against_a_server_that_rejects_pipelined_packets() -> None:

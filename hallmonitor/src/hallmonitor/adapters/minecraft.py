@@ -96,11 +96,15 @@ SEPARATOR_PREFIXES = frozenset({".", "*"})
 def _before_name(prefix: str, bedrock: bool) -> str:
     """The lookbehind that must hold just before a listed name's first character for a ban entry to count. A name
     character before it never counts. With a `.` or `*` prefix, a Java name counts only when the character before it is
-    not a name character and not the prefix, or when the prefix itself follows a name character (`operator.Tim`). So a
-    Bedrock ban on `.Tim` (`operator..Tim`, `ban(s):.Tim`, ` .Tim`) never bans the Java name `Tim`."""
+    not a name character and not the prefix, or when the prefix follows a name character (`operator.Tim`). A Bedrock
+    name starts with the prefix, so it counts only at the start of the reply, after whitespace or `:`, or when the
+    prefix follows a name character (`operator..Tim`). So a Java ban's reason that ends in `).` never bans Bedrock."""
     if prefix in SEPARATOR_PREFIXES and not bedrock:
         sep = re.escape(prefix)
         return rf"(?:(?<![A-Za-z0-9_{sep}])|(?<=[A-Za-z0-9_]{sep}))"
+    if prefix in SEPARATOR_PREFIXES:
+        sep = re.escape(prefix)
+        return rf"(?:^|(?<=[\s:])|(?<=[A-Za-z0-9_]{sep}))"
     return r"(?<![A-Za-z0-9_])"
 
 
@@ -111,7 +115,7 @@ def _is_banned(entry: _Entry, prefix: str, ban_text: str) -> bool:
     word, so a name that appears only as the banner or in the reason is not the banned player. The Java and Bedrock
     rules differ only for a `.` or `*` prefix, see _before_name."""
     pattern = _before_name(prefix, entry.bedrock) + re.escape(entry.listed) + r" was banned by \S+: "
-    return re.search(pattern, ban_text, re.IGNORECASE) is not None
+    return re.search(pattern, ban_text, re.IGNORECASE | re.ASCII) is not None
 
 
 def _listed_state(entries: Sequence[_Entry], listed_lower: set[str]) -> ListState:
