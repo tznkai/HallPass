@@ -123,8 +123,8 @@ true for what the adapter does.
   guard.
 
 The existing adapters show the patterns: `minecraft.py` (RCON whitelist), `palworld.py` (REST bans with a ban file
-read back), `valheim.py` (a permitted list edited through `pterodactyl.py`), `source_rcon.py` (RCON bans) and
-`fluxer.py` (an HTTP admin API that places no bans and keeps one subject's failure to that subject inside `observe`).
+read back), `valheim.py` (a permitted list edited through `pterodactyl.py`), `source_rcon.py` (RCON bans),
+`source_panel.py` (console bans through Pterodactyl, with the ban file read back) and `fluxer.py` (an HTTP admin API that places no bans and keeps one subject's failure to that subject inside `observe`).
 
 ## Publication
 

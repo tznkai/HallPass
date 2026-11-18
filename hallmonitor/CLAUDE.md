@@ -45,8 +45,8 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 ## Adapters
 
 - `src/hallmonitor/adapters/registry.py` is the one adapter-name-to-plugin map (`manual`, `fluxer`, `minecraft`,
-  `palworld`, `valheim`, `source_rcon`). Adding an adapter is one module plus one line there. A plugin returns None
-  when its service is unconfigured, and its subjects report `no_adapter`.
+  `palworld`, `valheim`, `source_rcon`, `source_panel`). Adding an adapter is one module plus one line there. A plugin
+  returns None when its service is unconfigured, and its subjects report `no_adapter`.
 - The protocol is `adapters/base.py`: `observe`, `apply`, `unmanaged_count`, observed states `allowed`, `suspended`,
   `unsupported`, `banned_external`, `error`. The loop never applies to `unsupported`, `banned_external` or `error`.
 - A failure with a service-wide reason (`auth`, `timeout`, `unreachable`) stops that service's remaining applies; any
@@ -98,7 +98,8 @@ code updates `REVIEW.md` in the same change.
 
 Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run
 only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
-ids. Fluxer, Palworld, Valheim and the Pterodactyl permissions are recorded. The Minecraft section lists the adapter's
-assumptions as pending, Abiotic Factor is manual for now (adapter deferred), and The Ship section is still empty.
-Until a service's check is recorded, that adapter's framing and parsing are unconfirmed. Writing a file through
-Pterodactyl needs `file.create`, not `file.update`.
+ids. Fluxer, Palworld, Valheim, the Pterodactyl permissions and The Ship (`source_panel`, checked 2026-11-18) are
+recorded. The Minecraft section lists the adapter's assumptions as pending, and Abiotic Factor is manual for now
+(adapter deferred). The Ship's 204 check for the subuser's console route is still pending. Until a service's check is
+recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
+not `file.update`.

@@ -88,3 +88,14 @@ The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the
 - `src/hallmonitor/pterodactyl.py:45` `if not 200 <= status < 300:` — any other non-2xx status is `http`, so an error body is never read as a file's text
 - `src/hallmonitor/pterodactyl.py:78` `raise PteroError("unreachable") from None` — a transport failure is `unreachable`, the service-wide reason that stops the service's remaining applies
 - `src/hallmonitor/pterodactyl.py:43` `if offline_is_unreachable and status in COMMAND_UNREACHABLE_STATUSES:` — a console command against an offline server (409 or 502) is `unreachable`, so the service's remaining applies stop, and no other route maps those statuses this way
+
+## Source panel (The Ship)
+
+- `src/hallmonitor/adapters/source_panel.py:48` `BAN_LINE = re.compile(` — the only form of a ban line: `banid 0` and a Source ID, once stripped, so a timed, commented or junk line is never a ban
+- `src/hallmonitor/adapters/source_panel.py:105` `failure = identity_error(subject, self._universe)` — the identity gate in observe: a malformed steam_id is `bad_identity` before any file line is compared
+- `src/hallmonitor/adapters/source_panel.py:160` `failure = identity_error(subject, self._universe)` — the identity gate in apply: nothing is recorded and no console command is built from a malformed id
+- `src/hallmonitor/adapters/source_panel.py:114` `return Observed("suspended") if record is not None else Observed("banned_external")` — a listed Source ban without an own record is `banned_external`, so the reconcile loop never applies to it
+- `src/hallmonitor/adapters/source_panel.py:129` `if sid in await self._listed():` — the re-read before a Source ban: a moderator's ban that appeared after observe is never taken over
+- `src/hallmonitor/adapters/source_panel.py:133` `await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))` — the record is placed before the first console command, so a ban the adapter sends is always recorded as ours
+- `src/hallmonitor/adapters/source_panel.py:147` `if not await self._owned(steam_id):` — the never-lift rule: a restore sends no `removeid` and no `writeid` unless hallmonitor recorded the ban
+- `src/hallmonitor/adapters/source_panel.py:117` `if own.within_grace(record[1], now, self._grace):` — the file-lag window: an own record the file does not show yet is `suspended` inside the grace window, and forgotten after it

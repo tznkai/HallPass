@@ -159,6 +159,26 @@ Verdict: automated (permitted list through Pterodactyl, live reload). Checked on
 
 ## The Ship
 
+Verdict: automated (console commands through Pterodactyl, ban file read back). Checked on 2026-11-18 on the test server,
+with crossplay off and one test account. Ids are placeholders such as `STEAM_0:<y>:<z>`, and the game directory is
+`<game-dir>`.
+
+- **Ids.** `status` shows each player as `STEAM_0:<y>:<z>` (Steam-validated), so the universe digit is 0.
+- **Permanent bans.** `banid 0 STEAM_0:<y>:<z>` places a permanent ban, and `listid` shows it as `permanent`. A
+  non-zero duration is a timed ban, which `writeid` does not save, so the adapter sends none.
+- **Kick.** `banid 0 STEAM_0:<y>:<z> kick` does not kick a player given a Steam id. `kickid STEAM_0:<y>:<z>` does, so a
+  suspension sends `banid`, `kickid` and `writeid` in that order.
+- **Ban file.** `writeid` writes `<game-dir>/cfg/banned_user.cfg`, relative to the server root, with one
+  `banid 0 STEAM_0:<y>:<z>` line per ban and nothing else. Only `writeid` writes it.
+- **Refused on reconnect.** A banned player who reconnects is refused with a ban message. `removeid STEAM_0:<y>:<z>`
+  followed by `writeid` lifts the ban and removes its line.
+- **Startup.** The server loads the file at startup only if `server.cfg` has `exec banned_user.cfg`. Without that line,
+  after a restart the file still held the ban, `listid` was empty and the ban was not enforced. The test server's
+  `server.cfg` has the line. Hallmonitor sends no `exec` of its own, so the operator must add it.
+- **Pending.** Whether `POST /api/client/servers/<id>/command` answers 204 for the hallmonitor subuser (with
+  `control.console`, `file.read` and `file.read-content`, and without `file.create`) is not yet checked live. Until it
+  is, a non-204 answer shows as an `http` error and no ban is recorded as ours.
+
 ## Abiotic Factor
 
 Verdict: manual for now (adapter deferred). Researched on 2026-11-18. Holds are applied by hand in the in-game admin
