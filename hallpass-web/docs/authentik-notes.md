@@ -147,3 +147,6 @@ item below, so each stays pending until a live run confirms it. Record the resul
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
   User Logout stage. Pending: with the provider on `default-invalidation-flow` (or another flow with a User Logout
   stage), a sign-out at hallpass ends the Authentik session, and the next visit asks for sign-in.
+- **Retry after a 400.** Pending: whether Authentik retries a back-channel delivery that got a 400 from the Logout URI.
+  Research says it does not, and the README says delivery is not retried. Pending: make hallpass answer 400 to one
+  logout token and confirm that no second delivery of that token arrives.

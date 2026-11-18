@@ -44,7 +44,8 @@ these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
   browser. Delivery is queued and is not retried, so a token that fails to arrive is never sent again.
 
 The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
-and 400 for anything else, with no body.
+and 400 for anything else, with no body. If the provider's keys cannot be fetched and none are cached, logout tokens
+are refused for up to 60 seconds, and the sessions they name end at max age or at sign-out instead.
 
 ## Caddy
 

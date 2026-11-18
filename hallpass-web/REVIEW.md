@@ -17,24 +17,24 @@ as the code they cite.
 
 ## Enrollment binding
 
-- `src/hallpass/auth.py:278` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
+- `src/hallpass/auth.py:281` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
 - `src/hallpass/registry.py:202` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
-- `src/hallpass/auth.py:174` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
-- `src/hallpass/auth.py:178` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
-- `src/hallpass/auth.py:200` `async def require_csrf` — every POST checks the form token and the Origin header
+- `src/hallpass/auth.py:177` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
+- `src/hallpass/auth.py:181` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
+- `src/hallpass/auth.py:203` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:42` `def safe_next` — the only check on where a sign-in returns the person to, so it
   must refuse off-site URLs
-- `src/hallpass/auth.py:311` `revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid` — the check
+- `src/hallpass/auth.py:314` `revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid` — the check
   every page makes: a session whose sid was revoked, or whose person was revoked after it started, is ended
   here and the person is sent to sign-in
-- `src/hallpass/auth.py:220` `request.session["id_token_handle"] = handle` — the cookie holds only the handle of the ID token kept on the server, never the token, so it carries no name, username or groups
+- `src/hallpass/auth.py:223` `request.session["id_token_handle"] = handle` — the cookie holds only the handle of the ID token kept on the server, never the token, so it carries no name, username or groups
 
 ## Admin check
 
-- `src/hallpass/auth.py:339` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:342` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 
@@ -48,7 +48,7 @@ as the code they cite.
 
 - `src/hallpass/terms.py:100` `def services_blocked(state: TermsState) -> bool:` — the rule for when a person may use services: no version, no acceptance, or an unaccepted blocking version
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
-- `src/hallpass/auth.py:327` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
+- `src/hallpass/auth.py:330` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
 - `src/hallpass/terms.py:117` `return not any(` — a child is covered only by a linked, unlocked parent who passes the parent rule; a child's own acceptance is never read for the gate
 - `src/hallpass/web/routes_auth.py:104` `if person.account_type != "child" and not state.accepted_current:` — the sign-
   in redirect to /terms: a child is never sent there, and an adult or parent keeps the rule
@@ -152,5 +152,9 @@ as the code they cite.
 - `src/hallpass/web/routes_auth.py:144` `return logout.end_session_url(` — the sign-out address is built only from
   discovery, the stored ID token and the public URL, never from the request
 - `src/hallpass/revocation.py:63` `return started_at is None or row[0] > started_at` — a subject-wide revocation ends only sessions that started before it; a session with no start time is ended by session_ended, which every request uses first
-- `src/hallpass/auth.py:146` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make hallpass fetch the provider's keys more than once per window
+- `src/hallpass/auth.py:149` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make hallpass fetch the provider's keys more than once per window
+  Accepted risk, agreed by the user on 2026-11-18: after a failed key fetch with no keys cached, every logout token
+  is refused for up to FORCED_REFRESH_COOLDOWN_SECONDS (60 s). The sessions those tokens would have ended then end at
+  max age or at sign-out instead. The trade is a bounded number of outbound key fetches against a missed revocation
+  during that window.
 - `src/hallpass/revocation.py:40` `ended_at = min(issued_at, now)` — a subject-wide revocation is stamped with the logout token's issue time, never later than now, so a late or replayed delivery cannot end sessions started after the logout event

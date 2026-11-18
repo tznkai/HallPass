@@ -128,7 +128,9 @@ class AuthlibOidc:
         """The discovery document's issuer and end-session endpoint and, when keys is set, the provider's keys.
         Sign-out asks for no keys, so a JWKS failure cannot stop it. Every key fetch, forced or not, is at least
         FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed fetches included. Inside that window the cached keys
-        are returned, and with none cached the call fails. A failure is a ProviderError, and its text is dropped."""
+        are returned. With none cached, the call raises ProviderError("provider_unavailable") until the window has
+        passed, so every logout token is refused meanwhile, and the sessions those tokens would have ended end at max
+        age or at sign-out instead. The error's text is dropped."""
         try:
             metadata = await self._client.load_server_metadata()
             jwks = await self._fetch_keys(refresh=refresh_keys) if keys else None
@@ -139,8 +141,9 @@ class AuthlibOidc:
 
     async def _fetch_keys(self, *, refresh: bool) -> Mapping[str, Any]:
         """The provider's keys. A read that needs the network goes out only when the cooldown has passed since the last
-        fetch attempt, so there is at most one outbound fetch per window, and an empty cache does not lift that. The
-        lock makes a concurrent caller wait for the fetch in flight, then read the keys it stored."""
+        fetch attempt, so there is at most one outbound fetch per window, and an empty cache does not lift that. With no
+        keys cached, a read inside the window raises provider_unavailable, so the logout token is refused for up to the
+        window. The lock makes a concurrent caller wait for the fetch in flight, then read the keys it stored."""
         async with self._keys_lock:
             now = self._monotonic()
             cooled = self._last_fetch is None or now - self._last_fetch >= FORCED_REFRESH_COOLDOWN_SECONDS

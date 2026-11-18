@@ -310,11 +310,19 @@ def _with_raw_header(env: Env, header_json: str) -> str:
     return f"{header}.{payload}.{signature}"
 
 
+def _with_empty_payload(env: Env) -> str:
+    """A valid RS256 header with a kid and a valid signature, but no payload between the dots."""
+    header, _, signature = logout_token(env.clock.now()).split(".")
+    return f"{header}..{signature}"
+
+
 @pytest.mark.parametrize("build", [
     pytest.param(lambda env: "not-a-jwt", id="not-a-jws"),
     pytest.param(lambda env: "aaa.bbb", id="two-segments"),
     pytest.param(lambda env: "aaa..bbb", id="empty-segment"),
     pytest.param(lambda env: "bm90LWpzb24.e30.c2ln", id="header-not-json"),
+    pytest.param(lambda env: _with_raw_header(env, "[]"), id="header-is-json-array"),
+    pytest.param(_with_empty_payload, id="empty-payload"),
     pytest.param(lambda env: jwt.encode({"alg": "HS256", "kid": "test-key"}, _claims_now(env),
                                         OctKey.generate_key(256)), id="hs256"),
     pytest.param(lambda env: jwt.encode({"alg": "RS256"}, _claims_now(env), signing_key()), id="no-kid"),
