@@ -72,14 +72,14 @@ def _is_linked(conn: sqlite3.Connection, child_id: int, parent_id: int) -> bool:
 
 
 def _counted_grant_rows(conn: sqlite3.Connection, child_id: int, columns: str) -> list[tuple]:
-    """The one query for grants that count: a grant counts only while its parent is still linked to this child. An
-    unlinked parent's grant is kept as history but counts for nothing. Whether a locked parent's grant counts is still
-    pending a user decision, so this query does not look at the parent's status."""
+    """The one query for grants that count. A grant counts only while its parent is still linked to this child, and
+    only while that parent is not locked. An unlinked or locked parent's grant is kept as history but counts for
+    nothing, and it counts again once the parent is unlinked or unlocked."""
     return conn.execute(
         f"SELECT {columns} FROM parent_grant g "
         "JOIN parent_link l ON l.child_id = g.child_id AND l.parent_id = g.parent_id "
         "JOIN person p ON p.id = g.parent_id JOIN terms_version t ON t.id = g.terms_version_id "
-        "WHERE g.child_id = ? ORDER BY g.id",
+        "WHERE g.child_id = ? AND p.status != 'locked' ORDER BY g.id",
         (child_id,),
     ).fetchall()
 
@@ -151,8 +151,49 @@ def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int, now: datet
     return result
 
 
+def _status_for_account_type(status: str, *, bound: bool, to_child: bool) -> str:
+    """The status a person takes when moved between child and another account type. An active person who becomes a
+    child needs a parent's grant: awaiting_grant when enrolled, invited when not. An awaiting child who becomes an adult
+    is active. Every other status is kept."""
+    if to_child:
+        if status == "active":
+            return "awaiting_grant" if bound else "invited"
+        return status
+    return "active" if status == "awaiting_grant" else status
+
+
+def change_account_type(conn: sqlite3.Connection, person_id: int, *, old_type: str, new_type: str, actor_id: int,
+                        now: datetime) -> None:
+    """Moves the status when an account type changes between child and another type. The admin route calls it in the
+    same transaction as the update. A locked person keeps `locked` and has its prior status moved the same way, so the
+    unlock lands on the status they would have. Writes one `status_changed` row when the status or the prior status
+    moves. A change between adult and parent moves nothing."""
+    to_child = new_type == "child"
+    if to_child == (old_type == "child"):
+        return
+    person = registry.get_person(conn, person_id)
+    if person is None:
+        raise registry.NoSuchPerson()
+    bound = person.authentik_uuid is not None
+    if person.status == "locked":
+        prior_after: str | None = _status_for_account_type(person.prior_status or "invited", bound=bound,
+                                                           to_child=to_child)
+        status_after = "locked"
+        if prior_after != person.prior_status:
+            conn.execute("UPDATE person SET prior_status = ? WHERE id = ?", (prior_after, person_id))
+    else:
+        status_after = _status_for_account_type(person.status, bound=bound, to_child=to_child)
+        prior_after = None
+        if status_after != person.status:
+            _set_status(conn, person_id, status_after)
+    if status_after == person.status and prior_after == person.prior_status:
+        return
+    registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=actor_id, target_person_id=person_id,
+                          action="status_changed", detail={"prior_status": prior_after, "status": status_after})
+
+
 def grants_for(conn: sqlite3.Connection, child_id: int) -> list[dict]:
     """Each counted grant for the child, oldest first: parent id, the parent's display name, the time and the version.
-    A grant by a parent who is no longer linked is left out, as it counts for nothing."""
+    A grant by a parent who is no longer linked, or who is locked, is left out, as it counts for nothing."""
     rows = _counted_grant_rows(conn, child_id, "g.parent_id, p.display_name, g.granted_at, t.version")
     return [{"parent_id": row[0], "display_name": row[1], "granted_at": row[2], "version": row[3]} for row in rows]

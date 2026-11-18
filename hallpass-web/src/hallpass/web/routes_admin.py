@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, desired, holds, registry, services, terms, text, tokens
+from hallpass import authentik_sync, desired, grants, holds, registry, services, terms, text, tokens
 from hallpass.auth import require_admin, require_admin_any_terms, require_csrf
 from hallpass.authentik import AuthentikError
 from hallpass.holds import HoldRefused
@@ -250,9 +250,13 @@ async def update_person(request: Request, person_id: int, admin: Admin,
     now = deps.clock()
 
     def change(conn) -> None:
+        before = registry.get_person(conn, person_id)
         registry.update_person(conn, person_id, display_name=display_name, account_type=account_type, email=email,
                                phone=phone, fluxer_email_override=fluxer_email_override)
         _log(conn, now=now, admin=admin, action="person_updated", target=person_id)
+        if before is not None and before.account_type != account_type:
+            grants.change_account_type(conn, person_id, old_type=before.account_type, new_type=account_type,
+                                       actor_id=admin.id, now=now)
 
     try:
         await deps.db.run(change)

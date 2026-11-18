@@ -500,3 +500,219 @@ async def test_a_grant_on_a_bound_invited_child_makes_it_active(db: Database, fa
 
     assert child.status == "active"
     assert len(await db.run(lambda c: grants.grants_for(c, family.child.id))) == (2 if prior_grant else 1)
+
+
+# A locked parent's grant does not count (Phase 8, Task 2) ---------------------------------------------------
+
+@dataclass
+class TwoParents:
+    mum: registry.Person
+    dad: registry.Person
+    child: registry.Person
+
+
+@pytest.fixture
+async def two_parents(db: Database) -> TwoParents:
+    """Two active parents who accepted v1, both linked to a child who has not signed in (invited)."""
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    mum = await accept_terms(db, (await make(db, display_name="Mum", account_type="parent")).id, version.id)
+    dad = await accept_terms(db, (await make(db, display_name="Dad", account_type="parent")).id, version.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    await link(db, child.id, mum.id)
+    await link(db, child.id, dad.id)
+    return TwoParents(mum=mum, dad=dad, child=child)
+
+
+async def lock(db: Database, person_id: int, locked: bool) -> None:
+    await db.run(lambda c: registry.set_locked(c, person_id, locked))
+
+
+async def test_a_locked_parents_grant_does_not_settle_the_child_to_active(db: Database,
+                                                                         two_parents: TwoParents) -> None:
+    await grant(db, two_parents.child.id, two_parents.mum.id)
+    await lock(db, two_parents.mum.id, True)
+
+    settled = await sign_in_settle(db, two_parents.child.id)
+
+    assert settled.status == "awaiting_grant"
+
+
+async def test_unlocking_the_parent_makes_their_grant_count_again_at_sign_in(db: Database,
+                                                                             two_parents: TwoParents) -> None:
+    await grant(db, two_parents.child.id, two_parents.mum.id)
+    await lock(db, two_parents.mum.id, True)
+    await lock(db, two_parents.mum.id, False)
+
+    settled = await sign_in_settle(db, two_parents.child.id)
+
+    assert settled.status == "active"
+
+
+async def test_a_locked_parents_grant_does_not_block_another_linked_parents_approval(db: Database,
+                                                                                    two_parents: TwoParents) -> None:
+    await grant(db, two_parents.child.id, two_parents.mum.id)
+    await lock(db, two_parents.mum.id, True)
+
+    granted = await grant(db, two_parents.child.id, two_parents.dad.id)
+
+    assert granted.status == "invited"
+    assert await db.run(lambda c: grants.grants_for(c, two_parents.child.id)) == [
+        {"parent_id": two_parents.dad.id, "display_name": "Dad", "granted_at": NOW_TEXT, "version": 1}]
+
+
+async def test_unlocking_the_granting_parent_blocks_a_second_approval_again(db: Database,
+                                                                           two_parents: TwoParents) -> None:
+    await grant(db, two_parents.child.id, two_parents.mum.id)
+    await lock(db, two_parents.mum.id, True)
+    await lock(db, two_parents.mum.id, False)
+
+    reason = await refusal_reason(db, two_parents.child.id, two_parents.dad.id)
+
+    assert reason == "already_granted"
+
+
+async def test_a_locked_parent_leaves_an_already_active_child_active(db: Database, family: Family) -> None:
+    await grant(db, family.child.id, family.parent.id)
+
+    await lock(db, family.parent.id, True)
+
+    assert await status_of(db, family.child.id) == "active"
+
+
+# An admin changes a person between child and another account type (Phase 8, Task 2) -----------------------
+
+@pytest.fixture
+async def published(db: Database) -> tuple[registry.Person, terms.TermsVersion]:
+    publisher = await make(db, display_name="Publisher")
+    return publisher, await publish(db, publisher.id)
+
+
+async def active_adult(db: Database, version: terms.TermsVersion, *, bound: bool) -> registry.Person:
+    adult = await accept_terms(db, (await make(db, display_name="Ann")).id, version.id)
+    if bound:
+        await db.run(lambda c: registry.bind_identity(c, adult.id, uuid=f"uuid-{adult.id}", authentik_pk=8,
+                                                      username="ann"))
+    person = await db.run(lambda c: registry.get_person(c, adult.id))
+    assert person is not None
+    return person
+
+
+async def retype(db: Database, person_id: int, new_type: str, actor_id: int) -> registry.Person:
+    """The admin route's change, in one transaction: the account type is updated, then the status moves."""
+    def change(conn):
+        before = registry.get_person(conn, person_id)
+        assert before is not None
+        registry.update_person(conn, person_id, display_name=before.display_name, account_type=new_type,
+                               email=before.email, phone=before.phone,
+                               fluxer_email_override=before.fluxer_email_override)
+        grants.change_account_type(conn, person_id, old_type=before.account_type, new_type=new_type,
+                                   actor_id=actor_id, now=NOW)
+        person = registry.get_person(conn, person_id)
+        assert person is not None
+        return person
+    return await db.run(change)
+
+
+async def status_changes(db: Database, person_id: int) -> list[tuple]:
+    rows = await db.run(lambda c: c.execute(
+        "SELECT actor_kind, actor_person_id, action, detail FROM decision_log "
+        "WHERE target_person_id = ? AND action = 'status_changed' ORDER BY id", (person_id,)).fetchall())
+    return [(kind, actor, action, json.loads(detail)) for kind, actor, action, detail in rows]
+
+
+async def test_an_active_bound_adult_made_a_child_is_awaiting_a_grant_and_logged(db: Database,
+                                                                                 published) -> None:
+    admin, version = published
+    ann = await active_adult(db, version, bound=True)
+
+    changed = await retype(db, ann.id, "child", admin.id)
+
+    assert changed.status == "awaiting_grant"
+    assert await status_changes(db, ann.id) == [
+        ("admin", admin.id, "status_changed", {"prior_status": None, "status": "awaiting_grant"})]
+
+
+async def test_an_active_unbound_adult_made_a_child_is_invited(db: Database, published) -> None:
+    admin, version = published
+    ann = await active_adult(db, version, bound=False)
+
+    changed = await retype(db, ann.id, "child", admin.id)
+
+    assert changed.status == "invited"
+
+
+async def test_an_invited_adult_made_a_child_stays_invited_with_no_row(db: Database, published) -> None:
+    admin, _ = published
+    ann = await make(db, display_name="Ann")
+
+    changed = await retype(db, ann.id, "child", admin.id)
+
+    assert changed.status == "invited"
+    assert await status_changes(db, ann.id) == []
+
+
+async def test_changing_between_adult_and_parent_moves_nothing(db: Database, published) -> None:
+    admin, version = published
+    ann = await active_adult(db, version, bound=True)
+
+    changed = await retype(db, ann.id, "parent", admin.id)
+
+    assert changed.status == "active"
+    assert await status_changes(db, ann.id) == []
+
+
+@pytest.mark.parametrize(("bound", "waiting"), [(True, "awaiting_grant"), (False, "invited")],
+                         ids=["bound", "unbound"])
+async def test_a_locked_adult_made_a_child_stays_locked_and_unlocks_to_the_waiting_status(
+        db: Database, published, bound: bool, waiting: str) -> None:
+    admin, version = published
+    ann = await active_adult(db, version, bound=bound)
+    await lock(db, ann.id, True)
+
+    changed = await retype(db, ann.id, "child", admin.id)
+    assert changed.status == "locked"
+    assert changed.prior_status == waiting
+    assert await status_changes(db, ann.id) == [
+        ("admin", admin.id, "status_changed", {"prior_status": waiting, "status": "locked"})]
+
+    await lock(db, ann.id, False)
+    assert await status_of(db, ann.id) == waiting
+
+
+async def test_a_parents_grant_after_the_change_makes_the_child_active(db: Database, published) -> None:
+    admin, version = published
+    ann = await active_adult(db, version, bound=True)
+    parent = await accept_terms(db, (await make(db, display_name="Pam", account_type="parent")).id, version.id)
+    await retype(db, ann.id, "child", admin.id)
+    await link(db, ann.id, parent.id)
+
+    granted = await grant(db, ann.id, parent.id)
+
+    assert granted.status == "active"
+
+
+async def test_an_awaiting_child_made_an_adult_becomes_active_and_logged(db: Database, published) -> None:
+    admin, _ = published
+    kit = await make(db, display_name="Kit", account_type="child")
+    await sign_in_settle(db, kit.id)
+
+    changed = await retype(db, kit.id, "adult", admin.id)
+
+    assert changed.status == "active"
+    assert await status_changes(db, kit.id) == [
+        ("admin", admin.id, "status_changed", {"prior_status": None, "status": "active"})]
+
+
+async def test_a_locked_awaiting_child_made_an_adult_unlocks_to_active(db: Database, published) -> None:
+    admin, _ = published
+    kit = await make(db, display_name="Kit", account_type="child")
+    await sign_in_settle(db, kit.id)
+    await lock(db, kit.id, True)
+
+    changed = await retype(db, kit.id, "adult", admin.id)
+    assert changed.status == "locked"
+    assert changed.prior_status == "active"
+
+    await lock(db, kit.id, False)
+    assert await status_of(db, kit.id) == "active"

@@ -308,3 +308,50 @@ async def test_a_bound_invited_child_with_a_grant_can_be_approved_again_and_beco
 
     assert done.status_code == 303
     assert (await person_row(env, child)).status == "active"
+
+
+async def test_a_locked_parent_does_not_block_another_linked_parents_approval_on_the_page(env: Env):
+    await admin_client(env)
+    mum = await create_person(env, "Mum", "parent")
+    dad = await create_person(env, "Dad", "parent")
+    child = await create_person(env, "Kid", "child")
+    for parent in (mum, dad):
+        assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    mum_browser = await enrol_and_sign_in(env, mum, "mum1")
+    dad_browser = await enrol_and_sign_in(env, dad, "dad1")
+    assert (await accept_current(env, mum_browser)).status_code == 303
+    assert (await accept_current(env, dad_browser)).status_code == 303
+    token = (await form(env, "/children", client=mum_browser))["csrf"]
+    assert (await mum_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+
+    assert (await post(env, f"/admin/people/{mum}/lock")).status_code == 303
+    waiting = (await dad_browser.get("/children")).text
+    assert "Approve" in waiting
+    token = (await form(env, "/children", client=dad_browser))["csrf"]
+    done = await dad_browser.post(f"/children/{child}/grant", data={"csrf": token})
+
+    assert done.status_code == 303
+    assert (await person_row(env, child)).status == "invited"
+
+
+async def test_an_admin_turns_an_active_adult_into_a_child_who_waits_for_a_parents_grant(env: Env):
+    await admin_client(env)
+    ana = await create_person(env, "Ana", "adult")
+    ana_browser = await enrol_and_sign_in(env, ana, "ana1")
+    assert (await accept_current(env, ana_browser)).status_code == 303
+    mum = await create_person(env, "Mum", "parent")
+    mum_browser = await enrol_and_sign_in(env, mum, "mum1")
+    assert (await accept_current(env, mum_browser)).status_code == 303
+
+    changed = await post(env, f"/admin/people/{ana}", display_name="Ana", account_type="child", email="", phone="",
+                         fluxer_email_override="")
+
+    assert changed.status_code == 303
+    assert (await person_row(env, ana)).status == "awaiting_grant"
+    logged = await env.db.run(lambda c: c.execute(
+        "SELECT COUNT(*) FROM decision_log WHERE action = 'status_changed' AND target_person_id = ?",
+        (ana,)).fetchone()[0])
+    assert logged == 1
+    assert (await post(env, f"/admin/people/{ana}/parents", parent_id=mum)).status_code == 303
+    waiting = (await mum_browser.get("/children")).text
+    assert "Ana" in waiting and "Approve" in waiting

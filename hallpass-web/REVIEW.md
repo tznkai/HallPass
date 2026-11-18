@@ -55,6 +55,9 @@ as the code they cite.
 - `src/hallpass/grants.py:52` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
 - `src/hallpass/grants.py:143` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
 - `src/hallpass/grants.py:121` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
+- `src/hallpass/grants.py:82` `AND p.status != 'locked'` — a grant by a locked parent counts for nothing, so it neither settles a child at sign-in nor blocks another parent's approval
+- `src/hallpass/grants.py:172` `if to_child == (old_type == "child"):` — a change between adult and parent moves no status; an active person made a child waits for a parent's grant, and an awaiting child made an adult becomes active
+- `src/hallpass/web/routes_admin.py:258` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
 
 ## Entitlement resolution
 
@@ -89,7 +92,7 @@ as the code they cite.
 - `src/hallpass/holds.py:329` `raise HoldRefused("strict_not_yours"` — the strict refusal: a parent with no hold of their own cannot lift while another parent's hold exists, and the refusal names those parents
 - `src/hallpass/holds.py:332` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
 - `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
-- `src/hallpass/web/routes_admin.py:948` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/web/routes_admin.py:952` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
 - `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 
 ## Outbox
