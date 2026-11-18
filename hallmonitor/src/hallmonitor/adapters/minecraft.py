@@ -104,7 +104,7 @@ def _before_name(prefix: str, bedrock: bool) -> str:
         return rf"(?:(?<![A-Za-z0-9_{sep}])|(?<=[A-Za-z0-9_]{sep}))"
     if prefix in SEPARATOR_PREFIXES:
         sep = re.escape(prefix)
-        return rf"(?:(?<=[\r\n])|(?<=ban\(s\):)|(?<=ban\(s\): )|(?<=[A-Za-z0-9_][.{sep}]))"
+        return rf"(?:(?<=\n)|(?<=ban\(s\):)|(?<=ban\(s\): )|(?<=[A-Za-z0-9_][.{sep}]))"
     return r"(?<![A-Za-z0-9_])"
 
 

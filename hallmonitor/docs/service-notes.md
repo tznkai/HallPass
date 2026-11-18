@@ -111,6 +111,7 @@ placeholders such as `<mc-host>`.
   (`operator..Tim`, `operator.*Tim`). A space or a reason's colon never starts a Bedrock name (`griefing .Tim`,
   `griefing:.Tim`). Under `.` or `*` the matcher has the residual misses and false matches listed in `REVIEW.md`,
   including a Java ban whose reason ends in `x.*` read as Bedrock `*Tim`, which is kept on purpose. Under `_`, a Java
+  ban after a reason ending in a non-name character then `_` reads as a ban on Bedrock `Tim` (`bye!_Tim`), a Java
   name starting with `_` is the same listed name as Bedrock `Tim`, and under an empty prefix a Java name and its Bedrock
   twin share one listed name; a ban on either bans both.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses

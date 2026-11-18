@@ -56,8 +56,8 @@ banned, since moderators already have the console.
 
 With a `.` or `*` prefix, a Java name is not banned by its Bedrock twin's entry (`..Tim`, `ban(s):.Tim`, ` .Tim`). A
 Bedrock name is banned only by an entry that begins it after a line break, after the `ban(s):` header (with or without a
-space), or after a letter, digit or `_` and then `.` or the prefix (`operator..Tim`, `operator.*Tim`). A colon or a space
-that ends a reason is neither a line break nor the header, so it never starts a Bedrock entry (`griefing:.Tim`,
+space), or after a letter, digit or `_` and then `.` or the prefix (`operator..Tim`, `operator.*Tim`). A colon or a
+space that ends a reason is neither a line break nor the header, so it never starts a Bedrock entry (`griefing:.Tim`,
 `griefing .Tim`). Both rules are ASCII-only, so a look-alike letter (the Kelvin sign, the long s) never matches.
 
 The residual cases are listed by prefix and direction. A text can be read either way (`x.Tim` is a Java ban whose reason
@@ -65,11 +65,13 @@ ends in `x.`, or a Bedrock ban whose reason ends in `x`), so each is a trade-off
 
 Under `.` or `*`, these false matches are accepted, and a hold is then not applied:
 - a Bedrock ban read as Java after a reason ending in a letter, digit or `_` (`griefing.Tim` bans Java `Tim`);
-- a Java ban read as Bedrock after a letter, digit or `_` and then `..`, `.*` or `**` (`griefing..Tim`, `x.*Tim`,
-  `x**Tim`). These cannot be told apart from the default-reason forms. Closing `x.*Tim` would also miss the
-  default-reason Bedrock ban `operator.*Tim`, so it is accepted.
+- a Java ban read as Bedrock after a letter, digit or `_` and then `..` under `.`, or `.*` or `**` under `*`
+  (`griefing..Tim`, `x.*Tim`, `x**Tim`), or after a reason that a moderator ends with `ban(s):` (with or without a
+  space) and then the prefix (`ban(s):.Tim`). These cannot be told apart from the default-reason forms. Closing `x.*Tim`
+  would also miss the default-reason Bedrock ban `operator.*Tim`, so it is accepted.
 
-Under `.` or `*`, these misses are accepted, since the ban still stands and the player shows `allowed`, which is harmless:
+Under `.` or `*`, these misses are accepted, since the ban still stands and the player shows `allowed`, which is
+harmless:
 - a Java ban after a reason whose last character is the prefix and whose character before it is not a letter, digit or
   `_` (`(2nd).Tim`, `..Tim`);
 - a Bedrock ban after a reason ending in anything other than a line break, the `ban(s):` header, or a letter, digit or
@@ -112,7 +114,9 @@ is accepted for `source_panel`: if `writeid` keeps failing for the whole window 
 record is forgotten while the console may still hold the ban in memory, so a later restore sends no `removeid`
 and the ban lasts until the server restarts (the file never had it, so the restart clears it).
 
-The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read just before it. A moderator's edit saved between that read and that write would be overwritten. The window holds one read and one write with only a local database call between them, and the race is accepted on that basis.
+The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read just
+before it. A moderator's edit saved between that read and that write would be overwritten. The window holds one read and
+one write with only a local database call between them, and the race is accepted on that basis.
 
 ## Valheim permitted list
 
