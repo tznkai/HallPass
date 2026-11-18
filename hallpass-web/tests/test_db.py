@@ -187,7 +187,7 @@ async def test_identity_case_migration_on_a_colliding_database_fails_and_keeps_e
     _make_db_before_identity_case(path)
     _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "playerone")])
 
-    with pytest.raises(sqlite3.Error):
+    with pytest.raises(sqlite3.IntegrityError, match="external_identity_case"):
         Database.open(path)
 
     with contextlib.closing(sqlite3.connect(path)) as c:
