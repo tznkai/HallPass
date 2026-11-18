@@ -191,7 +191,6 @@ async def test_idp_failure_shows_the_message_page_not_a_500(env: Env, caplog, pa
     assert home.status_code == 303 and home.headers["location"].startswith("/login")
 
 
-
 async def test_a_child_locked_between_the_check_and_the_settle_is_refused_without_a_session(env: Env,
                                                                                          monkeypatch):
     await publish_terms(env)

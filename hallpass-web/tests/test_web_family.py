@@ -249,9 +249,9 @@ async def test_a_second_approval_of_an_invited_child_is_refused_as_already_grant
 
 # A grant counts only while its parent is linked: the administrator swaps one parent for another ---------------------
 
-async def _mum_granted_then_unlinked(env: Env) -> tuple[int, int, int, httpx.AsyncClient]:
-    """Mum (linked, accepted) approves the invited child, then the administrator unlinks Mum. Returns the ids, Dad's
-    browser is not made yet; the caller links Dad."""
+async def _mum_granted_then_unlinked(env: Env) -> tuple[int, int, int]:
+    """Mum (linked, accepted) approves the invited child, then the administrator unlinks Mum. Returns the ids of Mum,
+    Dad and the child; the caller links Dad."""
     await admin_client(env)
     mum = await create_person(env, "Mum", "parent")
     dad = await create_person(env, "Dad", "parent")
@@ -262,11 +262,11 @@ async def _mum_granted_then_unlinked(env: Env) -> tuple[int, int, int, httpx.Asy
     token = (await form(env, "/children", client=mum_browser))["csrf"]
     assert (await mum_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
     assert (await post(env, f"/admin/people/{child}/parents/{mum}/remove")).status_code == 303
-    return mum, dad, child, mum_browser
+    return mum, dad, child
 
 
 async def test_a_linked_parent_can_approve_after_an_unlinked_parent_already_granted(env: Env):
-    _, dad, child, _ = await _mum_granted_then_unlinked(env)
+    _, dad, child = await _mum_granted_then_unlinked(env)
     assert (await post(env, f"/admin/people/{child}/parents", parent_id=dad)).status_code == 303
     dad_browser = await enrol_and_sign_in(env, dad, "dad1")
     assert (await accept_current(env, dad_browser)).status_code == 303
@@ -285,7 +285,7 @@ async def test_a_linked_parent_can_approve_after_an_unlinked_parent_already_gran
 
 
 async def test_an_unlinked_parents_grant_leaves_the_child_awaiting_a_grant_at_sign_in(env: Env):
-    _, _, child, _ = await _mum_granted_then_unlinked(env)
+    _, _, child = await _mum_granted_then_unlinked(env)
 
     child_browser = await enrol_and_sign_in(env, child, "kid1")
 
