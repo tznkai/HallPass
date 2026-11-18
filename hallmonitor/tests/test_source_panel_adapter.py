@@ -420,6 +420,26 @@ async def test_a_moderator_ban_is_never_lifted_by_a_restore(tmp_path: Path) -> N
     assert lab.state.files[(SERVER, BANLIST)] == f"banid 0 {OTHER_SID}\n"
 
 
+async def test_a_restore_after_the_shared_ban_is_lifted_reads_the_file_and_sends_nothing(tmp_path: Path) -> None:
+    """Two subjects share one id. The first restore lifts our ban; the second finds no record, reads the file, and
+    reports allowed with no removeid or writeid."""
+    async with lab_with(tmp_path) as lab:
+        assert await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended") == Observed("suspended")
+        assert await lab.adapter.apply(steam_subject("r1", OWN_ID, "allowed"), "allowed") == Observed("allowed")
+        sent = len(lab.state.commands)
+        assert await lab.adapter.apply(steam_subject("r2", OWN_ID, "allowed"), "allowed") == Observed("allowed")
+    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in lab.state.commands[sent:])
+    assert OWN_SID not in lab.state.files[(SERVER, BANLIST)]
+
+
+async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_sends_nothing(tmp_path: Path) -> None:
+    async with lab_with(tmp_path, OTHER_SID) as lab:
+        result = await lab.adapter.apply(steam_subject("r1", OWN_ID, "allowed"), "allowed")
+    assert result == Observed("allowed")
+    assert lab.state.commands == []
+    assert lab.state.files[(SERVER, BANLIST)] == f"banid 0 {OTHER_SID}\n"
+
+
 # Identity: a malformed or missing steam_id is refused before any command or file line --------------------------
 
 @pytest.mark.parametrize("value", ["12a", "1 2", "1\nremoveid 1", "", str(STEAM64_BASE - 2),

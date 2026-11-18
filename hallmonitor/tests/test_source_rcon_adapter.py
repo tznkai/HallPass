@@ -275,6 +275,36 @@ async def test_a_moderator_ban_on_our_subject_is_not_lifted_by_a_restore(db: Dat
     assert not any(cmd.startswith("removeid") for cmd in state.commands)
 
 
+# Restore with no own record: the console list is read again, and a lifted ban is reported allowed ---------
+
+async def test_a_restore_after_the_shared_ban_is_lifted_reads_the_list_and_sends_nothing(db: Database,
+                                                                                         http: httpx.AsyncClient) -> None:
+    """Two subjects share one id. The first restore lifts our ban; the second finds no record, reads `listid`, and
+    reports allowed with no removeid or writeid."""
+    state = server_state()
+    first = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    second = Subject("r2", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    async with rcon_server(state) as port:
+        adapter = adapter_for(db, http, port)
+        assert await adapter.apply(first, "suspended") == Observed("suspended")
+        assert await adapter.apply(first, "allowed") == Observed("allowed")
+        sent = len(state.commands)
+        assert await adapter.apply(second, "allowed") == Observed("allowed")
+    assert state.source_bans == []
+    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in state.commands[sent:])
+
+
+async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_changes_nothing(db: Database,
+                                                                                            http: httpx.AsyncClient) -> None:
+    state = server_state(source_bans=[OTHER_SID])
+    subj = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    async with rcon_server(state) as port:
+        result = await adapter_for(db, http, port).apply(subj, "allowed")
+    assert result == Observed("allowed")
+    assert state.source_bans == [OTHER_SID]
+    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in state.commands)
+
+
 # AC12.3: a server that does not confirm the ban is not_applied, and is never recorded as a suspension ----
 
 async def test_a_server_that_does_not_confirm_the_ban_is_not_applied_and_not_recorded(db: Database,

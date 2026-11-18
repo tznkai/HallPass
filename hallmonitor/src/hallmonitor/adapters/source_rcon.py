@@ -145,7 +145,11 @@ class SourceRconAdapter:
 
     async def _restore(self, steam_id: str, sid: str) -> Observed:
         if not await self._owned(steam_id):
-            return Observed("banned_external")
+            # No ban of ours to lift. Read the console list again: a listed id is a ban we did not place, and an unlisted
+            # one was lifted by an earlier restore of a subject that shares this id. Only `listid` is sent here.
+            async with self._session() as client:
+                listed = sid in await self._listed(client)
+            return Observed("banned_external") if listed else Observed("allowed")
         async with self._session() as client:
             await client.command(f"removeid {sid}")
             await client.command("writeid")

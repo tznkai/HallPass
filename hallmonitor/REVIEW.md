@@ -103,7 +103,7 @@ The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the
 
 - `src/hallmonitor/adapters/source_panel.py:48` `BAN_LINE = re.compile(` — the only form of a ban line: `banid 0` and a Source ID, once stripped, so a timed, commented or junk line is never a ban
 - `src/hallmonitor/adapters/source_panel.py:100` `failure = identity_error(subject, self._universe)` — the identity gate in observe: a malformed steam_id is `bad_identity` before any file line is compared
-- `src/hallmonitor/adapters/source_panel.py:158` `failure = identity_error(subject, self._universe)` — the identity gate in apply: nothing is recorded and no console command is built from a malformed id
+- `src/hallmonitor/adapters/source_panel.py:160` `failure = identity_error(subject, self._universe)` — the identity gate in apply: nothing is recorded and no console command is built from a malformed id
 - `src/hallmonitor/adapters/source_panel.py:109` `return Observed("suspended") if record is not None else Observed("banned_external")` — a listed Source ban without an own record is `banned_external`, so the reconcile loop never applies to it
 - `src/hallmonitor/adapters/source_panel.py:124` `if sid in await self._listed():` — the re-read before a Source ban: a moderator's ban that appeared after observe is never taken over
 - `src/hallmonitor/adapters/source_panel.py:128` `await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))` — the record is placed before the first console command, so a ban the adapter sends is always recorded as ours

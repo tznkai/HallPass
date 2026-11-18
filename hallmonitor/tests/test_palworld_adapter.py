@@ -436,3 +436,32 @@ async def test_apply_refuses_to_unban_a_ban_nobody_here_placed(db: Database) -> 
     assert result == Observed("banned_external")
     assert pal.requests == []
     assert file_text(ptero) == f"steam_{OTHER_ID},{player_uid(f'steam_{OTHER_ID}')}\n"
+
+
+# Restore with no own record: the ban list is read again, and a lifted ban is reported allowed -----------
+
+async def test_a_restore_after_the_shared_ban_is_lifted_reads_the_list_and_sends_nothing(db: Database) -> None:
+    """Two subjects share one id. The first restore lifts our ban; the second finds no record, reads the list, and
+    reports allowed with no second unban."""
+    pal, ptero = pal_state(), banlist()
+    first = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    second = Subject("r2", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        adapter = palworld(db, http)
+        assert await adapter.apply(first, "suspended") == Observed("suspended")
+        assert await adapter.apply(first, "allowed") == Observed("allowed")
+        sent = len(pal.requests)
+        assert await adapter.apply(second, "allowed") == Observed("allowed")
+    assert len(pal.requests) == sent
+    assert [path for _, path, _ in pal.requests] == [f"{REST_PREFIX}ban", f"{REST_PREFIX}unban"]
+    assert file_text(ptero) == ""
+
+
+async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_writes_nothing(db: Database) -> None:
+    pal, ptero = pal_state(), banlist()
+    moderator_ban(ptero, f"steam_{OTHER_ID}")
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        result = await palworld(db, http).apply(Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2), "allowed")
+    assert result == Observed("allowed")
+    assert pal.requests == []
+    assert file_text(ptero) == f"steam_{OTHER_ID},{player_uid(f'steam_{OTHER_ID}')}\n"
