@@ -284,6 +284,47 @@ async def test_after_the_shared_identity_migration_a_fluxer_user_id_stays_unique
         _insert(path, 60, 2, "fluxer", "fluxer_user_id", "2001")
 
 
+# Desired state keeps the pairs it stops sending (migration 0008) -----------------------------------------
+
+def _add_desired_row(path: Path, person_id: int, desired: str, generation: int) -> None:
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        c.execute("INSERT INTO service (id, slug, name, kind, adapter, auto_suspendable, url, retired, created_at) "
+                  "VALUES (1, 'minecraft', 'Minecraft', 'game', 'minecraft', 1, NULL, 0, '2026-11-13T00:00:00Z')")
+        c.execute("INSERT INTO desired_state (person_id, service_id, desired, generation, changed_at) "
+                  "VALUES (?, 1, ?, ?, '2026-11-13T00:00:00Z')", (person_id, desired, generation))
+        c.commit()
+
+
+async def test_desired_state_migration_keeps_rows_and_marks_them_sent_on_a_v7_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 7)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne")])
+    _add_desired_row(path, 1, "suspended", 4)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        rows = await database.run(lambda c: c.execute(
+            "SELECT person_id, service_id, desired, generation, changed_at, sent FROM desired_state").fetchall())
+        assert rows == [(1, 1, "suspended", 4, "2026-11-13T00:00:00Z", 1)]
+    finally:
+        database.close()
+
+
+async def test_desired_state_migration_on_an_empty_v7_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 7)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        assert await database.run(lambda c: c.execute("SELECT count(*) FROM desired_state").fetchone()[0]) == 0
+        columns = await database.run(lambda c: [row[1] for row in c.execute("PRAGMA table_info(desired_state)")])
+        assert "sent" in columns
+    finally:
+        database.close()
+
+
 # Quarantine -----------------------------------------------------------------------------------------
 
 async def test_garbage_db_is_quarantined_with_side_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

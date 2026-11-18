@@ -119,22 +119,26 @@ class _Outcome:
     """What one reports request stored, and what it skipped by reason."""
     stored: int = 0
     unknown_ref: int = 0
+    not_sent: int = 0
     unknown_slug: int = 0
 
 
 def _is_sent(conn: sqlite3.Connection, person_id: int, service_id: int, generation: int) -> bool:
-    """True when the pair has a desired row and the report's generation is not above the stored one. A pair with no row
-    was not sent by the last desired read (it was pruned, or it is not a subject), so a late report for it is stale, and
-    a report above the stored generation answers a value that was never sent."""
+    """True when the pair is sent now (`desired.desired_for` reads a row) and the report's generation is not above the
+    stored one. A pair that is not sent was not in the last desired read (it is not a subject, or it was dropped), so a
+    late report for it is refused. A report above the stored generation answers a value that was never sent. A report
+    at or below it is stored, and it shows as confirmed only when it carries the stored generation (see
+    `desired.report_status`)."""
     stored = desired.desired_for(conn, person_id, service_id)
     return stored is not None and generation <= stored[1]
 
 
 def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> _Outcome:
     """Stores each report and unmanaged count. A report or count naming an unknown slug is skipped as unknown_slug. A
-    report is skipped as unknown_ref when its ref is unknown, or when its pair is not in the desired state (see
-    `_is_sent`). A report's time is clamped to now, so a clock running ahead cannot block later reports, since the newest
-    time wins. A report older than the stored one for its pair does not replace it."""
+    report is skipped as unknown_ref when its ref is unknown, and as not_sent when its pair is not sent or its
+    generation is above the stored one (see `_is_sent`). A report's time is clamped to now, so a clock running ahead
+    cannot block later reports, since the newest time wins. A report older than the stored one for its pair does not
+    replace it."""
     outcome = _Outcome()
     for report in body.reports:
         service = services.get_by_slug(conn, report.slug)
@@ -142,8 +146,11 @@ def _store_reports(conn: sqlite3.Connection, body: ReportsIn, now: datetime) -> 
             outcome.unknown_slug += 1
             continue
         person = registry.get_by_ref(conn, report.ref)
-        if person is None or not _is_sent(conn, person.id, service.id, report.generation):
+        if person is None:
             outcome.unknown_ref += 1
+            continue
+        if not _is_sent(conn, person.id, service.id, report.generation):
+            outcome.not_sent += 1
             continue
         conn.execute(_UPSERT_REPORT, (person.id, service.id, report.observed, report.detail, report.generation,
                                       _iso(min(report.at, now))))
@@ -192,6 +199,8 @@ def create_monitor_app(deps: web_app.AppDeps) -> FastAPI:
         log_event(logger, "monitor_reports", count=outcome.stored)
         if outcome.unknown_ref:
             log_event(logger, "monitor_reports_skipped", count=outcome.unknown_ref, reason="unknown_ref")
+        if outcome.not_sent:
+            log_event(logger, "monitor_reports_skipped", count=outcome.not_sent, reason="not_sent")
         if outcome.unknown_slug:
             log_event(logger, "monitor_reports_skipped", count=outcome.unknown_slug, reason="unknown_slug")
         return Response(status_code=204)

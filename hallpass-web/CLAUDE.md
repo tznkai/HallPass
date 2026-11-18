@@ -51,7 +51,8 @@ from 1 (startup raises otherwise); add a new file, never edit a shipped one.
 ## Monitor API contract
 
 Routes: `GET /api/monitor/v1/desired` and `POST /api/monitor/v1/reports` (204), in `src/hallpass/monitor_api.py`.
-A desired value's generation goes up only when the recomputed value changes.
+A desired value's generation goes up when the recomputed value changes, and when a pair is sent again after it was
+dropped. A generation never goes down, so a report carrying an old generation is never confirmed.
 
 `tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example
 of the monitor API bodies. It is byte-identical in hallpass and hallmonitor. A change to it must land in both projects

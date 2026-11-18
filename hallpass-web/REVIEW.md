@@ -99,14 +99,17 @@ as the code they cite.
 
 ## Monitor API
 
-- `src/hallpass/monitor_api.py:167` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
-- `src/hallpass/monitor_api.py:171` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
+- `src/hallpass/monitor_api.py:174` `if any(name in request.headers for name in PROXY_HEADERS):` — the proxy-header refusal: a request carrying a forwarded or Via header gets 403 before its token is read, so nothing that came through the public proxy reaches the monitor routes
+- `src/hallpass/monitor_api.py:178` `if not hmac.compare_digest(presented, expected):` — the bearer token check, compared in constant time on the encoded bytes, so a wrong token is refused as 401 whatever its prefix
+- `src/hallpass/monitor_api.py:133` `return stored is not None and generation <= stored[1]` — the report gate: a report for a pair that is not sent, or whose generation is above the stored one, is refused; one at or below the stored generation is stored, and shows as confirmed only at the stored generation
 
 ## Shared identities
 
-- `src/hallpass/desired.py:144` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
+- `src/hallpass/desired.py:151` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
 
 ## Generations
 
-- `src/hallpass/desired.py:205` `generation = _store_generation(conn` — the only route by which `refresh` stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
-- `src/hallpass/desired.py:73` `UPDATE desired_state SET desired` — the bump: a generation goes up by one only when the recomputed value differs from the stored one, so an unchanged value keeps its generation
+- `src/hallpass/desired.py:214` `generation = _store_generation(conn` — the only route by which `refresh_with_pauses` (and so `refresh`) stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
+- `src/hallpass/desired.py:78` `UPDATE desired_state SET desired` — the bump: a generation goes up by one when the recomputed value differs from the stored one, or when a pair that was not sent is sent again, so a returning pair starts above every generation it had; a sent pair with the same value keeps its generation
+- `src/hallpass/desired.py:97` `UPDATE desired_state SET sent = 0` — a pair that stops being a subject keeps its row, unsent, so its generation stays on record for a return; deleting the row here would let a return start again at a low generation and confirm a late report
+- `src/hallpass/desired.py:233` `AND sent = 1` — `desired_for` reads only sent pairs, so a report for a pair that is not sent is refused, and no page shows the pair as monitored

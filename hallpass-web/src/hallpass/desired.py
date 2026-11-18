@@ -5,8 +5,9 @@
 `refresh` recomputes `access.evaluate` for every subject of every monitored service and stores the result. A
 shared identity (several people hold it on one service) is paused while any holder is suspended, and is then
 sent only on the suspended holders' subjects (`_sent_identities`). A pair gets generation 1 the first time it is
-seen, and goes up by one each time its desired value changes. A report carrying an older generation therefore
-shows that the current value is not yet confirmed. `report_status` maps a report onto the text a row shows.
+seen, and goes up by one each time its desired value changes. A pair that stops being sent keeps its row (sent = 0),
+and goes up by one when it is sent again, so a generation never goes down. A report carrying an older generation
+therefore shows that the current value is not yet confirmed. `report_status` maps a report onto the text a row shows.
 Plain functions over a sqlite3 connection; callers run them inside `Database.run`. Nothing here logs.
 """
 
@@ -54,23 +55,27 @@ def _subjects(conn: sqlite3.Connection, service: Service) -> list[tuple[int, tup
         by_person.setdefault(person_id, []).append((kind, value))
     if service.adapter not in SSO_SUBJECT_ADAPTERS:
         return [(person_id, tuple(found)) for person_id, found in sorted(by_person.items())]
-    bound = conn.execute("SELECT id, authentik_uuid FROM person WHERE authentik_uuid IS NOT NULL ORDER BY id").fetchall()
+    bound = conn.execute("SELECT id, authentik_uuid FROM person WHERE authentik_uuid IS NOT NULL "
+                         "ORDER BY id").fetchall()
     return [(person_id, ((SSO_SUBJECT_KIND, uuid),) + tuple(by_person.get(person_id, [])))
             for person_id, uuid in bound]
 
 
 def _store_generation(conn: sqlite3.Connection, *, person_id: int, service_id: int, value: str, now: datetime) -> int:
-    row = conn.execute("SELECT desired, generation FROM desired_state WHERE person_id = ? AND service_id = ?",
+    """Stores the pair as sent and returns its generation. A new pair starts at 1. A pair that was not sent (sent = 0,
+    kept by `_prune`) goes up by one, even when its value is the same, so it starts above every generation it had
+    before. A sent pair goes up by one only when its value changes."""
+    row = conn.execute("SELECT desired, generation, sent FROM desired_state WHERE person_id = ? AND service_id = ?",
                        (person_id, service_id)).fetchone()
     stamp = _iso(now)
     if row is None:
-        conn.execute("INSERT INTO desired_state (person_id, service_id, desired, generation, changed_at) "
-                     "VALUES (?, ?, ?, 1, ?)", (person_id, service_id, value, stamp))
+        conn.execute("INSERT INTO desired_state (person_id, service_id, desired, generation, changed_at, sent) "
+                     "VALUES (?, ?, ?, 1, ?, 1)", (person_id, service_id, value, stamp))
         return 1
-    stored_value, generation = row
-    if stored_value == value:
+    stored_value, generation, sent = row
+    if sent and stored_value == value:
         return generation
-    conn.execute("UPDATE desired_state SET desired = ?, generation = ?, changed_at = ? "
+    conn.execute("UPDATE desired_state SET desired = ?, generation = ?, changed_at = ?, sent = 1 "
                  "WHERE person_id = ? AND service_id = ?", (value, generation + 1, stamp, person_id, service_id))
     return generation + 1
 
@@ -81,17 +86,19 @@ def monitored_services(conn: sqlite3.Connection) -> list[Service]:
                   key=lambda service: service.slug)
 
 
-_PRUNED_TABLES = ("desired_state", "service_report")
-
-
 def _prune(conn: sqlite3.Connection, subjects: set[tuple[int, int]], monitored_ids: set[int]) -> None:
-    """Deletes the rows that no longer belong: desired and report rows for (person, service) pairs that are not
-    subjects any more, and unmanaged counts for services that are not monitored. A pair that returns starts again at
-    generation 1 with no report, because its old report was deleted with it."""
-    for table in _PRUNED_TABLES:
-        for person_id, service_id in conn.execute(f"SELECT person_id, service_id FROM {table}").fetchall():
-            if (person_id, service_id) not in subjects:
-                conn.execute(f"DELETE FROM {table} WHERE person_id = ? AND service_id = ?", (person_id, service_id))
+    """Keeps the rows that no longer belong, and deletes the reports that no longer belong. A desired row for a pair
+    that is not a subject any more is marked not sent (sent = 0) and kept, so its generation stays on record for a
+    return (see `_store_generation`). Its report is deleted, and `desired_for` hides the row, so a late report for it is
+    refused. Unmanaged counts for services that are not monitored are deleted."""
+    sent_pairs = conn.execute("SELECT person_id, service_id FROM desired_state WHERE sent = 1").fetchall()
+    for person_id, service_id in sent_pairs:
+        if (person_id, service_id) not in subjects:
+            conn.execute("UPDATE desired_state SET sent = 0 WHERE person_id = ? AND service_id = ?",
+                         (person_id, service_id))
+    for person_id, service_id in conn.execute("SELECT person_id, service_id FROM service_report").fetchall():
+        if (person_id, service_id) not in subjects:
+            conn.execute("DELETE FROM service_report WHERE person_id = ? AND service_id = ?", (person_id, service_id))
     for (service_id,) in conn.execute("SELECT service_id FROM service_unmanaged").fetchall():
         if service_id not in monitored_ids:
             conn.execute("DELETE FROM service_unmanaged WHERE service_id = ?", (service_id,))
@@ -155,8 +162,8 @@ class _ServiceState:
 
 
 def _pauses(shared: dict[tuple[str, str], list[_Subject]], paused: set[tuple[str, str]]) -> dict[int, SharedPause]:
-    """The pause of each allowed holder of a paused shared identity, with the suspended holders that cause it. A suspended
-    holder has no pause: its identity is kept on its own subject, so its own suspension is the reason."""
+    """The pause of each allowed holder of a paused shared identity, with the suspended holders that cause it. A
+    suspended holder has no pause: its identity is kept on its own subject, so its own suspension is the reason."""
     causes: dict[int, set[int]] = {}
     for key in paused:
         holders = shared[key]
@@ -168,7 +175,8 @@ def _pauses(shared: dict[tuple[str, str], list[_Subject]], paused: set[tuple[str
 
 
 def _service_state(conn: sqlite3.Connection, service: Service) -> _ServiceState:
-    """Evaluates every subject of the service once. Both `refresh_with_pauses` and `shared_pause` read from this."""
+    """Evaluates every subject of the service once. `refresh_with_pauses` is the only caller: it reads the sent
+    identities and the pauses from this, so no page evaluates a service on its own."""
     subjects = _evaluated_subjects(conn, service)
     shared = _shared_holders(subjects)
     paused = _paused_keys(shared)
@@ -184,7 +192,8 @@ def refresh_with_pauses(conn: sqlite3.Connection, now: datetime) -> tuple[list[D
     keyed by (service id, person id), so a page can show them without evaluating the services again.
 
     A subject whose identities are all paused (see `_sent_identities`) is not a subject for this round: hallmonitor is
-    not sent it, so it gets no desired row and no report, and a later restore starts it again at generation 1.
+    not sent it, so it gets no report, and its desired row is marked not sent. A later restore sends it again above its
+    old generation.
 
     Cost: every subject of every monitored service is evaluated once on each call, so the work grows with services times
     people. That is fine at neighbourhood scale. It could later be limited to the person being viewed. Callers run it
@@ -217,18 +226,11 @@ def refresh(conn: sqlite3.Connection, now: datetime) -> list[DesiredRow]:
     return rows
 
 
-def shared_pause(conn: sqlite3.Connection, person: Person, service: Service) -> SharedPause | None:
-    """The pause of this person's shared identities on the service, or None when none is paused. Only a monitored service
-    can pause, because hallmonitor is the one that removes an identity. Pages should prefer the pauses that
-    `refresh_with_pauses` returns, which cost no extra evaluation."""
-    if service.retired or service.kind not in MONITORED_KINDS:
-        return None
-    return _service_state(conn, service).pauses.get(person.id)
-
-
 def desired_for(conn: sqlite3.Connection, person_id: int, service_id: int) -> tuple[str, int] | None:
-    row = conn.execute("SELECT desired, generation FROM desired_state WHERE person_id = ? AND service_id = ?",
-                       (person_id, service_id)).fetchone()
+    """The stored desired value and generation of a pair that is sent now, or None. A pair that is not sent (sent = 0)
+    reads as None, so no page shows it as monitored and no report is accepted for it."""
+    row = conn.execute("SELECT desired, generation FROM desired_state "
+                       "WHERE person_id = ? AND service_id = ? AND sent = 1", (person_id, service_id)).fetchone()
     return None if row is None else (row[0], row[1])
 
 
@@ -270,7 +272,7 @@ def monitor_health(conn: sqlite3.Connection, now: datetime) -> dict:
     contact = conn.execute("SELECT last_contact_at FROM monitor_contact WHERE id = 1").fetchone()
     errors = conn.execute(
         "SELECT s.name, COUNT(*) FROM service_report r JOIN service s ON s.id = r.service_id "
-        "JOIN desired_state d ON d.person_id = r.person_id AND d.service_id = r.service_id "
+        "JOIN desired_state d ON d.person_id = r.person_id AND d.service_id = r.service_id AND d.sent = 1 "
         f"WHERE r.observed = 'error' AND s.retired = 0 AND s.kind IN ({kinds}) "
         "GROUP BY s.id ORDER BY s.name, s.id", MONITORED_KINDS).fetchall()
     unmanaged = conn.execute(

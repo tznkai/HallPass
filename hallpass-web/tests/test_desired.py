@@ -298,8 +298,9 @@ async def test_a_retired_service_prunes_its_desired_and_report_rows_and_its_unma
 
     assert [(row.service.slug, row.person.id) for row in await refresh(db, LATER)] == [("valheim", ann.id)]
     assert await stored_rows(db, ann, minecraft) == (None, None)
-    assert await db.run(lambda c: c.execute("SELECT service_id FROM service_unmanaged ORDER BY service_id").fetchall()) \
-        == [(valheim.id,)]
+    unmanaged = await db.run(lambda c: c.execute(
+        "SELECT service_id FROM service_unmanaged ORDER BY service_id").fetchall())
+    assert unmanaged == [(valheim.id,)]
 
 
 async def test_a_service_whose_kind_becomes_forward_auth_prunes_its_rows(db: Database, admin: Person) -> None:
@@ -315,26 +316,45 @@ async def test_a_service_whose_kind_becomes_forward_auth_prunes_its_rows(db: Dat
     assert await stored_rows(db, ann, minecraft) == (None, None)
 
 
-async def test_a_pair_that_returns_starts_at_generation_one_with_no_old_report(db: Database, admin: Person) -> None:
+def unbind_minecraft(db: Database, person: Person):
+    def change(conn) -> None:
+        (identity,) = [found for found in registry.identities_of(conn, person.id) if found.service_slug == "minecraft"]
+        registry.remove_identity(conn, identity.id)
+
+    return db.run(change)
+
+
+async def test_a_pair_that_returns_starts_above_its_old_generation_and_the_old_row_is_kept_unsent(
+        db: Database, admin: Person) -> None:
     minecraft = await make_service(db, admin, slug="minecraft")
     ann = await make_person(db, admin, name="Ann")
     await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
     await refresh(db)
-    await store_report(db, ann, minecraft, observed="error", generation=5)
 
-    def unbind(conn) -> None:
-        (identity,) = [found for found in registry.identities_of(conn, ann.id) if found.service_slug == "minecraft"]
-        registry.remove_identity(conn, identity.id)
+    await unbind_minecraft(db, ann)
+    assert await refresh(db, LATER) == []
+    assert await db.run(lambda c: c.execute("SELECT generation, sent FROM desired_state").fetchall()) == [(1, 0)]
 
-    await db.run(unbind)
-    await refresh(db, LATER)
     await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
     rows = await refresh(db, LATER)
 
-    assert generations(rows) == {("minecraft", ann.id): 1}
+    assert generations(rows) == {("minecraft", ann.id): 2}
     desired_row, found = await stored_rows(db, ann, minecraft)
-    assert (desired_row, found) == (("allowed", 1), None)
+    assert (desired_row, found) == (("allowed", 2), None)
     assert desired.report_status(desired_row, found, False) == text.NOT_YET_CONFIRMED
+
+
+async def test_generations_never_go_down_across_repeated_returns(db: Database, admin: Person) -> None:
+    await make_service(db, admin, slug="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    seen: list[int] = []
+    for _ in range(3):
+        await add_identity(db, ann, "minecraft", "java_name", "BuilderSeven")
+        seen.append(generations(await refresh(db, LATER))[("minecraft", ann.id)])
+        await unbind_minecraft(db, ann)
+        await refresh(db, LATER)
+
+    assert seen == [1, 2, 3]
 
 
 # Shared identities ------------------------------------------------------------------------------------
@@ -447,47 +467,8 @@ async def test_lifting_the_hold_restores_the_shared_identity_to_the_allowed_hold
     assert rows[("bedrock", ann.id)].identities == (("bedrock_gamertag", "GamerX"),)
 
 
-async def test_shared_pause_names_the_other_suspended_holders_only_where_an_identity_is_paused(
+async def test_pauses_name_the_suspended_holders_only_for_the_allowed_holder_of_a_paused_identity(
         db: Database, admin: Person) -> None:
-    bedrock, steam, ann, bo, _ = await shared_setup(db, admin)
-    await hold_on(db, admin, ann, bedrock, LATER)
-    await refresh(db, LATER)
-
-    def pauses(conn) -> dict[str, desired.SharedPause | None]:
-        bo_person = registry.get_person(conn, bo.id)
-        ann_person = registry.get_person(conn, ann.id)
-        return {
-            "bo_bedrock": desired.shared_pause(conn, bo_person, bedrock),
-            "bo_steam": desired.shared_pause(conn, bo_person, steam),
-            "ann_bedrock": desired.shared_pause(conn, ann_person, bedrock),
-        }
-
-    found = await db.run(pauses)
-
-    assert found == {
-        "bo_bedrock": desired.SharedPause(causes=(ann.id,)),
-        "bo_steam": None,
-        "ann_bedrock": None,
-    }
-
-
-async def test_a_suspended_holder_has_no_shared_pause_even_though_its_identity_is_paused(db: Database,
-                                                                                          admin: Person) -> None:
-    bedrock, _, ann, bo, _ = await shared_setup(db, admin)
-    await hold_on(db, admin, ann, bedrock, LATER)
-
-    def pauses(conn) -> tuple[desired.SharedPause | None, desired.SharedPause | None]:
-        return (desired.shared_pause(conn, registry.get_person(conn, ann.id), bedrock),
-                desired.shared_pause(conn, registry.get_person(conn, bo.id), bedrock))
-
-    ann_pause, bo_pause = await db.run(pauses)
-
-    assert ann_pause is None
-    assert bo_pause == desired.SharedPause(causes=(ann.id,))
-
-
-async def test_refresh_with_pauses_gives_each_allowed_holder_the_pause_shared_pause_gives(db: Database,
-                                                                                         admin: Person) -> None:
     bedrock, steam, ann, bo, cy = await shared_setup(db, admin)
     await hold_on(db, admin, ann, bedrock, LATER)
 
@@ -495,6 +476,16 @@ async def test_refresh_with_pauses_gives_each_allowed_holder_the_pause_shared_pa
 
     assert pauses == {(bedrock.id, bo.id): desired.SharedPause(causes=(ann.id,))}
     assert {row.person.id for row in rows if row.service.slug == "steam"} == {bo.id, cy.id}
+
+
+async def test_a_suspended_holder_has_no_pause_even_though_its_identity_is_paused(db: Database, admin: Person) -> None:
+    bedrock, _, ann, bo, _ = await shared_setup(db, admin)
+    await hold_on(db, admin, ann, bedrock, LATER)
+
+    _, pauses = await db.run(lambda c: desired.refresh_with_pauses(c, LATER))
+
+    assert (bedrock.id, ann.id) not in pauses
+    assert pauses[(bedrock.id, bo.id)] == desired.SharedPause(causes=(ann.id,))
 
 
 # Shared identities: the holders of one identity, the chain of shared identities, the returning subject --------
@@ -516,6 +507,8 @@ async def test_two_suspended_holders_both_keep_a_shared_identity_and_an_allowed_
     assert rows[("bedrock", bo.id)].identities == (("bedrock_gamertag", "GamerX"),)
     assert rows[("bedrock", ann.id)].desired == rows[("bedrock", bo.id)].desired == "suspended"
     assert ("bedrock", cy.id) not in rows
+    _, pauses = await db.run(lambda c: desired.refresh_with_pauses(c, LATER))
+    assert pauses == {(bedrock.id, cy.id): desired.SharedPause(causes=tuple(sorted((ann.id, bo.id))))}
 
 
 async def test_a_chain_of_shared_identities_pauses_only_the_link_to_the_suspended_holder(
@@ -541,7 +534,7 @@ async def test_a_chain_of_shared_identities_pauses_only_the_link_to_the_suspende
     assert rows[("minecraft", cy.id)].identities == (("java_name", "BuilderY"),)
 
 
-async def test_a_holder_paused_out_by_a_shared_identity_returns_at_generation_one_with_no_old_report(
+async def test_a_holder_paused_out_by_a_shared_identity_returns_above_its_old_generation(
         db: Database, admin: Person) -> None:
     bedrock = await make_service(db, admin, slug="bedrock", adapter="minecraft")
     ann = await make_person(db, admin, name="Ann")
@@ -559,15 +552,15 @@ async def test_a_holder_paused_out_by_a_shared_identity_returns_at_generation_on
     await lift_on(db, admin, ann, bedrock, LATER + timedelta(hours=1))
     returned = by_pair(await refresh(db, LATER + timedelta(hours=1)))
 
-    assert returned[("bedrock", bo.id)].generation == 1
+    assert returned[("bedrock", bo.id)].generation == 2
     assert returned[("bedrock", bo.id)].identities == (("bedrock_gamertag", "GamerX"),)
     desired_row, found = await stored_rows(db, bo, bedrock)
-    assert (desired_row, found) == (("allowed", 1), None)
+    assert (desired_row, found) == (("allowed", 2), None)
     assert desired.report_status(desired_row, found, False) == text.NOT_YET_CONFIRMED
 
 
-async def test_shared_pause_is_none_on_a_retired_service_and_on_an_unmonitored_one(db: Database,
-                                                                                    admin: Person) -> None:
+async def test_pauses_are_empty_on_a_retired_service_and_never_listed_for_an_unmonitored_one(db: Database,
+                                                                                              admin: Person) -> None:
     bedrock, _, ann, bo, _ = await shared_setup(db, admin)
     calendar = await make_service(db, admin, slug="calendar", kind="forward_auth", adapter="minecraft")
     for person in (ann, bo):
@@ -575,18 +568,12 @@ async def test_shared_pause_is_none_on_a_retired_service_and_on_an_unmonitored_o
     await hold_on(db, admin, ann, bedrock, LATER)
     await hold_on(db, admin, ann, calendar, LATER)
 
-    def before(conn) -> tuple[object, object]:
-        bo_person = registry.get_person(conn, bo.id)
-        return (desired.shared_pause(conn, bo_person, bedrock), desired.shared_pause(conn, bo_person, calendar))
+    _, before = await db.run(lambda c: desired.refresh_with_pauses(c, LATER))
 
-    assert await db.run(before) == (desired.SharedPause(causes=(ann.id,)), None)
+    assert before == {(bedrock.id, bo.id): desired.SharedPause(causes=(ann.id,))}
 
     await db.run(lambda c: services.retire_service(c, bedrock.id, actor_id=admin.id, now=NOW))
 
-    def after(conn) -> tuple[object, object]:
-        bo_person = registry.get_person(conn, bo.id)
-        retired = services.get_by_slug(conn, "bedrock")
-        assert retired is not None and retired.retired
-        return (desired.shared_pause(conn, bo_person, retired), desired.shared_pause(conn, bo_person, calendar))
+    _, after = await db.run(lambda c: desired.refresh_with_pauses(c, LATER))
 
-    assert await db.run(after) == (None, None)
+    assert after == {}
