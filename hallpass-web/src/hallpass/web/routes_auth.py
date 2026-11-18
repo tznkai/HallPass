@@ -85,6 +85,10 @@ async def callback(request: Request) -> Response:
         return _refused(request, error)
     # Each sign-in settles an invited child: enrolled now, so active when a parent has granted, else awaiting_grant.
     settled = await deps.db.run(lambda c: grants.settle_child_at_sign_in(c, person.id, deps.clock()))
+    if settled.status == "locked":
+        # Locked after resolve_sign_in passed the person and before the settle read the status. Refused as a locked
+        # person is, so no session starts.
+        return _refused(request, SignInError("locked"))
     if not was_bound or settled.status != person.status:
         await authentik_sync.sync_people(deps, [person.id])     # the first sign-in binds the person to Authentik
     person = settled

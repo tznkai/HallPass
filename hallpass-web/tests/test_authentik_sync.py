@@ -15,7 +15,18 @@ import pytest
 
 from hallpass import authentik_sync, grants, holds, registry, services
 from hallpass.registry import Person
-from tests.helpers import FLUXER_GROUP, NOW, Env, accept_current, admin_client, form, publish_terms, signed_in_person
+from tests.helpers import (
+    FLUXER_GROUP,
+    NOW,
+    Env,
+    accept_current,
+    admin_client,
+    form,
+    new_client,
+    publish_terms,
+    sign_in,
+    signed_in_person,
+)
 
 
 def deps(env: Env):
@@ -279,3 +290,43 @@ async def test_a_parent_accepting_the_terms_syncs_the_linked_child_into_the_flux
 
     assert (await accept_current(env, parent_browser)).status_code == 303
     assert in_group(env, child)
+
+
+# A bound child set back to invited is settled at sign-in, and Authentik follows ----------------------------------
+
+async def set_status(env: Env, person_id: int, status: str) -> None:
+    await env.db.run(lambda c: c.execute("UPDATE person SET status = ? WHERE id = ?", (status, person_id)))
+
+
+async def test_a_bound_child_set_back_to_invited_is_awaiting_and_out_of_the_group_after_sign_in(env: Env) -> None:
+    await make_fluxer(env)
+    child, _ = await signed_in_person(env, account_type="child", email="kid@example.com")
+    assert not in_group(env, child)
+    env.authentik.groups[FLUXER_GROUP].add(child.authentik_pk)   # Authentik still lists the child: a stale state
+    await set_status(env, child.id, "invited")
+
+    response = await sign_in(env, sub=child.authentik_uuid, username=authentik_user(env, child)["username"],
+                             client=new_client(env))
+
+    assert response.status_code == 303
+    settled = await env.db.run(lambda c: registry.get_person(c, child.id))
+    assert settled.status == "awaiting_grant"
+    assert not in_group(env, settled)
+
+
+async def test_a_bound_child_set_back_to_invited_with_a_grant_is_active_and_in_the_group_after_sign_in(
+        env: Env) -> None:
+    await make_fluxer(env)
+    child, _, _ = await linked_child(env, child_email="kid@example.com")
+    await sync(env, child.id)
+    assert in_group(env, child)
+    env.authentik.groups[FLUXER_GROUP].discard(child.authentik_pk)   # Authentik lost the child: a stale state
+    await set_status(env, child.id, "invited")
+
+    response = await sign_in(env, sub=child.authentik_uuid, username=authentik_user(env, child)["username"],
+                             client=new_client(env))
+
+    assert response.status_code == 303
+    settled = await env.db.run(lambda c: registry.get_person(c, child.id))
+    assert settled.status == "active"
+    assert in_group(env, settled)

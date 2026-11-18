@@ -45,15 +45,15 @@ as the code they cite.
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
 - `src/hallpass/auth.py:262` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
 - `src/hallpass/terms.py:117` `return not any(` — a child is covered only by a linked, unlocked parent who passes the parent rule; a child's own acceptance is never read for the gate
-- `src/hallpass/web/routes_auth.py:96` `if person.account_type != "child" and not state.accepted_current:` — the sign-in redirect to /terms: a child is never sent there, and an adult or parent keeps the rule
+- `src/hallpass/web/routes_auth.py:100` `if person.account_type != "child" and not state.accepted_current:` — the sign-in redirect to /terms: a child is never sent there, and an adult or parent keeps the rule
 - `src/hallpass/web/routes_terms.py:49` `if person.account_type == "child":` — a child's POST to /terms/accept is refused with 403 before anything is written
 
 ## Status transitions
 
-- `src/hallpass/grants.py:97` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
+- `src/hallpass/grants.py:106` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
 - `src/hallpass/grants.py:50` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
 - `src/hallpass/grants.py:52` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
-- `src/hallpass/grants.py:133` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
+- `src/hallpass/grants.py:143` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
 
 ## Entitlement resolution
 

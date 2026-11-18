@@ -88,12 +88,21 @@ def _has_grant(conn: sqlite3.Connection, child_id: int) -> bool:
     return bool(_counted_grant_rows(conn, child_id, "g.id"))
 
 
+def can_approve(child: Person, *, has_counted_grant: bool) -> bool:
+    """Whether a parent may approve this child now, by the rule `grant` applies: an awaiting child, an enrolled invited
+    child, or an invited child who is not yet enrolled and has no counted grant. The parent's page uses it too."""
+    if child.status == "awaiting_grant":
+        return True
+    return child.status == "invited" and (child.authentik_uuid is not None or not has_counted_grant)
+
+
 def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datetime) -> Person:
     """A linked parent approves a child. Checks run in order; the first failure raises GrantRefused.
     The link is checked first, so a missing child and a child the caller is not linked to are refused alike.
 
-    An awaiting child becomes active at once. An invited child (not yet enrolled) keeps its status: the grant is
-    recorded, and the child becomes active at their first sign-in. A second grant on an invited child is refused."""
+    An awaiting child becomes active at once, and so does an invited child who is already enrolled (bound to Authentik,
+    set back to invited by the administrator). An invited child who is not yet enrolled keeps its status: the grant is
+    recorded, and the child becomes active at their first sign-in. A second grant on such a child is refused."""
     if not _is_linked(conn, child_id, parent_id):
         raise GrantRefused("not_linked_parent")
     child = registry.get_person(conn, child_id)
@@ -105,7 +114,7 @@ def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datet
         raise GrantRefused("parent_terms")
     if parent.status != "active":
         raise GrantRefused("parent_inactive")
-    if child.status == "awaiting_grant":
+    if child.status == "awaiting_grant" or (child.status == "invited" and child.authentik_uuid is not None):
         _set_status(conn, child_id, "active")
     elif child.status == "invited":
         if _has_grant(conn, child_id):
@@ -125,14 +134,18 @@ def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datet
 
 def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int, now: datetime) -> Person:
     """Run on each successful sign-in. A child still invited (now enrolled) moves to active when a parent has granted,
-    otherwise to awaiting_grant. Any other status is left alone, so a lock is never overwritten. The status is read
-    inside this transaction, so a lock written just before it is seen."""
+    otherwise to awaiting_grant, and that change is logged as a `status_settled` row by the system. Any other status is
+    left alone, with no row, so a lock is never overwritten. The status is read inside this transaction, so a lock
+    written just before it is seen."""
     person = registry.get_person(conn, person_id)
     if person is None:
         raise registry.NoSuchPerson()
     if person.account_type != "child" or person.status != "invited":
         return person
-    _set_status(conn, person_id, "active" if _has_grant(conn, person_id) else "awaiting_grant")
+    status = "active" if _has_grant(conn, person_id) else "awaiting_grant"
+    _set_status(conn, person_id, status)
+    registry.log_decision(conn, at=now, actor_kind="system", actor_person_id=None, target_person_id=person_id,
+                          action="status_settled", detail={"status": status})
     result = registry.get_person(conn, person_id)
     assert result is not None
     return result

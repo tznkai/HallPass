@@ -290,3 +290,20 @@ async def test_an_unlinked_parents_grant_leaves_the_child_awaiting_a_grant_at_si
 
     assert (await person_row(env, child)).status == "awaiting_grant"
     assert (await child_browser.get("/")).status_code == 200
+
+
+async def test_a_bound_invited_child_with_a_grant_can_be_approved_again_and_becomes_active(env: Env):
+    parent, child, parent_browser, child_browser = await family(env)
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+    await env.db.run(lambda c: c.execute("UPDATE person SET status = 'invited' WHERE id = ?", (child,)))
+
+    waiting = (await parent_browser.get("/children")).text
+    assert "Kid" in waiting and "Approve" in waiting
+    assert text.GRANT_APPROVED_WAITING not in waiting
+
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    done = await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})
+
+    assert done.status_code == 303
+    assert (await person_row(env, child)).status == "active"

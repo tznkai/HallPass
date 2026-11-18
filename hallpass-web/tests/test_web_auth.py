@@ -11,7 +11,7 @@ import httpx
 import pytest
 from authlib.integrations.base_client import OAuthError
 
-from hallpass import registry, text
+from hallpass import grants, registry, text
 from tests.fake_authentik import enrol
 from tests.helpers import (
     Env,
@@ -190,3 +190,28 @@ async def test_idp_failure_shows_the_message_page_not_a_500(env: Env, caplog, pa
     home = await env.client.get("/")
     assert home.status_code == 303 and home.headers["location"].startswith("/login")
 
+
+
+async def test_a_child_locked_between_the_check_and_the_settle_is_refused_without_a_session(env: Env,
+                                                                                         monkeypatch):
+    await publish_terms(env)
+    person = await store_person(env)
+    user = enrol(env.authentik, await invite_person(env, person), "kid1")
+    real_settle = grants.settle_child_at_sign_in
+
+    def lock_then_settle(conn, person_id, now):
+        # The lock lands after resolve_sign_in has passed the person, and before the settle reads the status.
+        registry.set_locked(conn, person_id, True)
+        return real_settle(conn, person_id, now)
+
+    monkeypatch.setattr(grants, "settle_child_at_sign_in", lock_then_settle)
+
+    response = await sign_in(env, sub=user["uuid"], username="kid1",
+                             enrollment_ref=user["attributes"]["hallpass_enrollment"])
+
+    assert response.status_code == 403
+    assert text.LOCKED in response.text
+    home = await env.client.get("/")
+    assert home.status_code == 303 and home.headers["location"].startswith("/login")
+    stored = await env.db.run(lambda c: registry.get_person(c, person.id))
+    assert stored.status == "locked"

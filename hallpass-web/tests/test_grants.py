@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from hallpass import grants, registry, terms
+from hallpass import grants, holds, registry, terms, text
 from hallpass.db import Database
 from hallpass.grants import GrantRefused
 
@@ -415,3 +415,88 @@ async def test_granting_a_missing_child_is_refused_as_not_linked(db: Database, f
     reason = await refusal_reason(db, 999, family.parent.id)
 
     assert reason == "not_linked_parent"
+
+
+# The sign-in settle is logged when it changes a status -------------------------------------------------------
+
+async def settled_rows(db: Database, child_id: int) -> list[tuple]:
+    return await db.run(lambda c: c.execute(
+        "SELECT at, actor_kind, actor_person_id, target_person_id, action, detail FROM decision_log "
+        "WHERE action = 'status_settled' AND target_person_id = ? ORDER BY id", (child_id,)).fetchall())
+
+
+async def test_sign_in_settle_logs_a_status_settled_row_when_the_status_changes(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+
+    await sign_in_settle(db, child.id)
+
+    assert await settled_rows(db, child.id) == [
+        (NOW_TEXT, "system", None, child.id, "status_settled", json.dumps({"status": "awaiting_grant"}, sort_keys=True)),
+    ]
+
+
+async def test_sign_in_settle_logs_active_when_a_grant_is_already_counted(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    parent = await accept_terms(db, (await make(db, display_name="Pam", account_type="parent")).id, version.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    await link(db, child.id, parent.id)
+    await grant(db, child.id, parent.id)
+
+    await sign_in_settle(db, child.id)
+
+    rows = await settled_rows(db, child.id)
+    assert [json.loads(row[5]) for row in rows] == [{"status": "active"}]
+
+
+async def test_sign_in_settle_writes_no_row_when_nothing_changes(db: Database, family: Family) -> None:
+    await grant(db, family.child.id, family.parent.id)   # the child is now active
+    before = await settled_rows(db, family.child.id)
+    adult = await make(db, display_name="Ann")          # an adult is never settled
+    locked = await make(db, display_name="Kit", account_type="child")
+    await db.run(lambda c: registry.set_locked(c, locked.id, True))
+
+    await sign_in_settle(db, family.child.id)
+    await sign_in_settle(db, adult.id)
+    await sign_in_settle(db, locked.id)
+
+    assert await settled_rows(db, family.child.id) == before
+    assert await settled_rows(db, adult.id) == []
+    assert await settled_rows(db, locked.id) == []
+
+
+async def test_a_status_settled_row_is_not_parent_history_and_shows_to_the_administrator(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    await sign_in_settle(db, child.id)
+
+    history = await db.run(lambda c: holds._history(c, child.id))
+    shown = await db.run(lambda c: holds.recent_decisions(c, child.id))
+
+    assert history == []
+    assert shown[0]["action"] == "status_settled"
+    assert shown[0]["actor"] == text.ACTOR_SYSTEM
+
+
+# A bound child who is invited again (set back by the administrator) is approved like an awaiting child -----------
+
+async def set_status(db: Database, person_id: int, status: str) -> None:
+    await db.run(lambda c: c.execute("UPDATE person SET status = ? WHERE id = ?", (status, person_id)))
+
+
+@pytest.mark.parametrize("prior_grant", [False, True], ids=["no-prior-grant", "prior-grant"])
+async def test_a_grant_on_a_bound_invited_child_makes_it_active(db: Database, family: Family,
+                                                               prior_grant: bool) -> None:
+    if prior_grant:
+        await grant(db, family.child.id, family.parent.id)        # the child is active; the setup below reverts it
+    await db.run(lambda c: registry.bind_identity(c, family.child.id, uuid="uuid-kit", authentik_pk=7,
+                                                  username="kit"))
+    await set_status(db, family.child.id, "invited")
+
+    child = await grant(db, family.child.id, family.parent.id)
+
+    assert child.status == "active"
+    assert len(await db.run(lambda c: grants.grants_for(c, family.child.id))) == (2 if prior_grant else 1)

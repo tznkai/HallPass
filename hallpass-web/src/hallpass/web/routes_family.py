@@ -22,18 +22,19 @@ router = APIRouter()
 
 def _children_context(conn, person: Person) -> dict:
     """One row per linked child. A parent may approve a child who is awaiting a grant, or who is invited and not yet
-    approved; an invited child who is already approved waits for their first sign-in to become active."""
+    approved; an invited child who is already approved waits for their first sign-in to become active, unless they are
+    enrolled already, in which case the approval makes them active."""
     current = terms.current(conn)
     rows = []
     for child in registry.children_of(conn, person.id):
         child_grants = grants.grants_for(conn, child.id)
-        can_approve = current is not None and (
-            child.status == "awaiting_grant" or (child.status == "invited" and not child_grants))
+        can_approve = current is not None and grants.can_approve(child, has_counted_grant=bool(child_grants))
         rows.append({
             "child": child,
             "grants": child_grants,
             "can_approve": can_approve,
-            "approved_waiting": child.status == "invited" and bool(child_grants),
+            # An enrolled child who is invited again is approved at once, so only a child not yet enrolled waits.
+            "approved_waiting": child.status == "invited" and child.authentik_uuid is None and bool(child_grants),
             "ask": text.GRANT_ASK.format(child=child.display_name, version=current.version) if can_approve else "",
         })
     return {"rows": rows, "approved_waiting_text": text.GRANT_APPROVED_WAITING}
