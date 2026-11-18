@@ -63,7 +63,14 @@ as the code they cite.
 - `src/hallmonitor/adapters/source_rcon.py:147` `if not await self._owned(steam_id):` — the removeid gate: a restore runs no `removeid` unless the ban is recorded as ours
 - `src/hallmonitor/adapters/palworld.py:135` `if self._in_flight(record, now):` — a Palworld ban placed within the grace window that the ban list does not show yet reads as `suspended`, so its record is kept and no second ban is sent
 
-The Palworld forget step relies on the ban-list file reflecting a ban within the grace window; the live check confirms that the file shows a new ban inside that window, before any record is forgotten. The live check showed the line on the first read after the REST ban (see `docs/service-notes.md` `## Palworld`). The window has two accepted costs: inside it a moderator's ban on the same id counts as ours and is lifted on restore, and a moderator's unban is reported as suspended and not re-enforced until the window ends. The Source adapter has no window: its console list is re-read after `writeid`, so an id the list does not show is forgotten at once.
+The Palworld forget step relies on the ban-list file reflecting a ban within the grace window; the live check
+confirms that the file shows a new ban inside that window, before any record is forgotten. The live check showed the
+line on the first read after the REST ban (see `docs/service-notes.md` `## Palworld`). The window has two accepted
+costs: inside it a moderator's ban on the same id counts as ours and is lifted on restore, and a moderator's unban is
+reported as suspended and not re-enforced until the window ends. The `source_rcon` adapter has no window: its console
+list is re-read after `writeid`, so an id the list does not show is forgotten at once. The `source_panel` adapter has
+the Palworld-style grace window, with the same accepted costs: inside it a moderator's ban on the same id counts as
+ours and is lifted on restore, and a moderator's unban is reported as suspended until the window ends.
 
 The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read just before it. A moderator's edit saved between that read and that write would be overwritten. The window holds one read and one write with only a local database call between them, and the race is accepted on that basis.
 
@@ -92,10 +99,11 @@ The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the
 ## Source panel (The Ship)
 
 - `src/hallmonitor/adapters/source_panel.py:48` `BAN_LINE = re.compile(` — the only form of a ban line: `banid 0` and a Source ID, once stripped, so a timed, commented or junk line is never a ban
-- `src/hallmonitor/adapters/source_panel.py:105` `failure = identity_error(subject, self._universe)` — the identity gate in observe: a malformed steam_id is `bad_identity` before any file line is compared
-- `src/hallmonitor/adapters/source_panel.py:160` `failure = identity_error(subject, self._universe)` — the identity gate in apply: nothing is recorded and no console command is built from a malformed id
-- `src/hallmonitor/adapters/source_panel.py:114` `return Observed("suspended") if record is not None else Observed("banned_external")` — a listed Source ban without an own record is `banned_external`, so the reconcile loop never applies to it
-- `src/hallmonitor/adapters/source_panel.py:129` `if sid in await self._listed():` — the re-read before a Source ban: a moderator's ban that appeared after observe is never taken over
-- `src/hallmonitor/adapters/source_panel.py:133` `await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))` — the record is placed before the first console command, so a ban the adapter sends is always recorded as ours
-- `src/hallmonitor/adapters/source_panel.py:147` `if not await self._owned(steam_id):` — the never-lift rule: a restore sends no `removeid` and no `writeid` unless hallmonitor recorded the ban
-- `src/hallmonitor/adapters/source_panel.py:117` `if own.within_grace(record[1], now, self._grace):` — the file-lag window: an own record the file does not show yet is `suspended` inside the grace window, and forgotten after it
+- `src/hallmonitor/adapters/source_panel.py:100` `failure = identity_error(subject, self._universe)` — the identity gate in observe: a malformed steam_id is `bad_identity` before any file line is compared
+- `src/hallmonitor/adapters/source_panel.py:158` `failure = identity_error(subject, self._universe)` — the identity gate in apply: nothing is recorded and no console command is built from a malformed id
+- `src/hallmonitor/adapters/source_panel.py:109` `return Observed("suspended") if record is not None else Observed("banned_external")` — a listed Source ban without an own record is `banned_external`, so the reconcile loop never applies to it
+- `src/hallmonitor/adapters/source_panel.py:124` `if sid in await self._listed():` — the re-read before a Source ban: a moderator's ban that appeared after observe is never taken over
+- `src/hallmonitor/adapters/source_panel.py:128` `await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))` — the record is placed before the first console command, so a ban the adapter sends is always recorded as ours
+- `src/hallmonitor/adapters/source_panel.py:144` `if not await self._owned(steam_id):` — the never-lift rule: a restore sends no `removeid` and no `writeid` unless hallmonitor recorded the ban
+- `src/hallmonitor/adapters/source_panel.py:112` `if own.within_grace(record[1], now, self._grace):` — the file-lag window: an own record the file does not show yet is `suspended` inside the grace window, and forgotten after it
+- `src/hallmonitor/adapters/source_panel.py:132` `await self._forget(steam_id)   # banid was refused, so no ban was placed and no record is kept for it` — the forget is only for a refused `banid`: once `banid` is accepted the record is kept, so a ban the console holds is never left without a record

@@ -211,7 +211,7 @@ async def test_a_wrong_key_fails_the_whole_observe_with_auth(tmp_path: Path) -> 
     assert info.value.reason == "auth"
 
 
-@pytest.mark.parametrize(("status", "reason"), [(404, "http"), (500, "http")])
+@pytest.mark.parametrize(("status", "reason"), [(404, "not_found"), (500, "http")])
 async def test_a_failed_file_read_fails_the_whole_observe(tmp_path: Path, status: int, reason: str) -> None:
     async with lab_with(tmp_path, OWN_SID) as lab:
         lab.state.fail_next = {"contents": status}
@@ -303,9 +303,10 @@ async def test_an_id_a_moderator_already_listed_is_banned_external_and_never_tak
 
 
 @pytest.mark.parametrize(("status", "reason"),
-                         [(409, "unreachable"), (502, "unreachable"), (401, "auth"), (404, "http"), (500, "http")])
-async def test_a_failed_command_forgets_the_record_and_raises_the_reason(tmp_path: Path, status: int,
-                                                                         reason: str) -> None:
+                         [(409, "unreachable"), (502, "unreachable"), (401, "auth"), (404, "not_found"),
+                          (500, "http")])
+async def test_a_refused_banid_forgets_the_record_and_raises_the_reason(tmp_path: Path, status: int,
+                                                                       reason: str) -> None:
     async with lab_with(tmp_path) as lab:
         lab.state.fail_next = {"command": status}
         with pytest.raises(AdapterError) as info:
@@ -313,6 +314,74 @@ async def test_a_failed_command_forgets_the_record_and_raises_the_reason(tmp_pat
         assert info.value.reason == reason
         assert await record_of(lab, OWN_ID) is None
         assert lab.console.listed == []
+        assert lab.state.commands == []
+
+
+# Suspend: once banid has been accepted, the ban is ours and its record stays, whatever fails after it ----------------
+
+@pytest.mark.parametrize("refused", ["kickid", "writeid"])
+async def test_a_refused_command_after_banid_keeps_the_record_and_raises(tmp_path: Path, refused: str) -> None:
+    async with lab_with(tmp_path) as lab:
+        lab.state.fail_commands = {refused: 500}
+        with pytest.raises(AdapterError) as info:
+            await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended")
+        assert info.value.reason == "http"
+        assert await record_of(lab, OWN_ID) == (OWN_BAN, NOW)
+        assert lab.console.listed == [OWN_SID]   # the console holds the ban hallmonitor placed
+        assert lab.state.commands[0] == f"banid 0 {OWN_SID}"
+        assert lab.state.commands.count(f"banid 0 {OWN_SID}") == 1
+
+
+async def test_a_refused_kickid_then_a_following_observe_reads_it_as_suspended(tmp_path: Path) -> None:
+    async with lab_with(tmp_path) as lab:
+        lab.state.fail_commands = {"kickid": 500}
+        with pytest.raises(AdapterError):
+            await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended")
+        observed = await lab.adapter.observe([steam_subject("r1", OWN_ID, "suspended")])
+    assert observed == {"r1": Observed("suspended")}
+
+
+async def test_a_refused_writeid_then_a_following_observe_reads_it_as_suspended(tmp_path: Path) -> None:
+    async with lab_with(tmp_path) as lab:
+        lab.state.fail_commands = {"writeid": 500}
+        with pytest.raises(AdapterError):
+            await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended")
+        observed = await lab.adapter.observe([steam_subject("r1", OWN_ID, "suspended")])
+    assert observed == {"r1": Observed("suspended")}
+
+
+@pytest.mark.parametrize(("refused", "sent_before"),
+                         [("kickid", [f"banid 0 {OWN_SID}"]), ("writeid", [f"banid 0 {OWN_SID}", f"kickid {OWN_SID}"])])
+async def test_a_restore_after_a_refused_command_sends_removeid_and_writeid(tmp_path: Path, refused: str,
+                                                                           sent_before: list[str]) -> None:
+    async with lab_with(tmp_path) as lab:
+        lab.state.fail_commands = {refused: 500}
+        with pytest.raises(AdapterError):
+            await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended")
+        result = await lab.adapter.apply(steam_subject("r1", OWN_ID, "allowed"), "allowed")
+        assert await record_of(lab, OWN_ID) is None
+    assert result == Observed("allowed")
+    assert lab.state.commands == [*sent_before, f"removeid {OWN_SID}", "writeid"]
+    assert lab.state.files[(SERVER, BANLIST)] == ""
+
+
+# Suspend: the server accepts banid but its list never shows the id, so the record carries the grace window ------------
+
+async def test_a_banid_the_list_never_shows_stays_suspended_inside_the_grace_window_then_is_forgotten(
+        tmp_path: Path) -> None:
+    async with lab_with(tmp_path, ignore_banid=True) as lab:
+        result = await lab.adapter.apply(steam_subject("r1", OWN_ID, "suspended"), "suspended")
+        assert result == Observed("suspended")
+        assert await record_of(lab, OWN_ID) == (OWN_BAN, NOW)
+        assert lab.state.commands == [f"banid 0 {OWN_SID}", f"kickid {OWN_SID}", "writeid"]
+        assert lab.state.files[(SERVER, BANLIST)] == ""
+        inside = await lab.adapter.observe([steam_subject("r1", OWN_ID, "suspended")])
+        assert inside == {"r1": Observed("suspended")}
+        assert await record_of(lab, OWN_ID) == (OWN_BAN, NOW)
+        lab.clock.at = NOW + timedelta(seconds=602)
+        outside = await lab.adapter.observe([steam_subject("r1", OWN_ID, "suspended")])
+        assert outside == {"r1": Observed("allowed")}
+        assert await record_of(lab, OWN_ID) is None
 
 
 # Restore: only our own bans are lifted ------------------------------------------------------------------------

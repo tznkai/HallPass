@@ -31,6 +31,7 @@ class FakePteroState:
     key: str = PTERO_KEY
     requests: list[tuple[str, str]] = field(default_factory=list)      # (method, path) of the routes it owns
     fail_next: dict[str, int] = field(default_factory=dict)            # route name -> status, once each
+    fail_commands: dict[str, int] = field(default_factory=dict)        # command verb -> status, once each
     commands: list[str] = field(default_factory=list)                  # the text of each console command accepted
     command_bodies: list[bytes] = field(default_factory=list)          # the raw body of each command request
     command_types: list[str] = field(default_factory=list)             # the content-type of each command request
@@ -75,6 +76,9 @@ def _command(state: FakePteroState, request: httpx.Request) -> httpx.Response:
         return _error(422, "ValidationException")
     if not isinstance(text, str):
         return _error(422, "ValidationException")
+    verb = text.split(" ", 1)[0]
+    if verb in state.fail_commands:
+        return httpx.Response(state.fail_commands.pop(verb))   # a refused command runs nothing and is not recorded
     state.commands.append(text)
     if state.console is not None:
         state.console(state, text)

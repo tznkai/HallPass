@@ -60,11 +60,6 @@ def listed_source_ids(text: str) -> set[str]:
     return found
 
 
-def _reason(error: PteroError) -> str:
-    """Auth, unreachable and http keep their names. A missing file or command target is `http` for this adapter."""
-    return "http" if error.reason == "not_found" else error.reason
-
-
 class SourcePanelAdapter:
     capabilities = Capabilities(suspend=True, restore=True, read_state=True, removes_connected=True)
 
@@ -83,14 +78,14 @@ class SourcePanelAdapter:
         try:
             text = await self._files.read(self._banlist)
         except PteroError as error:
-            raise AdapterError(_reason(error)) from None
+            raise AdapterError(error.reason) from None
         return listed_source_ids(text)
 
     async def _command(self, text: str) -> None:
         try:
             await self._files.command(text)
         except PteroError as error:
-            raise AdapterError(_reason(error)) from None
+            raise AdapterError(error.reason) from None
 
     async def _record(self, steam_id: str) -> tuple[str, datetime] | None:
         return await self._db.run(lambda c: own.own_record(c, self._slug, steam_id))
@@ -133,11 +128,13 @@ class SourcePanelAdapter:
         await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))
         try:
             await self._command(f"banid 0 {sid}")
-            await self._command(f"kickid {sid}")
-            await self._command("writeid")
         except AdapterError:
-            await self._forget(steam_id)   # the ban may not have been placed, so no record is kept for it
+            await self._forget(steam_id)   # banid was refused, so no ban was placed and no record is kept for it
             raise
+        # banid was accepted, so the ban is ours and in force on the console. Its record is kept if kickid or writeid
+        # fails, and the error is raised, so the next pass reads the ban as ours and a restore can lift it.
+        await self._command(f"kickid {sid}")
+        await self._command("writeid")
         if sid not in await self._listed():
             # The file may lag the console. The record is inside the grace window, so the ban is about to be in force.
             log_event(log, "ban_not_yet_listed", adapter=ADAPTER, service=self._slug)
@@ -149,7 +146,8 @@ class SourcePanelAdapter:
         await self._command(f"removeid {sid}")
         await self._command("writeid")
         if sid in await self._listed():
-            log_event(log, "not_applied", adapter=ADAPTER, service=self._slug, outcome="listing_disagrees")
+            log_event(log, "not_applied", adapter=ADAPTER, service=self._slug, outcome="listing_disagrees",
+                      level=logging.WARNING)
             return Observed("error", "not_applied")
         await self._forget(steam_id)
         return Observed("allowed")
