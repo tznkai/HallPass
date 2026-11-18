@@ -44,6 +44,8 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 
 ## Adapters
 
+- **Opinionated: allowlist first.** Where a game has an allowlist, the adapter controls it; a ban list is the
+  fallback for games without one. A ban-first approach is not a setting and needs adapter changes (README).
 - `src/hallmonitor/adapters/registry.py` is the one adapter-name-to-plugin map (`manual`, `fluxer`, `minecraft`,
   `palworld`, `valheim`, `source_rcon`, `source_panel`). Adding an adapter is one module plus one line there. A plugin
   returns None when its service is unconfigured, and its subjects report `no_adapter`.
