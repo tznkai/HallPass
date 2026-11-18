@@ -129,8 +129,9 @@ such as `<pal-host>` and `<steam-id>`.
 
 ## Pterodactyl
 
-Panel 1.15.2, at or above the CVE-2026-54593 fix (Panel 1.12.3, Wings 1.12.2); the Wings version is still to be
-recorded. The `hallmonitor` subuser's Client API key (`ptlc_...`) is used with each server's own id.
+Panel 1.15.2, at or above the CVE-2026-54593 fix (Panel 1.12.3, Wings 1.12.2). The panel shows Wings (daemon) 1.13.4
+on 2026-11-18, also at or above that fix. The `hallmonitor` subuser's Client API key (`ptlc_...`) is used with each
+server's own id.
 
 - **Permissions.** Reading a file needs `file.read` and `file.read-content`. Writing a file's contents
   (`POST /api/client/servers/<id>/files/write`) needs `file.create`, not `file.update`: the panel checks
@@ -175,9 +176,9 @@ with crossplay off and one test account. Ids are placeholders such as `STEAM_0:<
 - **Startup.** The server loads the file at startup only if `server.cfg` has `exec banned_user.cfg`. Without that line,
   after a restart the file still held the ban, `listid` was empty and the ban was not enforced. The test server's
   `server.cfg` has the line. Hallmonitor sends no `exec` of its own, so the operator must add it.
-- **Pending.** Whether `POST /api/client/servers/<id>/command` answers 204 for the hallmonitor subuser (with
-  `control.console`, `file.read` and `file.read-content`, and without `file.create`) is not yet checked live. Until it
-  is, a non-204 answer shows as an `http` error and no ban is recorded as ours.
+- **Recorded.** On 2026-11-18, `POST /api/client/servers/<id>/command` answered 204 for the hallmonitor subuser, with
+  `control.console`, `file.read` and `file.read-content`, and without `file.create`. A non-204 answer would show as an
+  `http` error, and no ban would be recorded as ours.
 
 ## Abiotic Factor
 

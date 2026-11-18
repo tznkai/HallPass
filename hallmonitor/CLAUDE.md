@@ -100,6 +100,6 @@ Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl fil
 only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
 ids. Fluxer, Palworld, Valheim, the Pterodactyl permissions and The Ship (`source_panel`, checked 2026-11-18) are
 recorded. The Minecraft section lists the adapter's assumptions as pending, and Abiotic Factor is manual for now
-(adapter deferred). The Ship's 204 check for the subuser's console route is still pending. Until a service's check is
-recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
-not `file.update`.
+(adapter deferred). The Ship's 204 check for the subuser's console route was recorded on 2026-11-18. Until a
+service's check is recorded, that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl
+needs `file.create`, not `file.update`.
