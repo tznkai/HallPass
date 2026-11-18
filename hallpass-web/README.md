@@ -94,8 +94,10 @@ forces them to exit. The exit codes are:
 
 Hallpass compares Minecraft Java names and Bedrock gamertags without case. If an existing database already has two or
 more identities of the same kind on one service that differ only in case, the upgrade to schema version 6 stops
-with exit 1 and leaves the database at version 5. Hallpass cannot start until each group of such identities is
-resolved. Find the groups, with the id and stored value of every row, using the `sqlite3` tool:
+with exit 1 and leaves the database at version 5. This check runs first on an upgrade from version 5, so it also
+stops for case variants held by two different people, although schema version 7 allows several people to hold one
+identity. Hallpass cannot start until each group of such identities is resolved. Find the groups, with the id and
+stored value of every row, using the `sqlite3` tool:
 
 ```
 SELECT service_slug, kind, lower(value), group_concat(id), group_concat(value) FROM external_identity
