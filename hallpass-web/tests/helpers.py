@@ -121,6 +121,10 @@ class StubOidcClient:
         """Publishes a new key set, as the provider does when it rotates its keys."""
         self._jwks = jwks
 
+    def seed(self, jwks: dict) -> None:
+        """Puts a key set in the cache, as an earlier fetch would have, without counting a call."""
+        self._cached_jwks = jwks
+
     async def authorize_redirect(self, request, redirect_uri: str):
         if self._redirect_error is not None:
             raise self._redirect_error
@@ -139,11 +143,12 @@ class StubOidcClient:
     async def fetch_jwk_set(self, force: bool = False) -> dict:
         """As Authlib does: the cached key set, read from the provider again only when forced."""
         self.jwks_calls.append(force)
+        if not force and self._cached_jwks is not None:
+            return self._cached_jwks     # a cached read answers at once, while a forced fetch may still be in flight
         await asyncio.sleep(0)     # a real fetch yields, so concurrent callers really do overlap
-        if force or self._cached_jwks is None:
-            if self._jwks_error is not None:
-                raise self._jwks_error
-            self._cached_jwks = self._jwks or {"keys": []}
+        if self._jwks_error is not None:
+            raise self._jwks_error
+        self._cached_jwks = self._jwks or {"keys": []}
         return self._cached_jwks
 
 

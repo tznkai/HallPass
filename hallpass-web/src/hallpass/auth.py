@@ -98,7 +98,8 @@ class AuthlibOidc:
                  monotonic: Callable[[], float] = time.monotonic) -> None:
         self._monotonic = monotonic
         self._keys_lock = asyncio.Lock()
-        self._last_forced_refresh: float | None = None
+        self._last_fetch: float | None = None           # when the last key fetch went out, on the injected clock
+        self._keys: Mapping[str, Any] | None = None     # the key set the last successful fetch returned
         oauth = OAuth()
         oauth.register("authentik", server_metadata_url=metadata_url, client_id=client_id,
                        client_secret=client_secret, client_kwargs={"scope": "openid profile hallpass"})
@@ -125,9 +126,9 @@ class AuthlibOidc:
 
     async def provider(self, *, keys: bool = True, refresh_keys: bool = False) -> Provider:
         """The discovery document's issuer and end-session endpoint and, when keys is set, the provider's keys.
-        Sign-out asks for no keys, so a JWKS failure cannot stop it. The keys are fetched again only when refresh_keys
-        is set, and then only once per FORCED_REFRESH_COOLDOWN_SECONDS: inside the cooldown the cached keys are
-        returned. A failure is a ProviderError, and its text is dropped."""
+        Sign-out asks for no keys, so a JWKS failure cannot stop it. Every key fetch, forced or not, is at least
+        FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed fetches included. Inside that window the cached keys
+        are returned, and with none cached the call fails. A failure is a ProviderError, and its text is dropped."""
         try:
             metadata = await self._client.load_server_metadata()
             jwks = await self._fetch_keys(refresh=refresh_keys) if keys else None
@@ -137,14 +138,21 @@ class AuthlibOidc:
             raise ProviderError("provider_unavailable") from None
 
     async def _fetch_keys(self, *, refresh: bool) -> Mapping[str, Any]:
-        """The provider's keys. The lock makes concurrent callers share one forced fetch: the first sets the time, and
-        the rest find the cooldown running and read the cached keys it just refreshed."""
+        """The provider's keys. A read that needs the network goes out only when the cooldown has passed since the last
+        fetch attempt, so there is at most one outbound fetch per window, and an empty cache does not lift that. The
+        lock makes a concurrent caller wait for the fetch in flight, then read the keys it stored."""
         async with self._keys_lock:
-            last = self._last_forced_refresh
-            force = refresh and (last is None or self._monotonic() - last >= FORCED_REFRESH_COOLDOWN_SECONDS)
-            if force:
-                self._last_forced_refresh = self._monotonic()
-            return await self._client.fetch_jwk_set(force=force)
+            now = self._monotonic()
+            cooled = self._last_fetch is None or now - self._last_fetch >= FORCED_REFRESH_COOLDOWN_SECONDS
+            if self._keys is None or refresh:
+                if cooled:
+                    self._last_fetch = now
+                    self._keys = await self._client.fetch_jwk_set(force=refresh or self._keys is None)
+                    return self._keys
+                if self._keys is None:
+                    raise ProviderError("provider_unavailable")
+            # Inside the cooldown, or with keys already cached: the client answers from its own cache, sending nothing.
+            return await self._client.fetch_jwk_set(force=False)
 
 
 class RedirectToLogin(Exception):

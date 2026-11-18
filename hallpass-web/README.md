@@ -132,8 +132,8 @@ leave the suspension in place, or to suspend it by hand again if they already re
 
 Schema version 10 adds the tables that sign-out and back-channel logout use. An upgrade from version 9 keeps every row.
 Schema version 11 adds `oidc_session`, which keeps each sign-in's ID token on the server, so the session cookie holds
-only a handle to it. An upgrade from version 10 keeps every row. Sessions started before the upgrade hold no start time,
-so hallpass ends each of them on its next request. Everyone signs in once after the upgrade.
+only a handle to it. An upgrade from version 10 keeps every row. Sessions started before schema 10 hold no start time,
+so hallpass ends each of them once; everyone signs in again.
 
 Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
 by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied

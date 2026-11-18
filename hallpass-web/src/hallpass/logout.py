@@ -10,6 +10,9 @@ URL, and from nothing the request sent.
 
 from __future__ import annotations
 
+import base64
+import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -60,7 +63,10 @@ class LogoutClaims:
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """A finite JSON number. An integer is always finite here: math.isfinite raises for one beyond the float range."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return isinstance(value, int) or math.isfinite(value)
 
 
 def _check_claims(claims: Mapping[str, Any], *, issuer: str, client_id: str, now: datetime) -> LogoutClaims:
@@ -103,6 +109,20 @@ def check_size(token: str) -> None:
     """Refuses a token longer than MAX_TOKEN_CHARS, before anything about it is read or verified."""
     if len(token) > MAX_TOKEN_CHARS:
         raise LogoutTokenRefused("too_large")
+
+
+def check_header(token: str) -> None:
+    """Refuses a token that is not a compact JWS with an RS256 header and a string kid. The header is read without
+    verifying anything, so no key is fetched on behalf of a token that could never verify."""
+    parts = token.split(".")
+    if len(parts) != 3 or not all(parts):
+        raise LogoutTokenRefused("malformed")
+    try:
+        header = json.loads(base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4)))
+    except (ValueError, TypeError, RecursionError):
+        raise LogoutTokenRefused("malformed") from None
+    if not isinstance(header, dict) or header.get("alg") not in ALGORITHMS or not isinstance(header.get("kid"), str):
+        raise LogoutTokenRefused("malformed")
 
 
 def verify_logout_token(token: str, *, jwks: Mapping[str, Any], issuer: str, client_id: str,

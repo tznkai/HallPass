@@ -167,8 +167,9 @@ def _verify(deps, provider: logout.Provider, token: str) -> LogoutClaims:
 
 async def _verified_claims(deps, token: str) -> LogoutClaims:
     """Checks the token against the provider's keys. An unknown kid fetches the keys once more and tries again. A token
-    too large to be one is refused before the provider is asked for anything."""
+    that is too large, or not an RS256 JWS with a kid, is refused before the provider is asked for anything."""
     logout.check_size(token)
+    logout.check_header(token)
     try:
         return _verify(deps, await deps.oidc.provider(), token)
     except LogoutTokenRefused as error:

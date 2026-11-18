@@ -78,6 +78,10 @@ def test_an_audience_list_that_contains_the_client_id_is_accepted():
     pytest.param(lambda: logout_token(NOW, nonce="n-1"), "has_nonce", id="nonce-present"),
     pytest.param(lambda: logout_token(NOW, sid=None, sub=None), "no_subject", id="neither-sid-nor-sub"),
     pytest.param(lambda: logout_token(NOW, sid=7), "malformed_claim", id="sid-not-a-string"),
+    pytest.param(lambda: logout_token(NOW, exp=float("nan")), "malformed_claim", id="exp-nan"),
+    pytest.param(lambda: logout_token(NOW, exp=float("inf")), "malformed_claim", id="exp-infinite"),
+    pytest.param(lambda: logout_token(NOW, iat=float("inf")), "malformed_claim", id="iat-infinite"),
+    pytest.param(lambda: logout_token(NOW, iat=float("nan")), "malformed_claim", id="iat-nan"),
     pytest.param(lambda: logout_token(NOW, sid=None, sub=""), "no_subject", id="empty-sub-and-sid"),
     pytest.param(lambda: "not-a-jwt", "malformed", id="not-a-token"),
     pytest.param(lambda: jwt.encode({"alg": "HS256", "kid": "test-key"}, logout_claims(NOW),
@@ -87,6 +91,12 @@ def test_each_failed_check_is_refused_with_its_reason(token, reason):
     with pytest.raises(LogoutTokenRefused) as refused:
         verify(token())
     assert refused.value.reason == reason
+
+
+def test_an_integer_beyond_the_float_range_is_a_number_and_is_not_a_crash():
+    claims = verify(logout_token(NOW, exp=10 ** 400))
+
+    assert claims == LogoutClaims(sid=SID, sub=SUB, issued_at=NOW)
 
 
 def test_a_malformed_key_set_is_refused_as_bad_keys():
@@ -158,6 +168,20 @@ async def test_concurrent_forced_key_refetches_share_one_fetch():
 
     await asyncio.gather(oidc.provider(refresh_keys=True), oidc.provider(refresh_keys=True))
 
+    assert stub.jwks_calls == [True, False]
+
+
+async def test_a_refresh_that_waits_on_the_lock_gets_the_rotated_keys_not_the_cached_ones():
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION}, jwks=jwks("k1"))
+    stub.seed(jwks("k1"))
+    stub.rotate(jwks("k2"))
+    oidc = AuthlibOidc(metadata_url="https://authentik.test/.well-known", client_id=CLIENT_ID, client_secret="s",
+                       monotonic=lambda: 0.0)
+    oidc._client = stub
+
+    first, second = await asyncio.gather(oidc.provider(refresh_keys=True), oidc.provider(refresh_keys=True))
+
+    assert (first.jwks, second.jwks) == (jwks("k2"), jwks("k2"))
     assert stub.jwks_calls == [True, False]
 
 

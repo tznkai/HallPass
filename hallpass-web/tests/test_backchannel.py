@@ -5,13 +5,17 @@ records nothing. Each request goes through the app's own checks, with fake keys 
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import timedelta
 
 import httpx
 import pytest
+from joserfc import jwt
+from joserfc.jwk import OctKey
 
 from hallpass import registry
+from hallpass.auth import FORCED_REFRESH_COOLDOWN_SECONDS
 from hallpass.logs import FIELDS_ATTR
 from hallpass.logout import CLOCK_SKEW_SECONDS, MAX_TOKEN_CHARS, ProviderError
 from tests.helpers import (
@@ -293,3 +297,51 @@ async def test_an_oversized_token_is_refused_before_the_provider_is_asked_for_ke
 
     assert response.status_code == 400
     assert env.oidc.provider_calls == []
+
+
+def _claims_now(env: Env) -> dict:
+    return logout_claims(env.clock.now())
+
+
+def _with_raw_header(env: Env, header_json: str) -> str:
+    """A valid token's payload and signature under a header written by hand, for headers joserfc will not encode."""
+    _, payload, signature = logout_token(env.clock.now()).split(".")
+    header = base64.urlsafe_b64encode(header_json.encode()).decode().rstrip("=")
+    return f"{header}.{payload}.{signature}"
+
+
+@pytest.mark.parametrize("build", [
+    pytest.param(lambda env: "not-a-jwt", id="not-a-jws"),
+    pytest.param(lambda env: "aaa.bbb", id="two-segments"),
+    pytest.param(lambda env: "aaa..bbb", id="empty-segment"),
+    pytest.param(lambda env: "bm90LWpzb24.e30.c2ln", id="header-not-json"),
+    pytest.param(lambda env: jwt.encode({"alg": "HS256", "kid": "test-key"}, _claims_now(env),
+                                        OctKey.generate_key(256)), id="hs256"),
+    pytest.param(lambda env: jwt.encode({"alg": "RS256"}, _claims_now(env), signing_key()), id="no-kid"),
+    pytest.param(lambda env: _with_raw_header(env, '{"alg": "RS256", "kid": 7}'), id="kid-not-a-string"),
+])
+async def test_a_token_that_is_not_an_rs256_jws_with_a_kid_gets_no_key_fetch(env: Env, build):
+    await bound_adult(env)
+
+    response = await deliver(env, build(env))
+
+    assert response.status_code == 400
+    assert env.oidc.provider_calls == []
+    assert await revocation_rows(env) == (0, 0)
+
+
+async def test_failed_key_fetches_are_spaced_by_the_cooldown_even_for_unauthenticated_traffic(env: Env):
+    ticks = [0.0]
+    stub = StubOidcClient(metadata={"issuer": ISSUER, "end_session_endpoint": END_SESSION}, jwks=jwks("test-key"),
+                          jwks_error=httpx.ConnectError("unreachable"))
+    use_oidc_client(env, stub, monotonic=ticking(ticks))
+    token = logout_token(env.clock.now())
+
+    statuses = [(await deliver(env, token)).status_code for _ in range(10)]
+
+    assert statuses == [400] * 10
+    assert stub.jwks_calls == [True]
+
+    ticks[0] = float(FORCED_REFRESH_COOLDOWN_SECONDS)
+    assert (await deliver(env, token)).status_code == 400
+    assert stub.jwks_calls == [True, True]
