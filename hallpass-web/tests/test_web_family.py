@@ -364,16 +364,24 @@ async def test_an_admin_turns_an_active_adult_into_a_child_who_waits_for_a_paren
     await authentik_sync.sync_people(env.application.state.deps, [ana])
     assert await in_fluxer_group(env, ana)
 
-    changed = await post(env, f"/admin/people/{ana}", display_name="Ana", account_type="child", email="", phone="",
-                         fluxer_email_override="")
+    # Ana keeps her address, so only the change of type can take her out of the Fluxer group.
+    changed = await post(env, f"/admin/people/{ana}", display_name="Ana", account_type="child",
+                         email="ana.a@example.invalid", phone="", fluxer_email_override="")
 
     assert changed.status_code == 303
     assert (await person_row(env, ana)).status == "awaiting_grant"
-    assert not await in_fluxer_group(env, ana)
     logged = await env.db.run(lambda c: c.execute(
         "SELECT COUNT(*) FROM decision_log WHERE action = 'status_changed' AND target_person_id = ?",
         (ana,)).fetchone()[0])
     assert logged == 1
+    # Mum has accepted the terms, so once she is linked the wait for a grant is the only reason left.
     assert (await post(env, f"/admin/people/{ana}/parents", parent_id=mum)).status_code == 303
+    await authentik_sync.sync_people(env.application.state.deps, [ana])
+    assert not await in_fluxer_group(env, ana)
     waiting = (await mum_browser.get("/children")).text
     assert "Ana" in waiting and "Approve" in waiting
+
+    token = (await form(env, "/children", client=mum_browser))["csrf"]
+    assert (await mum_browser.post(f"/children/{ana}/grant", data={"csrf": token})).status_code == 303
+    assert (await person_row(env, ana)).status == "active"
+    assert await in_fluxer_group(env, ana)

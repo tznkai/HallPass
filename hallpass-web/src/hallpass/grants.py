@@ -3,7 +3,8 @@
 """Person-status transitions and parent grants.
 
 Covers the status transitions out of `invited`, the status change on an admin's change to or from child, and parent
-grants. `change_account_type` also moves a locked person's `prior_status`, so the unlock lands on the waiting status.
+grants. `change_account_type` also moves a locked person's `prior_status`, so the unlock lands on the status the change
+would have given them.
 
 This module and `registry.set_locked` are the only places that set a person's status. Plain functions over a
 sqlite3 connection, run inside `Database.run`, so each call is one transaction. Nothing here calls log_event;
