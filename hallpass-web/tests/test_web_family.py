@@ -10,10 +10,12 @@ from __future__ import annotations
 import httpx
 from markupsafe import escape
 
-from hallpass import registry, services, text
+from hallpass import authentik_sync, registry, services, text
 from hallpass.registry import Person
 from tests.fake_authentik import enrol
 from tests.helpers import (
+    ADMIN_SUB,
+    FLUXER_GROUP,
     NOW,
     Env,
     accept_current,
@@ -334,20 +336,40 @@ async def test_a_locked_parent_does_not_block_another_linked_parents_approval_on
     assert (await person_row(env, child)).status == "invited"
 
 
+async def in_fluxer_group(env: Env, person_id: int) -> bool:
+    row = await person_row(env, person_id)
+    return row.authentik_pk in env.authentik.groups[FLUXER_GROUP]
+
+
 async def test_an_admin_turns_an_active_adult_into_a_child_who_waits_for_a_parents_grant(env: Env):
     await admin_client(env)
+    admin = await env.db.run(lambda c: registry.get_by_uuid(c, ADMIN_SUB))
+    fluxer = await env.db.run(lambda c: services.create_service(
+        c, slug="fluxer", name="Fluxer", kind="oidc", adapter="fluxer", auto_suspendable=True, url=None,
+        actor_id=admin.id, now=NOW))
+    def grant_by_type(conn) -> None:
+        for subject in ("adult", "child"):
+            services.add_entitlement(conn, fluxer.id, "type", subject, "grant", actor_id=admin.id, now=NOW)
+
+    await env.db.run(grant_by_type)
     ana = await create_person(env, "Ana", "adult")
+    # A Fluxer address is needed for group membership; an adult with no address is never a member.
+    assert (await post(env, f"/admin/people/{ana}", display_name="Ana", account_type="adult",
+                       email="ana.a@example.invalid", phone="", fluxer_email_override="")).status_code == 303
     ana_browser = await enrol_and_sign_in(env, ana, "ana1")
     assert (await accept_current(env, ana_browser)).status_code == 303
     mum = await create_person(env, "Mum", "parent")
     mum_browser = await enrol_and_sign_in(env, mum, "mum1")
     assert (await accept_current(env, mum_browser)).status_code == 303
+    await authentik_sync.sync_people(env.application.state.deps, [ana])
+    assert await in_fluxer_group(env, ana)
 
     changed = await post(env, f"/admin/people/{ana}", display_name="Ana", account_type="child", email="", phone="",
                          fluxer_email_override="")
 
     assert changed.status_code == 303
     assert (await person_row(env, ana)).status == "awaiting_grant"
+    assert not await in_fluxer_group(env, ana)
     logged = await env.db.run(lambda c: c.execute(
         "SELECT COUNT(*) FROM decision_log WHERE action = 'status_changed' AND target_person_id = ?",
         (ana,)).fetchone()[0])

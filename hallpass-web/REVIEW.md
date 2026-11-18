@@ -50,13 +50,13 @@ as the code they cite.
 
 ## Status transitions
 
-- `src/hallpass/grants.py:106` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
-- `src/hallpass/grants.py:50` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
-- `src/hallpass/grants.py:52` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
-- `src/hallpass/grants.py:143` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
-- `src/hallpass/grants.py:121` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
-- `src/hallpass/grants.py:82` `AND p.status != 'locked'` — a grant by a locked parent counts for nothing, so it neither settles a child at sign-in nor blocks another parent's approval
-- `src/hallpass/grants.py:172` `if to_child == (old_type == "child"):` — a change between adult and parent moves no status; an active person made a child waits for a parent's grant, and an awaiting child made an adult becomes active
+- `src/hallpass/grants.py:109` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
+- `src/hallpass/grants.py:53` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
+- `src/hallpass/grants.py:55` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
+- `src/hallpass/grants.py:146` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
+- `src/hallpass/grants.py:124` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
+- `src/hallpass/grants.py:85` `AND p.status != 'locked'` — a grant by a locked parent counts for nothing, so it neither settles a child at sign-in nor blocks another parent's approval
+- `src/hallpass/grants.py:175` `if to_child == (old_type == "child"):` — a change between adult and parent moves no status; an active person made a child waits for a parent's grant, and an awaiting child made an adult becomes active
 - `src/hallpass/web/routes_admin.py:258` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
 
 ## Entitlement resolution

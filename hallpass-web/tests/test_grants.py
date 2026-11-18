@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from hallpass import grants, holds, registry, terms, text
+from hallpass import access, grants, holds, registry, services, terms, text
 from hallpass.db import Database
 from hallpass.grants import GrantRefused
+from tests.helpers import make_service
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 NOW_TEXT = "2026-11-13T12:00:00+00:00"
@@ -640,6 +641,8 @@ async def test_an_active_unbound_adult_made_a_child_is_invited(db: Database, pub
     changed = await retype(db, ann.id, "child", admin.id)
 
     assert changed.status == "invited"
+    assert await status_changes(db, ann.id) == [
+        ("admin", admin.id, "status_changed", {"prior_status": None, "status": "invited"})]
 
 
 async def test_an_invited_adult_made_a_child_stays_invited_with_no_row(db: Database, published) -> None:
@@ -680,16 +683,29 @@ async def test_a_locked_adult_made_a_child_stays_locked_and_unlocks_to_the_waiti
     assert await status_of(db, ann.id) == waiting
 
 
+async def access_of(db: Database, person_id: int, service: services.Service) -> access.Access:
+    person = await db.run(lambda c: registry.get_person(c, person_id))
+    assert person is not None
+    return await db.run(lambda c: access.evaluate(c, person, service))
+
+
 async def test_a_parents_grant_after_the_change_makes_the_child_active(db: Database, published) -> None:
     admin, version = published
     ann = await active_adult(db, version, bound=True)
     parent = await accept_terms(db, (await make(db, display_name="Pam", account_type="parent")).id, version.id)
+    calendar = await make_service(db, "calendar")
+    await db.run(lambda c: services.add_entitlement(c, calendar.id, "type", "child", "grant", actor_id=admin.id,
+                                                    now=NOW))
     await retype(db, ann.id, "child", admin.id)
     await link(db, ann.id, parent.id)
+
+    # The linked parent has accepted the terms, so the only reason left is the wait for a grant.
+    assert await access_of(db, ann.id, calendar) == access.Access(desired="suspended", reasons=("not_active",))
 
     granted = await grant(db, ann.id, parent.id)
 
     assert granted.status == "active"
+    assert await access_of(db, ann.id, calendar) == access.Access(desired="allowed", reasons=())
 
 
 async def test_an_awaiting_child_made_an_adult_becomes_active_and_logged(db: Database, published) -> None:
@@ -713,6 +729,8 @@ async def test_a_locked_awaiting_child_made_an_adult_unlocks_to_active(db: Datab
     changed = await retype(db, kit.id, "adult", admin.id)
     assert changed.status == "locked"
     assert changed.prior_status == "active"
+    assert await status_changes(db, kit.id) == [
+        ("admin", admin.id, "status_changed", {"prior_status": "active", "status": "locked"})]
 
     await lock(db, kit.id, False)
     assert await status_of(db, kit.id) == "active"
