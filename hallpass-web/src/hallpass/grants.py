@@ -71,8 +71,21 @@ def _is_linked(conn: sqlite3.Connection, child_id: int, parent_id: int) -> bool:
                         (child_id, parent_id)).fetchone() is not None
 
 
+def _counted_grant_rows(conn: sqlite3.Connection, child_id: int, columns: str) -> list[tuple]:
+    """The one query for grants that count: a grant counts only while its parent is still linked to this child. An
+    unlinked parent's grant is kept as history but counts for nothing. Whether a locked parent's grant counts is still
+    pending a user decision, so this query does not look at the parent's status."""
+    return conn.execute(
+        f"SELECT {columns} FROM parent_grant g "
+        "JOIN parent_link l ON l.child_id = g.child_id AND l.parent_id = g.parent_id "
+        "JOIN person p ON p.id = g.parent_id JOIN terms_version t ON t.id = g.terms_version_id "
+        "WHERE g.child_id = ? ORDER BY g.id",
+        (child_id,),
+    ).fetchall()
+
+
 def _has_grant(conn: sqlite3.Connection, child_id: int) -> bool:
-    return conn.execute("SELECT 1 FROM parent_grant WHERE child_id = ? LIMIT 1", (child_id,)).fetchone() is not None
+    return bool(_counted_grant_rows(conn, child_id, "g.id"))
 
 
 def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datetime) -> Person:
@@ -110,7 +123,7 @@ def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datet
     return result
 
 
-def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int) -> Person:
+def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int, now: datetime) -> Person:
     """Run on each successful sign-in. A child still invited (now enrolled) moves to active when a parent has granted,
     otherwise to awaiting_grant. Any other status is left alone, so a lock is never overwritten. The status is read
     inside this transaction, so a lock written just before it is seen."""
@@ -126,11 +139,7 @@ def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int) -> Person:
 
 
 def grants_for(conn: sqlite3.Connection, child_id: int) -> list[dict]:
-    """Each grant made for the child, oldest first: parent id, the parent's display name, the time and the version."""
-    rows = conn.execute(
-        "SELECT g.parent_id, p.display_name, g.granted_at, t.version FROM parent_grant g "
-        "JOIN person p ON p.id = g.parent_id JOIN terms_version t ON t.id = g.terms_version_id "
-        "WHERE g.child_id = ? ORDER BY g.id",
-        (child_id,),
-    ).fetchall()
+    """Each counted grant for the child, oldest first: parent id, the parent's display name, the time and the version.
+    A grant by a parent who is no longer linked is left out, as it counts for nothing."""
+    rows = _counted_grant_rows(conn, child_id, "g.parent_id, p.display_name, g.granted_at, t.version")
     return [{"parent_id": row[0], "display_name": row[1], "granted_at": row[2], "version": row[3]} for row in rows]

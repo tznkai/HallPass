@@ -156,7 +156,7 @@ async def test_awaiting_grant_child_is_suspended_on_every_service_until_the_pare
         assert "not_active" in decision.reasons
 
     await db.run(lambda c: grants.grant(c, child_id=child.id, parent_id=parent.id, now=NOW))
-    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id))
+    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id, NOW))
 
     for service in (calendar, valheim):
         assert await decide(db, child.id, service) == access.Access(desired="allowed", reasons=())
@@ -171,7 +171,7 @@ async def test_an_active_child_is_allowed_while_a_linked_parent_has_accepted(db:
     calendar = await make_service(db, "calendar")
     await entitle(db, admin, calendar.id, "type", "child")
     await db.run(lambda c: grants.grant(c, child_id=child.id, parent_id=parent.id, now=NOW))
-    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id))
+    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id, NOW))
 
     assert await decide(db, child.id, calendar) == access.Access(desired="allowed", reasons=())
 

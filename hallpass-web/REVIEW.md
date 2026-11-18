@@ -50,10 +50,10 @@ as the code they cite.
 
 ## Status transitions
 
-- `src/hallpass/grants.py:84` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
+- `src/hallpass/grants.py:97` `if not _is_linked(conn, child_id, parent_id):` — the linked-parent check: a person who is not a linked parent of the child cannot grant, and this check runs first, before any lookup or status change, so a missing child and an unlinked one are refused alike
 - `src/hallpass/grants.py:50` `if person.status == "locked":` — a locked person's terms acceptance is refused inside the write's transaction, so a lock that lands after the sign-in check cannot leave an acceptance behind
 - `src/hallpass/grants.py:52` `if person.account_type == "child":` — a child's acceptance is refused before any write, because a child's terms are covered by a parent, not by their own acceptance
-- `src/hallpass/grants.py:120` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
+- `src/hallpass/grants.py:133` `if person.account_type != "child" or person.status != "invited":` — the sign-in settle reads the status inside its own transaction and moves only an invited child, so a lock is never overwritten
 
 ## Entitlement resolution
 

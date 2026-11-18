@@ -52,7 +52,7 @@ async def grant(db: Database, child_id: int, parent_id: int) -> registry.Person:
 
 
 async def sign_in_settle(db: Database, child_id: int) -> registry.Person:
-    return await db.run(lambda c: grants.settle_child_at_sign_in(c, child_id))
+    return await db.run(lambda c: grants.settle_child_at_sign_in(c, child_id, NOW))
 
 
 async def refusal_reason(db: Database, child_id: int, parent_id: int) -> str:
@@ -145,19 +145,24 @@ async def test_later_acceptance_does_not_move_an_active_child_back(db: Database,
     assert await status_of(db, family.child.id) == "active"
 
 
-async def test_locked_person_acceptance_is_refused_and_not_stored(db: Database) -> None:
+@pytest.mark.parametrize(("account_type", "display_name"), [
+    ("adult", "Ann"),
+    ("parent", "Pam"),
+], ids=["adult", "parent"])
+async def test_locked_person_acceptance_is_refused_and_not_stored(db: Database, account_type: str,
+                                                                  display_name: str) -> None:
     publisher = await make(db, display_name="Publisher")
     version = await publish(db, publisher.id)
-    child = await make(db, display_name="Kit", account_type="child")
-    await db.run(lambda c: registry.set_locked(c, child.id, True))
+    person = await make(db, display_name=display_name, account_type=account_type)
+    await db.run(lambda c: registry.set_locked(c, person.id, True))
 
     with pytest.raises(grants.AcceptanceLocked):
-        await accept_terms(db, child.id, version.id)
+        await accept_terms(db, person.id, version.id)
 
     stored = await db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
     logged = await db.run(lambda c: c.execute(
         "SELECT COUNT(*) FROM decision_log WHERE action = 'terms_accepted'").fetchone()[0])
-    after = await db.run(lambda c: registry.get_person(c, child.id))
+    after = await db.run(lambda c: registry.get_person(c, person.id))
     assert stored == 0 and logged == 0
     assert after is not None and after.status == "locked"
 
@@ -370,6 +375,40 @@ async def test_a_locked_parent_is_refused_and_the_child_is_unchanged(db: Databas
 
     assert reason == "parent_inactive"
     assert await status_of(db, family.child.id) == "awaiting_grant"
+
+
+# Only grants by a parent who is linked to the child now count ----------------------------------------------
+
+async def test_an_unlinked_parents_grant_does_not_settle_the_child_to_active(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    mum = await accept_terms(db, (await make(db, display_name="Mum", account_type="parent")).id, version.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    await link(db, child.id, mum.id)
+    await grant(db, child.id, mum.id)
+    await db.run(lambda c: registry.unlink_parent(c, child.id, mum.id))
+
+    settled = await sign_in_settle(db, child.id)
+
+    assert settled.status == "awaiting_grant"
+
+
+async def test_a_linked_parent_can_approve_after_an_unlinked_parent_granted_before_enrolment(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    mum = await accept_terms(db, (await make(db, display_name="Mum", account_type="parent")).id, version.id)
+    dad = await accept_terms(db, (await make(db, display_name="Dad", account_type="parent")).id, version.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    await link(db, child.id, mum.id)
+    await grant(db, child.id, mum.id)
+    await db.run(lambda c: registry.unlink_parent(c, child.id, mum.id))
+    await link(db, child.id, dad.id)
+
+    granted = await grant(db, child.id, dad.id)
+
+    assert granted.status == "invited"
+    assert await db.run(lambda c: grants.grants_for(c, child.id)) == [
+        {"parent_id": dad.id, "display_name": "Dad", "granted_at": NOW_TEXT, "version": 1}]
 
 
 async def test_granting_a_missing_child_is_refused_as_not_linked(db: Database, family: Family) -> None:
