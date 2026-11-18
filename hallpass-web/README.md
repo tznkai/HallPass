@@ -34,7 +34,9 @@ Hallpass signs people in through an OpenID Connect provider in Authentik, and si
 these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
 
 - Invalidation flow: `default-invalidation-flow`, with a User Logout stage. Without that stage, a sign-out at hallpass
-  does not end the Authentik session, so the next visit signs the person straight back in.
+  does not end the Authentik session, so the next visit signs the person straight back in. The provider's default
+  invalidation flow, `default-provider-invalidation-flow`, has no User Logout stage, so it must be changed to
+  `default-invalidation-flow` or another flow that has one.
 - Redirect URIs: the strict redirect URI `<public_url>/auth/callback` (sign-in), and a second one of type Logout,
   `<public_url>/signed-out`, which the end-session request returns the browser to.
 - Logout method: Back-channel, with the Logout URI `<public_url>/auth/backchannel-logout`.
@@ -129,8 +131,9 @@ marks it restored. A new hold on that service cancels the pending restore, and t
 leave the suspension in place, or to suspend it by hand again if they already restored it.
 
 Schema version 10 adds the tables that sign-out and back-channel logout use. An upgrade from version 9 keeps every row.
-Sessions started before the upgrade hold no Authentik session id and no start time. A logout token that names a session
-id leaves them alone, but a logout token with only the person's subject ends them, so those people sign in again.
+Schema version 11 adds `oidc_session`, which keeps each sign-in's ID token on the server, so the session cookie holds
+only a handle to it. An upgrade from version 10 keeps every row. Sessions started before the upgrade hold no start time,
+so hallpass ends each of them on its next request. Everyone signs in once after the upgrade.
 
 Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
 by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied

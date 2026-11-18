@@ -141,5 +141,9 @@ item below, so each stays pending until a live run confirms it. Record the resul
   document at `jwks_uri`. The token is signed RS256.
 - **`sid` match.** Pending: the `sid` in a logout token equals the `sid` in the ID token of the same session, which is
   the SHA-256 hex of Authentik's session key.
-- **Cookie size.** Pending: the session cookie, which now carries the stored ID token, stays under the browser's 4096
-  byte limit with the real token. A cookie that is too large is dropped, and sign-in would then loop.
+- **Cookie size.** Pending: the session cookie stays under the browser's 4096 byte limit with a real sign-in. It holds
+  a handle to the ID token kept on the server, not the token, so a cookie that is too large would be a bug. A cookie
+  that is too large is dropped, and sign-in would then loop.
+- **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
+  User Logout stage. Pending: with the provider on `default-invalidation-flow` (or another flow with a User Logout
+  stage), a sign-out at hallpass ends the Authentik session, and the next visit asks for sign-in.
