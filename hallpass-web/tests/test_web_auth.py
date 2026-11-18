@@ -152,7 +152,7 @@ async def test_logout_ends_the_session_and_needs_the_csrf_token(env: Env):
 
     token = (await form(env, "/"))["csrf"]
     done = await env.client.post("/logout", data={"csrf": token})
-    assert done.status_code == 303 and done.headers["location"] == "/"
+    assert done.status_code == 303 and done.headers["location"] == "/signed-out"
     assert (await env.client.get("/")).headers["location"].startswith("/login")
 
 

@@ -47,6 +47,7 @@ TOPICS = [
     "Entitlement resolution",
     "Access decision",
     "Forward auth",
+    "Back-channel logout",
     "Feed tokens",
     "Conflict engine",
     "Hold permissions",

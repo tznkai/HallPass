@@ -20,11 +20,13 @@ from hallpass import grants, registry, services, terms
 from hallpass.auth import AuthlibOidc, Identity
 from hallpass.authentik import AuthentikClient
 from hallpass.config import Config
+from hallpass.logout import Provider
 from hallpass.monitor_api import create_monitor_app
 from hallpass.db import Database
 from hallpass.registry import Person
 from hallpass.web import app as web_app
 from tests.fake_authentik import FakeAuthentikState, add_user, enrol, make_app
+from tests.logout_tokens import END_SESSION, ISSUER, jwks
 
 ADMIN_SUB = "00000000-0000-4000-8000-000000000001"
 FLUXER_GROUP = "00000000-0000-4000-8000-0000000000f1"
@@ -63,10 +65,18 @@ class FixedClock:
 
 
 class FakeOidc:
-    """Stands in for AuthlibOidc: begin redirects straight back with a fake code, finish returns the queued identity."""
+    """Stands in for AuthlibOidc: begin redirects straight back with a fake code, and finish returns the queued
+    identity. provider() serves a discovery document and a JWKS the test controls. A refresh swaps in
+    `jwks_after_refresh`, which is how a key rotated at the provider is simulated."""
 
     def __init__(self) -> None:
         self.next_identity: Identity | None = None
+        self.issuer = ISSUER
+        self.end_session_endpoint: str | None = END_SESSION
+        self.jwks: dict = jwks("test-key")
+        self.jwks_after_refresh: dict | None = None
+        self.provider_error: Exception | None = None
+        self.provider_calls: list[bool] = []
 
     async def begin(self, request: Request, redirect_uri: str):
         return RedirectResponse(redirect_uri + "?code=fake&state=x", 302)
@@ -76,16 +86,29 @@ class FakeOidc:
             raise RuntimeError("no identity queued for this sign-in")
         return self.next_identity
 
+    async def provider(self, *, refresh_keys: bool = False) -> Provider:
+        self.provider_calls.append(refresh_keys)
+        if self.provider_error is not None:
+            raise self.provider_error
+        if refresh_keys and self.jwks_after_refresh is not None:
+            self.jwks = self.jwks_after_refresh
+        return Provider(issuer=self.issuer, end_session_endpoint=self.end_session_endpoint, jwks=self.jwks)
+
 
 class StubOidcClient:
     """Stands in for the Authlib client under AuthlibOidc. Each call raises its error, or returns its token. Used to
-    run the real translation in AuthlibOidc against IdP failures."""
+    run the real translation in AuthlibOidc against IdP failures and against the discovery document and JWKS."""
 
     def __init__(self, *, redirect_error: Exception | None = None, token: object = None,
-                 token_error: Exception | None = None) -> None:
+                 token_error: Exception | None = None, metadata: dict | None = None,
+                 metadata_error: Exception | None = None, jwks: dict | None = None) -> None:
         self._redirect_error = redirect_error
         self._token = token
         self._token_error = token_error
+        self._metadata = metadata
+        self._metadata_error = metadata_error
+        self._jwks = jwks
+        self.jwks_calls: list[bool] = []
 
     async def authorize_redirect(self, request, redirect_uri: str):
         if self._redirect_error is not None:
@@ -96,6 +119,15 @@ class StubOidcClient:
         if self._token_error is not None:
             raise self._token_error
         return self._token
+
+    async def load_server_metadata(self) -> dict:
+        if self._metadata_error is not None:
+            raise self._metadata_error
+        return self._metadata or {}
+
+    async def fetch_jwk_set(self, force: bool = False) -> dict:
+        self.jwks_calls.append(force)
+        return self._jwks or {"keys": []}
 
 
 def use_oidc_client(env: Env, client: StubOidcClient) -> None:
@@ -181,10 +213,12 @@ def new_client(env: Env) -> httpx.AsyncClient:
 
 
 async def sign_in(env: Env, *, sub: str, username: str | None = None, enrollment_ref: str | None = None,
-                  next_path: str | None = None, client: httpx.AsyncClient | None = None) -> httpx.Response:
+                  next_path: str | None = None, client: httpx.AsyncClient | None = None, sid: str | None = None,
+                  id_token: str | None = None) -> httpx.Response:
     """Runs /login and the callback as the browser would. Returns the callback response."""
     browser = client or env.client
-    env.oidc.next_identity = Identity(sub=sub, username=username, enrollment_ref=enrollment_ref)
+    env.oidc.next_identity = Identity(sub=sub, username=username, enrollment_ref=enrollment_ref, sid=sid,
+                                      id_token=id_token)
     params = None if next_path is None else {"next": next_path}
     start = await browser.get("/login", params=params)
     assert start.status_code == 302, start.status_code

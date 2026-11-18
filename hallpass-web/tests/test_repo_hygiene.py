@@ -153,6 +153,7 @@ ALLOWED_HOSTS = frozenset({
     "docs.fluxer.app",                            # Fluxer's public documentation
     "docs.fluxer.com",                            # Fluxer's documentation, which docs.fluxer.app redirects to
     "docs.goauthentik.io", "integrations.goauthentik.io",  # Authentik's public documentation
+    "schemas.openid.net",                         # the OpenID Back-Channel Logout event key, a spec identifier
     "wiki.geysermc.org",                          # the GeyserMC public wiki
     "minecraft.wiki",                             # the Minecraft public wiki
     "developer.valvesoftware.com",                # Valve's public developer documentation

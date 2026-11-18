@@ -326,7 +326,7 @@ def make_test_app(config: Config, db: Database, authentik: AuthentikClient) -> F
 
     @app.get("/start/{person_id}")
     def start(person_id: int, request: Request) -> dict:
-        start_session(request, person_id)
+        start_session(request, person_id, sid=None, id_token=None, started_at=datetime.now(UTC))
         return {"ok": True}
 
     @app.get("/stop")

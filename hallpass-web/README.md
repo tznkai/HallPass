@@ -28,6 +28,22 @@ The three checks, the same ones CI runs:
 .venv/bin/reuse --root . lint
 ```
 
+## Authentik provider
+
+Hallpass signs people in through an OpenID Connect provider in Authentik, and sign-out and back-channel logout depend on
+these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
+
+- Invalidation flow: `default-invalidation-flow`, with a User Logout stage. Without that stage, a sign-out at hallpass
+  does not end the Authentik session, so the next visit signs the person straight back in.
+- Redirect URIs: the strict redirect URI `<public_url>/auth/callback` (sign-in), and a second one of type Logout,
+  `<public_url>/signed-out`, which the end-session request returns the browser to.
+- Logout method: Back-channel, with the Logout URI `<public_url>/auth/backchannel-logout`.
+- Authentik's worker must reach `<public_url>/auth/backchannel-logout`. The worker posts the logout token to it, not the
+  browser. Delivery is queued and is not retried, so a token that fails to arrive is never sent again.
+
+The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
+and 400 for anything else, with no body.
+
 ## Caddy
 
 Caddy sits in front of the web services and asks hallpass, through forward auth, whether each request may
@@ -111,6 +127,10 @@ suspension, with no restore pending. When a parent restores a service that was s
 emailed to undo that suspension by hand, and the person's page shows the restore as pending until the administrator
 marks it restored. A new hold on that service cancels the pending restore, and the administrator is emailed once to
 leave the suspension in place, or to suspend it by hand again if they already restored it.
+
+Schema version 10 adds the tables that sign-out and back-channel logout use. An upgrade from version 9 keeps every row.
+Sessions started before the upgrade hold no Authentik session id and no start time. A logout token that names a session
+id leaves them alone, but a logout token with only the person's subject ends them, so those people sign in again.
 
 Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
 by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied

@@ -35,7 +35,7 @@ from tests.helpers import (
 NOW_TEXT = "2026-11-13T12:00:00+00:00"
 # Pages that answer without a terms acceptance. Later phases add their own ungated machine endpoints here, such as
 # /forward-auth in Phase 4.
-UNGATED_PATHS = {"/terms", "/login", "/auth/callback", "/forward-auth"}
+UNGATED_PATHS = {"/terms", "/login", "/auth/callback", "/forward-auth", "/signed-out"}
 
 
 def gated_get_paths(env: Env) -> list[str]:
@@ -127,7 +127,7 @@ async def test_before_a_first_acceptance_the_terms_page_and_sign_out_still_work(
     token = (await form(env, "/terms", client=browser))["csrf"]
     done = await browser.post("/logout", data={"csrf": token})
 
-    assert done.status_code == 303 and done.headers["location"] == "/"
+    assert done.status_code == 303 and done.headers["location"] == "/signed-out"
     assert (await browser.get("/")).headers["location"].startswith("/login")
 
 

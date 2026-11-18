@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Sign-in and sign-out. The home page is routes_me; the admin pages live in routes_admin."""
+"""Sign-in, sign-out and back-channel logout. The home page is routes_me; the admin pages live in routes_admin."""
 
 from __future__ import annotations
 
@@ -11,14 +11,16 @@ from urllib.parse import urlencode, urlsplit
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, grants, registry, terms, text
+from hallpass import authentik_sync, grants, logout, registry, revocation, terms, text
 from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
+from hallpass.logout import LogoutClaims, LogoutTokenRefused, ProviderError
 from hallpass.logs import log_event
-from hallpass.web.pages import message_page
+from hallpass.web.pages import message_page, page
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+SIGNED_OUT = "/signed-out"
 
 REFUSALS = {
     "not_registered": (text.NOT_REGISTERED, 403),
@@ -94,7 +96,7 @@ async def callback(request: Request) -> Response:
     person = settled
     destination = request.session.get("next") or "/"
     state = await deps.db.run(lambda c: terms.state_for(c, person.id))
-    start_session(request, person.id)
+    start_session(request, person.id, sid=identity.sid, id_token=identity.id_token, started_at=deps.clock())
     log_event(logger, "sign_in", outcome="ok", person_id=person.id)
     # A child is never sent to /terms: a linked parent's acceptance covers them.
     if person.account_type != "child" and not state.accepted_current:
@@ -102,8 +104,82 @@ async def callback(request: Request) -> Response:
     return RedirectResponse(destination, status_code=303)
 
 
-@router.post("/logout", dependencies=[Depends(require_csrf)])
-async def logout(request: Request) -> RedirectResponse:
-    end_session(request)
-    return RedirectResponse("/", status_code=303)
+async def _sign_out_target(deps, id_token: object) -> str:
+    """Where a sign-out goes. The provider's end-session endpoint takes the stored ID token and the public sign-out
+    address; without an ID token, or without an endpoint, or when discovery fails, it goes to the signed-out page. The
+    address is built from discovery, the stored token and the public URL, and never from the request."""
+    if not isinstance(id_token, str) or not id_token:
+        log_event(logger, "sign_out", outcome="local", reason="no_id_token")
+        return SIGNED_OUT
+    try:
+        provider = await deps.oidc.provider()
+    except ProviderError as error:
+        log_event(logger, "sign_out", outcome="local", reason=error.reason)
+        return SIGNED_OUT
+    if not provider.end_session_endpoint:
+        log_event(logger, "sign_out", outcome="local", reason="no_endpoint")
+        return SIGNED_OUT
+    log_event(logger, "sign_out", outcome="provider")
+    return logout.end_session_url(provider.end_session_endpoint, id_token=id_token,
+                                  public_url=deps.config.public_url)
 
+
+@router.post("/logout", dependencies=[Depends(require_csrf)])
+async def logout_route(request: Request) -> RedirectResponse:
+    deps = request.app.state.deps
+    id_token = request.session.get("id_token")
+    end_session(request)
+    return RedirectResponse(await _sign_out_target(deps, id_token), status_code=303)
+
+
+@router.get("/signed-out")
+async def signed_out(request: Request) -> Response:
+    """The page a sign-out ends on. It needs no session, and it shows the sign-in link."""
+    return page(request, "signed_out.html", viewer=None, heading=text.SIGNED_OUT_HEADING,
+                sign_in=text.SIGNED_OUT_SIGN_IN)
+
+
+def _verify(deps, provider: logout.Provider, token: str) -> LogoutClaims:
+    return logout.verify_logout_token(token, jwks=provider.jwks, issuer=provider.issuer,
+                                      client_id=deps.config.oidc_client_id, now=deps.clock())
+
+
+async def _verified_claims(deps, token: str) -> LogoutClaims:
+    """Checks the token against the provider's keys. An unknown kid fetches the keys once more and tries again."""
+    try:
+        return _verify(deps, await deps.oidc.provider(), token)
+    except LogoutTokenRefused as error:
+        if error.reason != "unknown_kid":
+            raise
+    return _verify(deps, await deps.oidc.provider(refresh_keys=True), token)
+
+
+async def _accept_logout_token(deps, raw: object) -> str | None:
+    """Verifies one logout token and records what it ends. Returns None once recorded, or the reason it was refused,
+    in which case nothing is recorded."""
+    if not isinstance(raw, str) or not raw:
+        return "missing_token"
+    try:
+        claims = await _verified_claims(deps, raw)
+    except (LogoutTokenRefused, ProviderError) as error:
+        return error.reason
+    now, max_age = deps.clock(), deps.config.session_max_age_seconds
+    if claims.sid is not None:
+        await deps.db.run(lambda c: revocation.revoke_session(c, sid=claims.sid, now=now, max_age_seconds=max_age))
+    else:
+        await deps.db.run(lambda c: revocation.revoke_subject(c, sub=claims.sub, now=now, max_age_seconds=max_age))
+    return None
+
+
+@router.post("/auth/backchannel-logout")
+async def backchannel_logout(request: Request) -> Response:
+    """The provider's back-channel logout. It is public and takes no session and no CSRF token: the signed token is the
+    only authority. It answers 200 once the token is recorded, and 400 with nothing recorded otherwise. The answer
+    carries nothing the caller can use."""
+    deps = request.app.state.deps
+    reason = await _accept_logout_token(deps, (await request.form()).get("logout_token"))
+    if reason is None:
+        log_event(logger, "backchannel_logout", outcome="ok")
+        return Response(status_code=200, headers={"Cache-Control": "no-store"})
+    log_event(logger, "backchannel_logout", outcome="refused", reason=reason)
+    return Response(status_code=400, headers={"Cache-Control": "no-store"})

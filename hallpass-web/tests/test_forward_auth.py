@@ -8,6 +8,7 @@ Covers hallpass.AC5.4 to AC5.8, and the forward-auth parts of AC3.4, AC3.5 and A
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
@@ -17,6 +18,7 @@ from hallpass.auth import Identity
 from hallpass.logs import FIELDS_ATTR
 from hallpass.registry import Person
 from tests.fake_authentik import enrol
+from tests.logout_tokens import SID, SUB, logout_token
 from tests.helpers import (
     BASE_URL,
     NOW,
@@ -28,12 +30,14 @@ from tests.helpers import (
     make_service,
     new_client,
     publish_terms,
+    sign_in,
     signed_in_person,
     store_person,
 )
 from tests.test_web_family import family
 
 SESSION = "hallpass_session"
+SECOND_SID = "sid-test-session-two"
 FORWARDED_HOST = "calendar.hallpass.test"
 PROTO = "https"
 
@@ -389,3 +393,56 @@ async def test_an_active_entitled_child_is_denied_when_no_linked_parent_has_acce
 async def person_row_status(env: Env, person_id: int) -> str:
     person = await env.db.run(lambda c: registry.get_person(c, person_id))
     return person.status
+
+
+# Phase 8: a revoked Authentik session is no session at forward auth ---------------------------------------------
+
+async def bound_adult_granted_calendar(env: Env) -> Person:
+    await publish_terms(env)
+    person = await store_person(env, account_type="adult")
+    await env.db.run(lambda c: registry.bind_identity(c, person.id, uuid=SUB, authentik_pk=7, username="kid1"))
+    await accept_for(env, person.id)
+    await grant_type(env, await make_service(env.db, "calendar"), "adult", person)
+    return person
+
+
+async def signed_in_with_sid(env: Env, sid: str) -> httpx.AsyncClient:
+    browser = new_client(env)
+    response = await sign_in(env, sub=SUB, username="kid1", sid=sid, client=browser)
+    assert response.status_code == 303
+    return browser
+
+
+async def deliver_logout(env: Env, **overrides) -> httpx.Response:
+    return await env.client.post("/auth/backchannel-logout",
+                                 data={"logout_token": logout_token(env.clock.now(), **overrides)})
+
+
+async def test_a_session_whose_sid_was_revoked_is_sent_to_sign_in_at_forward_auth(env: Env):
+    await bound_adult_granted_calendar(env)
+    ended = await signed_in_with_sid(env, SID)
+    survivor = await signed_in_with_sid(env, SECOND_SID)
+    assert (await check(ended, "calendar")).status_code == 200
+
+    assert (await deliver_logout(env)).status_code == 200
+
+    response = await check(ended, "calendar")
+    assert response.status_code == 302
+    assert response.headers["location"].startswith(f"{BASE_URL}/login?")
+    assert "x-hallpass-person" not in response.headers
+    assert (await check(survivor, "calendar")).status_code == 200
+
+
+async def test_a_subject_revocation_sends_older_sessions_to_sign_in_at_forward_auth(env: Env):
+    await bound_adult_granted_calendar(env)
+    older = await signed_in_with_sid(env, SID)
+    revoked_at = env.clock.now() + timedelta(seconds=60)
+    env.clock.set(revoked_at)
+
+    assert (await deliver_logout(env, sid=None, iat=int(revoked_at.timestamp()),
+                                 exp=int(revoked_at.timestamp()) + 120)).status_code == 200
+    env.clock.set(revoked_at + timedelta(seconds=30))
+    newer = await signed_in_with_sid(env, SECOND_SID)
+
+    assert (await check(older, "calendar")).status_code == 302
+    assert (await check(newer, "calendar")).status_code == 200

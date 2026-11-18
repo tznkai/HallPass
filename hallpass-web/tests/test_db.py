@@ -354,6 +354,28 @@ async def test_manual_restore_migration_keeps_every_mark_with_no_restore_pending
         database.close()
 
 
+# Revoked sessions (migration 0010) ------------------------------------------------------------------
+
+async def test_revoked_session_migration_adds_both_tables_and_keeps_rows_on_a_v9_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 9)
+    _add_manual_mark(path, 1)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        assert dbmod.LATEST_VERSION == 10
+        tables = await database.run(lambda c: {row[0] for row in c.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")})
+        assert {"revoked_session", "revoked_subject"} <= tables
+        columns = await database.run(lambda c: [row[1] for row in c.execute("PRAGMA table_info(revoked_session)")])
+        assert columns == ["sid", "revoked_at"]
+        kept = await database.run(lambda c: c.execute("SELECT person_id FROM manual_suspension").fetchall())
+        assert kept == [(1,)]
+    finally:
+        database.close()
+
+
 # Quarantine -----------------------------------------------------------------------------------------
 
 async def test_garbage_db_is_quarantined_with_side_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

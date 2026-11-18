@@ -21,10 +21,17 @@ def _post_routes(env: Env) -> list:
     return [route for route in api_routes(env.application) if "POST" in route.methods]
 
 
+# The provider's back-channel logout. It has no session and no form token: the signed logout token is its authority,
+# and the route is checked for those checks in test_backchannel.py.
+PUBLIC_POSTS = {"/auth/backchannel-logout"}
+
+
 async def test_every_post_route_depends_on_require_csrf(env: Env):
     posts = _post_routes(env)
     assert posts, "no POST routes were found"
-    missing = [route.path for route in posts if require_csrf not in _dependency_calls(route.dependant)]
+    assert PUBLIC_POSTS <= {route.path for route in posts}, "a public POST route in the list is gone"
+    missing = [route.path for route in posts
+               if route.path not in PUBLIC_POSTS and require_csrf not in _dependency_calls(route.dependant)]
     assert missing == []
 
 

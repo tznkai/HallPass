@@ -119,3 +119,27 @@ Hallpass ran against the test Authentik at `<hallpass>` behind the reverse proxy
   Authentik must reject a missing or empty `user_pks` with 400 rather than treat it as all. The live run confirmed
   that a given pk scopes the delete to that user. What Authentik does with an empty parameter was deliberately
   not tried, so the guard stays.
+
+## Phase 8: sign-out and back-channel logout (pending live checks)
+
+Research on Authentik 2026.8.5, from its source and documentation. None of it has run live yet. The code relies on each
+item below, so each stays pending until a live run confirms it. Record the result under the item, with placeholders.
+
+- **End-session redirect.** The discovery document's `end_session_endpoint` takes `id_token_hint` and
+  `post_logout_redirect_uri`. `post_logout_redirect_uri` needs the hint, and it must match a redirect URI of type
+  Logout. Pending: a sign-out at hallpass returns the browser to `<public_url>/signed-out`.
+- **Invalidation flow.** The end-session request runs the provider's invalidation flow, and that ends the Authentik
+  session only when the flow has a User Logout stage. Pending: after the sign-out, a visit to hallpass asks for
+  sign-in again, and the Authentik session cookie is gone.
+- **Back-channel on sign-out at Authentik.** Pending: a sign-out at Authentik sends one logout token to the Logout URI,
+  and hallpass ends that session only.
+- **Back-channel on admin session deletion.** Pending: deleting a user's session in Authentik sends a logout token with
+  that session's `sid`.
+- **Back-channel on user deactivation.** Pending: deactivating a user sends a logout token with the subject alone, and
+  hallpass ends that person's sessions started before it.
+- **Issuer and keys.** Pending: the `iss` of a live logout token equals the discovery `issuer`, and its `kid` is in the
+  document at `jwks_uri`. The token is signed RS256.
+- **`sid` match.** Pending: the `sid` in a logout token equals the `sid` in the ID token of the same session, which is
+  the SHA-256 hex of Authentik's session key.
+- **Cookie size.** Pending: the session cookie, which now carries the stored ID token, stays under the browser's 4096
+  byte limit with the real token. A cookie that is too large is dropped, and sign-in would then loop.

@@ -30,10 +30,11 @@ from joserfc.errors import JoseError
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 
-from hallpass import display_names, holds, registry, terms, text
+from hallpass import display_names, holds, registry, revocation, terms, text
 from hallpass.authentik import AuthentikClient, AuthentikError, AuthentikUser
 from hallpass.config import Config
 from hallpass.db import Database
+from hallpass.logout import Provider, ProviderError
 from hallpass.logs import log_event
 from hallpass.registry import Person
 
@@ -43,15 +44,21 @@ SESSION_COOKIE = "hallpass_session"
 
 @dataclass(frozen=True)
 class Identity:
+    """What a sign-in tells hallpass. sid and id_token are the handles sign-out and back-channel logout need: sid is
+    the ID token's session id (None when the token has none), and id_token is the raw token, kept as the hint."""
     sub: str
     username: str | None
     enrollment_ref: str | None
+    sid: str | None = None
+    id_token: str | None = None
 
 
 class OidcClient(Protocol):
     async def begin(self, request: Request, redirect_uri: str) -> Response: ...
 
     async def finish(self, request: Request) -> Identity: ...
+
+    async def provider(self, *, refresh_keys: bool = False) -> Provider: ...
 
 
 class SignInError(Exception):
@@ -96,10 +103,25 @@ class AuthlibOidc:
         try:
             token = await self._client.authorize_access_token(request)
             userinfo = token["userinfo"]
+            sid = userinfo.get("sid")
+            id_token = token.get("id_token")
             return Identity(sub=userinfo["sub"], username=userinfo.get("preferred_username"),
-                            enrollment_ref=userinfo.get("hallpass_enrollment"))
+                            enrollment_ref=userinfo.get("hallpass_enrollment"),
+                            sid=sid if isinstance(sid, str) and sid else None,
+                            id_token=id_token if isinstance(id_token, str) and id_token else None)
         except _OIDC_ERRORS as error:
             raise _oidc_failure(error) from None
+
+    async def provider(self, *, refresh_keys: bool = False) -> Provider:
+        """The discovery document's issuer and end-session endpoint, and the provider's keys. The keys are fetched
+        again only when refresh_keys is set. A failure is a ProviderError, and its text is dropped."""
+        try:
+            metadata = await self._client.load_server_metadata()
+            jwks = await self._client.fetch_jwk_set(force=refresh_keys)
+            return Provider(issuer=metadata["issuer"], end_session_endpoint=metadata.get("end_session_endpoint"),
+                            jwks=jwks)
+        except (*_OIDC_ERRORS, RuntimeError):
+            raise ProviderError("provider_unavailable") from None
 
 
 class RedirectToLogin(Exception):
@@ -156,10 +178,16 @@ async def require_csrf(request: Request) -> None:
         raise HTTPException(403, text.CSRF_FAILED)
 
 
-def start_session(request: Request, person_id: int) -> None:
+def start_session(request: Request, person_id: int, *, sid: str | None, id_token: str | None,
+                  started_at: datetime) -> None:
+    """Starts a session. It keeps the sid and ID token that sign-out and back-channel logout use, and the start
+    time that a subject-wide revocation is compared with."""
     request.session.clear()
     request.session["person_id"] = person_id
     request.session["csrf"] = secrets.token_urlsafe(32)
+    request.session["sid"] = sid
+    request.session["id_token"] = id_token
+    request.session["started_at"] = revocation.stamp(started_at)
 
 
 def end_session(request: Request) -> None:
@@ -248,6 +276,12 @@ async def current_person_any_terms(request: Request) -> Person:
     if person.status == "locked":
         end_session(request)
         raise HTTPException(403, text.LOCKED)
+    sid, started_at = request.session.get("sid"), request.session.get("started_at")
+    revoked = await deps.db.run(lambda c: revocation.session_revoked(c, sid=sid, sub=person.authentik_uuid,
+                                                                     started_at=started_at))
+    if revoked:
+        end_session(request)
+        raise RedirectToLogin(request.url.path)
     request.state.has_children = await deps.db.run(lambda c: bool(registry.children_of(c, person.id)))
     # The admin's nav shows the open review count. Only an admin's request pays for that query.
     is_admin = person.authentik_uuid is not None and person.authentik_uuid in deps.config.admin_subs
