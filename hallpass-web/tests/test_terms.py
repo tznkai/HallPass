@@ -174,3 +174,125 @@ async def test_pages_blocked_follows_the_terms_rule(db: Database, publishes: lis
     state = await state_after(db, publishes, accepts)
 
     assert terms.pages_blocked(state) is expected
+
+
+# Child coverage: a child is covered while a linked, unlocked parent has accepted (Phase 8, Task 1) -------------
+
+async def link(db: Database, child_id: int, parent_id: int) -> None:
+    await db.run(lambda c: registry.link_parent(c, child_id, parent_id, NOW))
+
+
+async def blocked_for(db: Database, person_id: int) -> bool:
+    person = await db.run(lambda c: registry.get_person(c, person_id))
+    assert person is not None
+    return await db.run(lambda c: terms.services_blocked_for(c, person))
+
+
+async def test_child_is_covered_when_one_of_two_linked_parents_has_accepted(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    mum = await make(db, display_name="Mum", account_type="parent")
+    dad = await make(db, display_name="Dad", account_type="parent")
+    await link(db, child.id, mum.id)
+    await link(db, child.id, dad.id)
+    await accept(db, dad.id, version.id)
+
+    assert await blocked_for(db, child.id) is False
+
+
+async def test_child_is_not_covered_when_no_linked_parent_has_accepted(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    mum = await make(db, display_name="Mum", account_type="parent")
+    await link(db, child.id, mum.id)
+
+    assert await blocked_for(db, child.id) is True
+
+
+async def test_child_is_not_covered_by_a_parent_who_accepted_but_is_locked(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+    mum = await make(db, display_name="Mum", account_type="parent")
+    await link(db, child.id, mum.id)
+    await accept(db, mum.id, version.id)
+    await db.run(lambda c: registry.set_locked(c, mum.id, True))
+
+    assert await blocked_for(db, child.id) is True
+
+
+async def test_child_with_no_linked_parent_is_not_covered(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    await publish(db, publisher.id)
+    child = await make(db, display_name="Kit", account_type="child")
+
+    assert await blocked_for(db, child.id) is True
+
+
+async def test_a_new_blocking_version_uncovers_the_child_until_a_parent_accepts_it(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    first = await publish(db, publisher.id, blocking=True)
+    child = await make(db, display_name="Kit", account_type="child")
+    mum = await make(db, display_name="Mum", account_type="parent")
+    await link(db, child.id, mum.id)
+    await accept(db, mum.id, first.id)
+    assert await blocked_for(db, child.id) is False
+
+    second = await publish(db, publisher.id, blocking=True)
+    assert await blocked_for(db, child.id) is True
+
+    await accept(db, mum.id, second.id)
+    assert await blocked_for(db, child.id) is False
+
+
+async def test_a_new_optional_version_keeps_the_child_covered(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    first = await publish(db, publisher.id, blocking=True)
+    child = await make(db, display_name="Kit", account_type="child")
+    mum = await make(db, display_name="Mum", account_type="parent")
+    await link(db, child.id, mum.id)
+    await accept(db, mum.id, first.id)
+
+    await publish(db, publisher.id, blocking=False)
+
+    assert await blocked_for(db, child.id) is False
+
+
+async def test_pages_are_never_blocked_for_a_child(db: Database) -> None:
+    child = await make(db, display_name="Kit", account_type="child")
+    no_version = await db.run(lambda c: registry.get_person(c, child.id))
+    assert no_version is not None
+    assert await db.run(lambda c: terms.pages_blocked_for(c, no_version)) is False
+
+    publisher = await make(db, display_name="Publisher")
+    await publish(db, publisher.id, blocking=True)
+    assert await db.run(lambda c: terms.pages_blocked_for(c, no_version)) is False
+
+
+async def test_adult_gate_is_the_per_person_rule(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    adult = await make(db, display_name="Ann")
+    adult_row = await db.run(lambda c: registry.get_person(c, adult.id))
+    assert adult_row is not None
+
+    assert await db.run(lambda c: terms.services_blocked_for(c, adult_row)) is True
+    await accept(db, adult.id, version.id)
+    assert await db.run(lambda c: terms.services_blocked_for(c, adult_row)) is False
+    assert await db.run(lambda c: terms.pages_blocked_for(c, adult_row)) is False
+
+
+async def test_acceptance_report_leaves_children_out_of_not_accepted(db: Database) -> None:
+    publisher = await make(db, display_name="Publisher")
+    version = await publish(db, publisher.id)
+    mum = await make_bound(db, "Mum", 11)
+    await accept(db, mum.id, version.id)
+    kit = await make_bound(db, "Kit", 12)
+    await db.run(lambda c: c.execute("UPDATE person SET account_type = 'child' WHERE id = ?", (kit.id,)))
+    await make_bound(db, "Ben", 13)
+
+    _, missing = await db.run(lambda c: terms.acceptance_report(c, version.id))
+
+    assert [p.display_name for p in missing] == ["Ben"]

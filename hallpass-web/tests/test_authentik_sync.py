@@ -15,7 +15,7 @@ import pytest
 
 from hallpass import authentik_sync, grants, holds, registry, services
 from hallpass.registry import Person
-from tests.helpers import FLUXER_GROUP, NOW, Env, admin_client, form, signed_in_person
+from tests.helpers import FLUXER_GROUP, NOW, Env, accept_current, admin_client, form, publish_terms, signed_in_person
 
 
 def deps(env: Env):
@@ -263,3 +263,19 @@ async def test_admin_setting_a_parent_email_adds_the_child_with_the_plus_address
     username = authentik_user(env, child)["username"]
     assert in_group(env, child)
     assert authentik_user(env, child)["attributes"]["fluxer_email"] == f"mum+{username}@example.com"
+
+
+async def test_a_parent_accepting_the_terms_syncs_the_linked_child_into_the_fluxer_group(env: Env) -> None:
+    # The child is covered only by the parent's acceptance. A new blocking version uncovers both until the parent
+    # accepts it, and that acceptance must sync the child, whose group membership changes with it.
+    await make_fluxer(env)
+    child, _, parent_browser = await linked_child(env, parent_email="mum@example.com")
+    await sync(env, child.id)
+    assert in_group(env, child)
+
+    await publish_terms(env, blocking=True)
+    await sync(env, child.id)
+    assert not in_group(env, child)
+
+    assert (await accept_current(env, parent_browser)).status_code == 303
+    assert in_group(env, child)

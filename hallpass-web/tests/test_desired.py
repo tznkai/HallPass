@@ -39,12 +39,18 @@ async def admin(db: Database) -> Person:
 
 
 async def make_person(db: Database, admin: Person, *, name: str, account_type: str = "adult") -> Person:
-    """An adult or child who has accepted the current terms, so an entitlement makes them allowed."""
+    """An adult who has accepted the current terms, or a child covered by a linked parent who has, so an entitlement
+    makes them allowed. A child never accepts the terms themselves."""
     def change(conn) -> Person:
         person = registry.create_person(conn, display_name=name, account_type=account_type, now=NOW)
         version = terms.current(conn) or terms.publish(conn, tos_text="Terms.", privacy_text="Privacy.",
                                                        blocking=True, actor_id=admin.id, now=NOW)
-        grants.accept_terms(conn, person.id, version.id, NOW)
+        if account_type == "child":
+            parent = registry.create_person(conn, display_name=f"Parent of {name}", account_type="parent", now=NOW)
+            grants.accept_terms(conn, parent.id, version.id, NOW)
+            registry.link_parent(conn, person.id, parent.id, NOW)
+        else:
+            grants.accept_terms(conn, person.id, version.id, NOW)
         return registry.get_person(conn, person.id)
 
     return await db.run(change)

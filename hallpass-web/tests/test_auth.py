@@ -97,8 +97,8 @@ async def make_child(db: Database, **fields) -> Person:
 
 
 async def make_accepted(db: Database, **fields) -> Person:
-    """A person who has accepted the current terms, so the page gate lets them through. v1 is published by an unbound
-    publisher when no version exists."""
+    """A person the page gate lets through. An adult or parent has accepted the current terms; a child never accepts,
+    and the page gate never sends a child to /terms. v1 is published by an unbound publisher when no version exists."""
     person = await make_child(db, **fields)
 
     def accept(conn) -> None:
@@ -107,7 +107,8 @@ async def make_accepted(db: Database, **fields) -> Person:
             publisher = registry.create_person(conn, display_name="Publisher", account_type="adult", now=NOW)
             version = terms.publish(conn, tos_text="Terms", privacy_text="Privacy", blocking=True,
                                     actor_id=publisher.id, now=NOW)
-        grants.accept_terms(conn, person.id, version.id, NOW)
+        if person.account_type != "child":
+            grants.accept_terms(conn, person.id, version.id, NOW)
 
     await db.run(accept)
     return person

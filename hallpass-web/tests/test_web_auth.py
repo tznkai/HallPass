@@ -57,11 +57,11 @@ async def test_session_cookie_carries_the_configured_domain(tmp_path: Path):
         await environment.close()
 
 
-@pytest.mark.parametrize("fields", [
-    {"account_type": "child"},                                       # AC1.3: a child with no email
-    {"account_type": "adult", "email": "ana@parent.invalid"},        # AC1.2 with an address on file
+@pytest.mark.parametrize(("fields", "first_location"), [
+    ({"account_type": "child"}, "/"),                                # AC1.3: a child is never sent to terms
+    ({"account_type": "adult", "email": "ana@parent.invalid"}, "/terms?next=%2F"),  # AC1.2, an address on file
 ], ids=["child-without-email", "adult-with-email"])
-async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields):
+async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields, first_location):
     await publish_terms(env)
     person = await store_person(env, display_name="Kid", **fields)
     invitation_pk = await invite_person(env, person)
@@ -70,8 +70,9 @@ async def test_enrolled_person_signs_in_and_then_by_sub_alone(env: Env, fields):
 
     first = await sign_in(env, sub=user["uuid"], username="kid1", enrollment_ref=ref)
     assert first.status_code == 303
-    assert first.headers["location"] == "/terms?next=%2F"
-    assert (await accept_current(env)).headers["location"] == "/"
+    assert first.headers["location"] == first_location
+    if fields["account_type"] == "adult":
+        assert (await accept_current(env)).headers["location"] == "/"
     assert "Kid" in (await env.client.get("/")).text
     stored = await env.db.run(lambda c: registry.get_person(c, person.id))
     assert (stored.authentik_uuid, stored.authentik_pk) == (user["uuid"], user["pk"])

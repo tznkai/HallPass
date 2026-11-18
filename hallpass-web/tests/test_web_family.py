@@ -30,6 +30,7 @@ NOW_TEXT = "2026-11-13T12:00:00+00:00"
 
 # The notice as Jinja writes it into HTML (the apostrophe is escaped).
 SHARED_NOTICE_HTML = str(escape(text.SHARED_IDENTITY_PAUSED))
+ON_BEHALF_HTML = str(escape("on the child's behalf"))
 
 
 async def post(env: Env, path: str, **fields) -> httpx.Response:
@@ -59,7 +60,8 @@ async def enrol_and_sign_in(env: Env, person_id: int, username: str) -> httpx.As
 
 
 async def family(env: Env) -> tuple[int, int, httpx.AsyncClient, httpx.AsyncClient]:
-    """An admin-linked parent and child, both signed in and both having accepted v1. Returns the ids and browsers."""
+    """An admin-linked parent who accepted v1, and a child who has signed in (so awaiting a grant). A child never
+    accepts. Returns the ids and browsers."""
     await admin_client(env)
     parent = await create_person(env, "Mum", "parent")
     child = await create_person(env, "Kid", "child")
@@ -67,7 +69,6 @@ async def family(env: Env) -> tuple[int, int, httpx.AsyncClient, httpx.AsyncClie
     parent_browser = await enrol_and_sign_in(env, parent, "mum1")
     child_browser = await enrol_and_sign_in(env, child, "kid1")
     assert (await accept_current(env, parent_browser)).status_code == 303
-    assert (await accept_current(env, child_browser)).status_code == 303
     return parent, child, parent_browser, child_browser
 
 
@@ -192,3 +193,54 @@ async def test_a_parent_sees_the_shared_identity_notice_on_a_child_row_without_t
     assert response.status_code == 200
     assert SHARED_NOTICE_HTML in response.text
     assert "Zara Other" not in response.text
+
+
+# Phase 8: the approval comes before the child enrols -------------------------------------------------------
+
+async def test_the_approval_says_it_is_given_on_the_childs_behalf(env: Env):
+    _, _, parent_browser, _ = await family(env)
+
+    waiting = (await parent_browser.get("/children")).text
+
+    assert ON_BEHALF_HTML in waiting
+
+
+async def test_a_parent_can_approve_an_invited_child_before_the_child_enrols(env: Env):
+    await admin_client(env)
+    parent = await create_person(env, "Mum", "parent")
+    child = await create_person(env, "Kid", "child")
+    assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    parent_browser = await enrol_and_sign_in(env, parent, "mum1")
+    assert (await accept_current(env, parent_browser)).status_code == 303
+
+    before = (await parent_browser.get("/children")).text
+    assert "Kid" in before and "Approve" in before
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    done = await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})
+
+    assert done.status_code == 303 and done.headers["location"] == "/children"
+    assert (await person_row(env, child)).status == "invited"
+    shown = (await parent_browser.get("/children")).text
+    assert text.GRANT_APPROVED_WAITING in shown
+    assert "Approve" not in shown
+
+    child_browser = await enrol_and_sign_in(env, child, "kid1")
+    assert (await person_row(env, child)).status == "active"
+    assert (await child_browser.get("/")).status_code == 200
+
+
+async def test_a_second_approval_of_an_invited_child_is_refused_as_already_granted(env: Env):
+    await admin_client(env)
+    parent = await create_person(env, "Mum", "parent")
+    child = await create_person(env, "Kid", "child")
+    assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    parent_browser = await enrol_and_sign_in(env, parent, "mum1")
+    assert (await accept_current(env, parent_browser)).status_code == 303
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+
+    again = await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})
+
+    assert again.status_code == 403
+    assert text.GRANT_REFUSED["already_granted"] in again.text
+    assert await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM parent_grant").fetchone()[0]) == 1

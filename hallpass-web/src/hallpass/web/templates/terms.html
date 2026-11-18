@@ -13,6 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <h2>Privacy disclosure</h2>
   <div class="prewrap">{{ current.privacy_text }}</div>
 </section>
+{% if read_only %}
+<p>{{ child_line }}</p>
+{% else %}
 <form method="post" action="/terms/accept" class="stack">
   <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
   <input type="hidden" name="version_id" value="{{ current.id }}">
@@ -20,6 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <button type="submit">I accept</button>
   {% if show_not_now %}<a href="{{ target }}">{{ not_now }}</a>{% endif %}
 </form>
+{% endif %}
 {% else %}
 <p class="notice error">{{ not_published }}</p>
 {% endif %}

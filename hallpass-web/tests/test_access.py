@@ -145,7 +145,6 @@ async def test_awaiting_grant_child_is_suspended_on_every_service_until_the_pare
     await accept(db, parent.id, version_id)
     child = await make_person(db, account_type="child", name="Kid")
     await db.run(lambda c: registry.link_parent(c, child.id, parent.id, NOW))
-    await accept(db, child.id, version_id)
     calendar = await make_service(db, "calendar")
     valheim = await make_service(db, "valheim", kind="game")
     for service in (calendar, valheim):
@@ -157,9 +156,38 @@ async def test_awaiting_grant_child_is_suspended_on_every_service_until_the_pare
         assert "not_active" in decision.reasons
 
     await db.run(lambda c: grants.grant(c, child_id=child.id, parent_id=parent.id, now=NOW))
+    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id))
 
     for service in (calendar, valheim):
         assert await decide(db, child.id, service) == access.Access(desired="allowed", reasons=())
+
+
+async def test_an_active_child_is_allowed_while_a_linked_parent_has_accepted(db: Database, admin: Person) -> None:
+    version_id = await publish(db, admin)
+    parent = await make_person(db, account_type="parent", name="Mum")
+    await accept(db, parent.id, version_id)
+    child = await make_person(db, account_type="child", name="Kid")
+    await db.run(lambda c: registry.link_parent(c, child.id, parent.id, NOW))
+    calendar = await make_service(db, "calendar")
+    await entitle(db, admin, calendar.id, "type", "child")
+    await db.run(lambda c: grants.grant(c, child_id=child.id, parent_id=parent.id, now=NOW))
+    await db.run(lambda c: grants.settle_child_at_sign_in(c, child.id))
+
+    assert await decide(db, child.id, calendar) == access.Access(desired="allowed", reasons=())
+
+
+async def test_an_active_child_is_suspended_with_terms_when_no_linked_parent_has_accepted(
+        db: Database, admin: Person) -> None:
+    await publish(db, admin)
+    parent = await make_person(db, account_type="parent", name="Mum")
+    child = await make_person(db, account_type="child", name="Kid")
+    await db.run(lambda c: registry.link_parent(c, child.id, parent.id, NOW))
+    calendar = await make_service(db, "calendar")
+    await entitle(db, admin, calendar.id, "type", "child")
+    # Active without a grant, so that the terms reason is the only one that applies.
+    await db.run(lambda c: c.execute("UPDATE person SET status = 'active' WHERE id = ?", (child.id,)))
+
+    assert await decide(db, child.id, calendar) == access.Access(desired="suspended", reasons=("terms",))
 
 
 # services_for --------------------------------------------------------------------------------------

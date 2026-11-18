@@ -15,8 +15,9 @@ from datetime import datetime
 from hallpass import registry, terms
 from hallpass.registry import Person, _iso
 
-# The status a person moves to on their first acceptance of any terms version, while still invited.
-_FIRST_ACCEPTANCE_STATUS = {"adult": "active", "parent": "active", "child": "awaiting_grant"}
+# The status an adult or a parent moves to on their first acceptance of any terms version, while still invited.
+# A child never accepts: a linked parent's acceptance covers them, and their status moves at sign-in instead.
+_FIRST_ACCEPTANCE_STATUS = {"adult": "active", "parent": "active"}
 
 
 class GrantRefused(Exception):
@@ -31,18 +32,25 @@ class AcceptanceLocked(Exception):
     """A locked person tried to accept terms. Nothing is recorded; the web layer answers with the locked text."""
 
 
+class ChildCannotAccept(Exception):
+    """A child tried to accept terms. Nothing is recorded; a linked parent accepts for the child."""
+
+
 def _set_status(conn: sqlite3.Connection, person_id: int, status: str) -> None:
     conn.execute("UPDATE person SET status = ? WHERE id = ?", (status, person_id))
 
 
 def accept_terms(conn: sqlite3.Connection, person_id: int, version_id: int, now: datetime) -> Person:
     """Records the acceptance. On the person's first-ever acceptance while invited, moves them out of invited.
-    A locked person is refused before anything is written, so a lock can never leave an acceptance behind."""
+    A locked person is refused before anything is written, so a lock can never leave an acceptance behind. A child
+    is refused the same way: their terms are covered by a parent, not by their own acceptance."""
     person = registry.get_person(conn, person_id)
     if person is None:
         raise registry.NoSuchPerson()
     if person.status == "locked":
         raise AcceptanceLocked()
+    if person.account_type == "child":
+        raise ChildCannotAccept()
     version = terms.get(conn, version_id)
     if version is None:
         raise ValueError("unknown terms version")
@@ -63,9 +71,16 @@ def _is_linked(conn: sqlite3.Connection, child_id: int, parent_id: int) -> bool:
                         (child_id, parent_id)).fetchone() is not None
 
 
+def _has_grant(conn: sqlite3.Connection, child_id: int) -> bool:
+    return conn.execute("SELECT 1 FROM parent_grant WHERE child_id = ? LIMIT 1", (child_id,)).fetchone() is not None
+
+
 def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datetime) -> Person:
-    """A linked parent approves an awaiting child. Checks run in order; the first failure raises GrantRefused.
-    The link is checked first, so a missing child and a child the caller is not linked to are refused alike."""
+    """A linked parent approves a child. Checks run in order; the first failure raises GrantRefused.
+    The link is checked first, so a missing child and a child the caller is not linked to are refused alike.
+
+    An awaiting child becomes active at once. An invited child (not yet enrolled) keeps its status: the grant is
+    recorded, and the child becomes active at their first sign-in. A second grant on an invited child is refused."""
     if not _is_linked(conn, child_id, parent_id):
         raise GrantRefused("not_linked_parent")
     child = registry.get_person(conn, child_id)
@@ -77,9 +92,13 @@ def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datet
         raise GrantRefused("parent_terms")
     if parent.status != "active":
         raise GrantRefused("parent_inactive")
-    if child.status != "awaiting_grant":
+    if child.status == "awaiting_grant":
+        _set_status(conn, child_id, "active")
+    elif child.status == "invited":
+        if _has_grant(conn, child_id):
+            raise GrantRefused("already_granted")
+    else:
         raise GrantRefused("child_not_awaiting")
-    _set_status(conn, child_id, "active")
     conn.execute(
         "INSERT INTO parent_grant (child_id, parent_id, terms_version_id, granted_at) VALUES (?, ?, ?, ?)",
         (child_id, parent_id, state.current.id, _iso(now)),
@@ -87,6 +106,21 @@ def grant(conn: sqlite3.Connection, *, child_id: int, parent_id: int, now: datet
     registry.log_decision(conn, at=now, actor_kind="parent", actor_person_id=parent_id,
                           target_person_id=child_id, action="granted", detail={"version": state.current.version})
     result = registry.get_person(conn, child_id)
+    assert result is not None
+    return result
+
+
+def settle_child_at_sign_in(conn: sqlite3.Connection, person_id: int) -> Person:
+    """Run on each successful sign-in. A child still invited (now enrolled) moves to active when a parent has granted,
+    otherwise to awaiting_grant. Any other status is left alone, so a lock is never overwritten. The status is read
+    inside this transaction, so a lock written just before it is seen."""
+    person = registry.get_person(conn, person_id)
+    if person is None:
+        raise registry.NoSuchPerson()
+    if person.account_type != "child" or person.status != "invited":
+        return person
+    _set_status(conn, person_id, "active" if _has_grant(conn, person_id) else "awaiting_grant")
+    result = registry.get_person(conn, person_id)
     assert result is not None
     return result
 

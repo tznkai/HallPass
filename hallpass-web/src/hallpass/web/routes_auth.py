@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
-from hallpass import authentik_sync, registry, terms, text
+from hallpass import authentik_sync, grants, registry, terms, text
 from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
 from hallpass.config import Config
 from hallpass.logs import log_event
@@ -83,13 +83,17 @@ async def callback(request: Request) -> Response:
         person = await resolve_sign_in(deps.db, deps.authentik, deps.config, identity, deps.clock())
     except SignInError as error:
         return _refused(request, error)
-    if not was_bound:
+    # Each sign-in settles an invited child: enrolled now, so active when a parent has granted, else awaiting_grant.
+    settled = await deps.db.run(lambda c: grants.settle_child_at_sign_in(c, person.id))
+    if not was_bound or settled.status != person.status:
         await authentik_sync.sync_people(deps, [person.id])     # the first sign-in binds the person to Authentik
+    person = settled
     destination = request.session.get("next") or "/"
     state = await deps.db.run(lambda c: terms.state_for(c, person.id))
     start_session(request, person.id)
     log_event(logger, "sign_in", outcome="ok", person_id=person.id)
-    if not state.accepted_current:
+    # A child is never sent to /terms: a linked parent's acceptance covers them.
+    if person.account_type != "child" and not state.accepted_current:
         return RedirectResponse(f"/terms?{urlencode({'next': destination})}", status_code=303)
     return RedirectResponse(destination, status_code=303)
 

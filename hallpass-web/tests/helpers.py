@@ -245,7 +245,7 @@ async def signed_in_person(env: Env, *, account_type: str = "adult", accepted: b
     browser = new_client(env)
     await sign_in(env, sub=user["uuid"], username=user["username"],
                   enrollment_ref=user["attributes"]["hallpass_enrollment"], client=browser)
-    if accepted:
+    if accepted and account_type != "child":           # a child never accepts; a linked parent covers them
         if await env.db.run(terms.current) is None:
             await publish_terms(env)
         await accept_current(env, browser)

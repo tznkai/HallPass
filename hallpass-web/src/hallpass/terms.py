@@ -12,7 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
-from hallpass.registry import _PERSON_SELECT_P, Person, _iso, _person, log_decision
+from hallpass.registry import _PERSON_SELECT_P, Person, _iso, _person, log_decision, parents_of
 
 _VERSION_COLUMNS = "id, version, tos_text, privacy_text, blocking, published_at"
 
@@ -109,8 +109,27 @@ def pages_blocked(state: TermsState) -> bool:
     return services_blocked(state)
 
 
+def services_blocked_for(conn: sqlite3.Connection, person: Person) -> bool:
+    """The services gate for a person. An adult or a parent follows their own acceptance. A child never accepts:
+    they are covered while some linked parent who is not locked passes the parent rule."""
+    if person.account_type != "child":
+        return services_blocked(state_for(conn, person.id))
+    return not any(
+        parent.status != "locked" and not services_blocked(state_for(conn, parent.id))
+        for parent in parents_of(conn, person.id)
+    )
+
+
+def pages_blocked_for(conn: sqlite3.Connection, person: Person) -> bool:
+    """The page gate for a person. The terms never send a child to /terms; a child's services show the suspension."""
+    if person.account_type == "child":
+        return False
+    return pages_blocked(state_for(conn, person.id))
+
+
 def acceptance_report(conn: sqlite3.Connection, version_id: int) -> tuple[list[tuple[Person, str]], list[Person]]:
-    """(accepted with their times, not accepted). Not accepted counts only unlocked people bound to an IdP account."""
+    """(accepted with their times, not accepted). Not accepted counts only unlocked adults and parents bound to an IdP
+    account: a child never accepts, so a child is never listed as not accepted."""
     accepted_rows = conn.execute(
         f"SELECT {_PERSON_SELECT_P}, a.accepted_at FROM terms_acceptance a JOIN person p ON p.id = a.person_id "
         "WHERE a.terms_version_id = ? ORDER BY a.accepted_at, p.id",
@@ -119,7 +138,7 @@ def acceptance_report(conn: sqlite3.Connection, version_id: int) -> tuple[list[t
     accepted = [(_person(row[:-1]), row[-1]) for row in accepted_rows]
     missing_rows = conn.execute(
         f"SELECT {_PERSON_SELECT_P} FROM person p "
-        "WHERE p.status <> 'locked' AND p.authentik_uuid IS NOT NULL "
+        "WHERE p.status <> 'locked' AND p.authentik_uuid IS NOT NULL AND p.account_type <> 'child' "
         "AND NOT EXISTS (SELECT 1 FROM terms_acceptance a WHERE a.person_id = p.id AND a.terms_version_id = ?) "
         "ORDER BY p.id",
         (version_id,),

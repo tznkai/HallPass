@@ -53,7 +53,7 @@ def evaluate(conn: sqlite3.Connection, person: Person, service: Service) -> Acce
         reasons.append("not_entitled")
     if person.status != "active":
         reasons.append("not_active")
-    if terms.services_blocked(terms.state_for(conn, person.id)):
+    if terms.services_blocked_for(conn, person):
         reasons.append("terms")
     if holds_for(conn, person.id, service.id):
         reasons.append("held")

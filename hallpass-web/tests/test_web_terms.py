@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import re
 
-from hallpass import registry, text
+import httpx
+
+from hallpass import registry, terms, text
 from hallpass.auth import current_person_any_terms
 from hallpass.registry import Person
 from tests.fake_authentik import enrol
@@ -21,6 +23,7 @@ from tests.helpers import (
     api_routes,
     form,
     invite_person,
+    new_client,
     publish_terms,
     sign_in,
     signed_in_person,
@@ -209,5 +212,87 @@ async def test_the_accept_form_needs_the_csrf_token(env: Env):
     refused = await browser.post("/terms/accept", data={"csrf": "not-the-token", "version_id": version_id})
 
     assert refused.status_code == 403
+    count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
+    assert count == 0
+
+
+# Phase 8: a child never accepts, and is never sent to /terms ----------------------------------------------
+
+async def enrol_child_and_sign_in(env: Env, child: Person) -> tuple[httpx.Response, httpx.AsyncClient]:
+    user = enrol(env.authentik, await invite_person(env, child), f"child{child.id}")
+    browser = new_client(env)
+    response = await sign_in(env, sub=user["uuid"], username=user["username"],
+                             enrollment_ref=user["attributes"]["hallpass_enrollment"], client=browser)
+    return response, browser
+
+
+async def covered_child(env: Env) -> tuple[Person, Person, int]:
+    """A child linked to a parent who has accepted v1. Returns the child, the parent and the version id."""
+    version_id = await publish_terms(env)
+    parent, _ = await signed_in_person(env, account_type="parent", display_name="Mum")
+    child = await store_person(env, display_name="Kid", account_type="child")
+    await env.db.run(lambda c: registry.link_parent(c, child.id, parent.id, env.clock.now()))
+    await env.db.run(lambda c: terms.accept(c, parent.id, version_id, env.clock.now()))
+    return child, parent, version_id
+
+
+async def test_a_child_is_never_sent_to_terms_at_sign_in_or_on_a_page(env: Env):
+    await publish_terms(env)
+    child = await store_person(env, display_name="Kid", account_type="child")
+
+    response, browser = await enrol_child_and_sign_in(env, child)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert (await browser.get("/")).status_code == 200
+
+
+async def test_a_child_with_no_covering_parent_still_sees_pages_not_terms(env: Env):
+    await publish_terms(env)
+    _, browser = await signed_in_person(env, account_type="child", accepted=False)
+
+    for path in ("/", "/children"):
+        response = await browser.get(path)
+        assert response.status_code == 200, path
+        assert not response.headers.get("location", "").startswith("/terms"), path
+
+
+async def test_the_child_terms_page_is_read_only_and_says_a_parent_accepts_when_covered(env: Env):
+    child, _, _ = await covered_child(env)
+    _, browser = await enrol_child_and_sign_in(env, child)
+
+    page = await browser.get("/terms")
+
+    assert page.status_code == 200
+    assert TERMS_TOS in page.text and TERMS_PRIVACY in page.text
+    assert 'name="version_id"' not in page.text and 'action="/terms/accept"' not in page.text
+    assert text.TERMS_NOT_NOW not in page.text
+    assert text.TERMS_CHILD_COVERED in page.text
+    assert text.TERMS_CHILD_NOT_COVERED not in page.text
+
+
+async def test_the_child_terms_page_says_no_parent_has_accepted_when_not_covered(env: Env):
+    await publish_terms(env)
+    child = await store_person(env, display_name="Kid", account_type="child")
+    _, browser = await enrol_child_and_sign_in(env, child)
+
+    page = await browser.get("/terms")
+
+    assert page.status_code == 200
+    assert 'name="version_id"' not in page.text
+    assert text.TERMS_CHILD_NOT_COVERED in page.text
+    assert text.TERMS_CHILD_COVERED not in page.text
+
+
+async def test_a_child_cannot_post_an_acceptance_and_nothing_is_recorded(env: Env):
+    version_id = await publish_terms(env)
+    child = await store_person(env, display_name="Kid", account_type="child")
+    _, browser = await enrol_child_and_sign_in(env, child)
+    token = (await form(env, "/terms", client=browser))["csrf"]
+
+    refused = await browser.post("/terms/accept", data={"csrf": token, "version_id": str(version_id)})
+
+    assert refused.status_code == 403
+    assert text.CHILD_CANNOT_ACCEPT in refused.text
     count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
     assert count == 0

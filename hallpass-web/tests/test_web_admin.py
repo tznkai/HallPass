@@ -169,6 +169,7 @@ async def test_locking_blocks_sign_in_and_unlocking_restores_it(env: Env):
     user = await bind_child(env, person_id, "kid1")
     await admin_client(env)
     env.authentik.sessions[user["pk"]] = ["s1", "s2"]
+    assert (await person_row(env, person_id)).status == "awaiting_grant"   # the sign-in moved the enrolled child
 
     assert (await post(env, f"/admin/people/{person_id}/lock")).status_code == 303
 
@@ -181,7 +182,7 @@ async def test_locking_blocks_sign_in_and_unlocking_restores_it(env: Env):
     await admin_client(env)
     assert (await post(env, f"/admin/people/{person_id}/unlock")).status_code == 303
     assert env.authentik.users[user["pk"]]["is_active"] is True
-    assert (await person_row(env, person_id)).status == "invited"
+    assert (await person_row(env, person_id)).status == "awaiting_grant"
 
 
 async def test_a_lock_survives_an_authentik_outage_with_a_warning(env: Env):

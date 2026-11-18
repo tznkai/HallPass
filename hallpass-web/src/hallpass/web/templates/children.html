@@ -11,12 +11,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <section class="stack" data-child="{{ row.child.id }}">
   <h2>{{ row.child.display_name }}</h2>
   <p>Status: {{ row.child.status }}</p>
-  {% if row.child.status == "awaiting_grant" and current %}
+  {% if row.can_approve %}
   <form method="post" action="/children/{{ row.child.id }}/grant" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
-    <p>Approving lets {{ row.child.display_name }} use hallpass. You confirm that you accept terms version {{ current.version }}.</p>
+    <p>{{ row.ask }}</p>
     <button type="submit">Approve</button>
   </form>
+  {% endif %}
+  {% if row.approved_waiting %}
+  <p>{{ approved_waiting_text }}</p>
   {% endif %}
   {% if row.grants %}
   <h3>Approvals</h3>

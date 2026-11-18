@@ -27,12 +27,21 @@ INVITATION_NOT_CREATED = "The invitation was not created because Authentik did n
 TERMS_NOT_PUBLISHED = "No terms have been published yet. Hallpass cannot be used until the administrator publishes them."
 TERMS_CHANGED = "The terms changed while this page was open. Read the current version and accept it."
 TERMS_NOT_NOW = "Not now"
+# A child reads the terms but never accepts them. A linked parent accepts for the child.
+CHILD_CANNOT_ACCEPT = "Only a parent can accept the terms. A parent accepts them for a child."
+TERMS_CHILD_COVERED = "A parent accepts these terms for you."
+TERMS_CHILD_NOT_COVERED = "No parent has accepted these terms yet, so you cannot use hallpass until one does."
+# The parent's approval text. The child's name and the version are filled in by the page.
+GRANT_ASK = ("Approving lets {child} use hallpass. You confirm that you accept terms version {version}, "
+             "on the child's behalf.")
+GRANT_APPROVED_WAITING = "This child is approved. They become active when they sign in."
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
     "parent_terms": "You must accept the current terms before you can approve a child.",
     "parent_inactive": "Your account must be active before you can approve a child.",
     "child_not_awaiting": "This child is not waiting for approval.",
+    "already_granted": "This child is already approved.",
 }
 # The personal page and the service rows, shared with a parent's view of a child.
 STATUS_ALLOWED = "Allowed"

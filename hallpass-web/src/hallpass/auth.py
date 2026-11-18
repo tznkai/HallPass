@@ -256,10 +256,11 @@ async def current_person_any_terms(request: Request) -> Person:
 
 
 async def current_person(request: Request) -> Person:
-    """The page gate: as current_person_any_terms, and a person who must still accept the terms is sent to /terms."""
+    """The page gate: as current_person_any_terms, and an adult or parent who must still accept the terms is sent to
+    /terms. A child is never sent there: their terms are covered by a parent."""
     person = await current_person_any_terms(request)
-    state = await _deps(request).db.run(lambda c: terms.state_for(c, person.id))
-    if terms.pages_blocked(state):
+    blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))
+    if blocked:
         raise RedirectToTerms(request.url.path)
     return person
 
