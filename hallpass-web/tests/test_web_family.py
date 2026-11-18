@@ -80,6 +80,7 @@ async def test_a_linked_parent_approves_an_awaiting_child_through_the_pages(env:
     waiting = (await parent_browser.get("/children")).text
     assert "Kid" in waiting and "awaiting_grant" in waiting and "Approve" in waiting
     assert "terms version 1" in waiting
+    assert "Approving lets Kid use the services." in waiting.replace("&#39;", "'")
 
     token = (await form(env, "/children", client=parent_browser))["csrf"]
     done = await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})

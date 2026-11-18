@@ -11,11 +11,12 @@ import re
 
 import httpx
 
-from hallpass import registry, terms, text
+from hallpass import registry, services, terms, text
 from hallpass.auth import current_person_any_terms
 from hallpass.registry import Person
 from tests.fake_authentik import enrol
 from tests.helpers import (
+    NOW,
     TERMS_PRIVACY,
     TERMS_TOS,
     Env,
@@ -23,6 +24,7 @@ from tests.helpers import (
     api_routes,
     form,
     invite_person,
+    make_service,
     new_client,
     publish_terms,
     sign_in,
@@ -296,3 +298,43 @@ async def test_a_child_cannot_post_an_acceptance_and_nothing_is_recorded(env: En
     assert text.CHILD_CANNOT_ACCEPT in refused.text
     count = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM terms_acceptance").fetchone()[0])
     assert count == 0
+
+
+# The child's wording: a child is told what happens to them, never that they must accept -----------------------
+
+async def test_the_child_terms_page_says_services_stay_off_until_a_parent_accepts(env: Env):
+    await publish_terms(env)
+    child = await store_person(env, display_name="Kid", account_type="child")
+    _, browser = await enrol_child_and_sign_in(env, child)
+
+    page = await browser.get("/terms")
+
+    assert "No parent has accepted these terms yet, so your services stay off until one does." in page.text
+    assert "you cannot use hallpass" not in page.text
+
+
+async def test_a_child_is_refused_an_acceptance_with_the_child_wording(env: Env):
+    version_id = await publish_terms(env)
+    child = await store_person(env, display_name="Kid", account_type="child")
+    _, browser = await enrol_child_and_sign_in(env, child)
+    token = (await form(env, "/terms", client=browser))["csrf"]
+
+    refused = await browser.post("/terms/accept", data={"csrf": token, "version_id": str(version_id)})
+
+    assert "A child does not accept the terms. A parent accepts them for you." in refused.text
+    assert "Only a parent can accept" not in refused.text
+
+
+async def test_a_child_sees_that_a_parent_must_accept_the_terms_not_that_they_must(env: Env):
+    await publish_terms(env)
+    actor = await store_person(env, display_name="Admin", account_type="adult")
+    calendar = await make_service(env.db, "calendar")
+    await env.db.run(lambda c: services.add_entitlement(c, calendar.id, "type", "child", "grant",
+                                                        actor_id=actor.id, now=NOW))
+    child = await store_person(env, display_name="Kid", account_type="child")
+    _, browser = await enrol_child_and_sign_in(env, child)
+
+    home = await browser.get("/")
+
+    assert "A parent must accept the current terms first." in home.text
+    assert "The current terms must be accepted first." not in home.text

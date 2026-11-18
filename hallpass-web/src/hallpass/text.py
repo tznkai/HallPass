@@ -28,11 +28,11 @@ TERMS_NOT_PUBLISHED = "No terms have been published yet. Hallpass cannot be used
 TERMS_CHANGED = "The terms changed while this page was open. Read the current version and accept it."
 TERMS_NOT_NOW = "Not now"
 # A child reads the terms but never accepts them. A linked parent accepts for the child.
-CHILD_CANNOT_ACCEPT = "Only a parent can accept the terms. A parent accepts them for a child."
+CHILD_CANNOT_ACCEPT = "A child does not accept the terms. A parent accepts them for you."
 TERMS_CHILD_COVERED = "A parent accepts these terms for you."
-TERMS_CHILD_NOT_COVERED = "No parent has accepted these terms yet, so you cannot use hallpass until one does."
+TERMS_CHILD_NOT_COVERED = "No parent has accepted these terms yet, so your services stay off until one does."
 # The parent's approval text. The child's name and the version are filled in by the page.
-GRANT_ASK = ("Approving lets {child} use hallpass. You confirm that you accept terms version {version}, "
+GRANT_ASK = ("Approving lets {child} use the services. You confirm that you accept terms version {version}, "
              "on the child's behalf.")
 GRANT_APPROVED_WAITING = "This child is approved. They become active when they sign in."
 # One message per grants.GrantRefused reason.
@@ -55,6 +55,8 @@ REASON_RETIRED = "The service has been retired."
 REASON_NOT_ENTITLED = "Not entitled to this service."
 REASON_NOT_ACTIVE = "The account is not active yet. A parent must approve it."
 REASON_TERMS = "The current terms must be accepted first."
+# A child cannot accept the terms, so their reason names the parent who must.
+REASON_TERMS_CHILD = "A parent must accept the current terms first."
 REASON_HELD = "A hold is in place."
 FEED_SHOWN_ONCE = ("This feed link is shown only once. Copy it now: reloading the page does not show it again. "
                    "Generating a new link revokes this one.")

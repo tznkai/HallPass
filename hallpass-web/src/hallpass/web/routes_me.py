@@ -33,6 +33,14 @@ REASON_TEXT = {
 }
 
 
+def _reason_text(reason: str, person: Person) -> str:
+    """The reason as shown for this person. A child never accepts the terms, so a child's terms reason names the parent
+    who must accept them, rather than telling the child to accept."""
+    if reason == "terms" and person.account_type == "child":
+        return text.REASON_TERMS_CHILD
+    return REASON_TEXT[reason]
+
+
 def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairPauses) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
     who placed each hold, a note when a game service has no external identity for the person, the report status
@@ -59,7 +67,7 @@ def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairP
             "service_id": service.id,
             "name": service.name,
             "status": text.STATUS_ALLOWED if decision.desired == "allowed" else text.STATUS_SUSPENDED,
-            "reasons": [REASON_TEXT[reason] for reason in decision.reasons],
+            "reasons": [_reason_text(reason, person) for reason in decision.reasons],
             "suspendable": suspendable,
             "auto_suspendable": service.auto_suspendable,
             "holders": holders,
