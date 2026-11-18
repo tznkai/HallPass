@@ -43,7 +43,7 @@ as the code they cite.
 
 - `src/hallmonitor/adapters/minecraft.py:117` `pattern = _before_name(prefix, entry.bedrock)` — the ban-entry matcher: an entry is found anywhere in the reply, but a name with a name character before it never counts, so `Xbob was banned by` is not a ban on Bob
 - `src/hallmonitor/adapters/minecraft.py:102` `if prefix in SEPARATOR_PREFIXES and not bedrock:` — the Java rule under a `.` or `*` prefix: a Java name counts only after a separator, or after the prefix that follows a name character, so a Bedrock twin's ban (`operator..Tim`, `ban(s):.Tim`) never bans the Java name `Tim`
-- `src/hallmonitor/adapters/minecraft.py:105` `if prefix in SEPARATOR_PREFIXES:` — the Bedrock rule under a `.` or `*` prefix: a Bedrock name counts only at the start of the reply, after whitespace, after the `ban(s):` header, or after a letter, digit or `_` and then `.` or the prefix, so a reason's colon (`griefing:.Tim`) and a reason ending in `).` (`...(2nd).Tim`) never ban the Bedrock name `.Tim`
+- `src/hallmonitor/adapters/minecraft.py:105` `if prefix in SEPARATOR_PREFIXES:` — the Bedrock rule under a `.` or `*` prefix: a Bedrock name counts only after a line break, after the `ban(s):` header (with or without a space), or after a letter, digit or `_` and then `.` or the prefix, so a reason's colon (`griefing:.Tim`), a reason's space (`griefing .Tim`) and a reason ending in `).` (`...(2nd).Tim`) never ban the Bedrock name `.Tim`
 - `src/hallmonitor/adapters/minecraft.py:155` `if any(_is_banned(entry, self._prefix, ban_text) for entry in entries):` — the ban branch of observe: a player on the ban list is checked before any whitelist state is read, so a ban placed by someone else is never lifted
 - `src/hallmonitor/adapters/minecraft.py:156` `return Observed("banned_external")` — the observation that keeps the reconcile loop from applying anything to a banned player
 - `src/hallmonitor/adapters/minecraft.py:189` `if actual != desired:` — the apply re-check: the whitelist is read again after the change, and any disagreement is `not_applied`, so a partial change is never reported as success
@@ -54,22 +54,31 @@ glues the next name to a letter (`...: griefing<name> was banned by ...`), so th
 `allowed`, which is harmless. A moderator who writes `<name> was banned by x: ` inside a reason can make that name look
 banned, since moderators already have the console.
 
-With a `.` or `*` prefix, a Java name is not banned by its Bedrock twin's entry (`..Tim`, `ban(s):.Tim`, ` .Tim`), and a
-Bedrock name is banned only by an entry that begins it at the start of the reply, after whitespace, after the `ban(s):`
-header, or after a letter, digit or `_` and then `.` or the prefix (`operator..Tim`, `operator.*Tim`). A colon that ends
-a reason is not the header, so it never starts a Bedrock entry (`griefing:.Tim`). A Java ban whose reason ends in `).`
-therefore does not ban the Bedrock name. Both rules are ASCII-only, so a look-alike letter (the Kelvin sign, the long
-s) never matches.
+With a `.` or `*` prefix, a Java name is not banned by its Bedrock twin's entry (`..Tim`, `ban(s):.Tim`, ` .Tim`). A
+Bedrock name is banned only by an entry that begins it after a line break, after the `ban(s):` header (with or without a
+space), or after a letter, digit or `_` and then `.` or the prefix (`operator..Tim`, `operator.*Tim`). A colon or a space
+that ends a reason is neither a line break nor the header, so it never starts a Bedrock entry (`griefing:.Tim`,
+`griefing .Tim`). Both rules are ASCII-only, so a look-alike letter (the Kelvin sign, the long s) never matches.
 
-The residual cases are the same for both directions. A miss, which is harmless: a Java ban after a reason whose last
-character is the prefix and whose character before that is not a letter, digit or `_` (`..`, `).`, `!.`, and under `*`
-also `.*`) is not seen, so the player shows `allowed` while the ban stands; and a Bedrock ban after a reason whose last
-character is not a letter, digit, `_` or whitespace, and is not `.` or the prefix after a letter, digit or `_`, is not
-seen. That covers a reason ending in `)`, `!` or `:` (`...(2nd offence)`, `bye!`, `griefing:`) and the prefix after
-such a character (`).`, `..`, `!.`). A false match, which is rare, in two forms: a Bedrock ban whose reason has no
-closing punctuation and ends in a letter, digit or `_` (`...griefing.Tim was banned by`) reads as a ban on Java `Tim`,
-so that hold is not applied; and under `*`, a Java ban whose reason ends in `x.*` (`...griefing.*Tim was banned by`)
-reads as a ban on Bedrock `*Tim`, so that hold is not applied.
+The residual cases are listed by prefix and direction. A text can be read either way (`x.Tim` is a Java ban whose reason
+ends in `x.`, or a Bedrock ban whose reason ends in `x`), so each is a trade-off.
+
+Under `.` or `*`, these false matches are accepted, and a hold is then not applied:
+- a Bedrock ban read as Java after a reason ending in a letter, digit or `_` (`griefing.Tim` bans Java `Tim`);
+- a Java ban read as Bedrock after a letter, digit or `_` and then `..`, `.*` or `**` (`griefing..Tim`, `x.*Tim`,
+  `x**Tim`). These cannot be told apart from the default-reason forms. Closing `x.*Tim` would also miss the
+  default-reason Bedrock ban `operator.*Tim`, so it is accepted.
+
+Under `.` or `*`, these misses are accepted, since the ban still stands and the player shows `allowed`, which is harmless:
+- a Java ban after a reason whose last character is the prefix and whose character before it is not a letter, digit or
+  `_` (`(2nd).Tim`, `..Tim`);
+- a Bedrock ban after a reason ending in anything other than a line break, the `ban(s):` header, or a letter, digit or
+  `_` and then `.` or the prefix (`griefing.Tim`, `griefing .Tim`, `(2nd).Tim`, `bye!.Tim`, `griefing:.Tim`).
+
+Under `_`, a Java ban read as Bedrock after a non-name character and then `_` (`bye!_Tim`) bans Bedrock `Tim`, a false
+match. A Java name starting with `_` (`_Tim`) has the same listed name as Bedrock `Tim`, so a ban on either bans both.
+Under an empty prefix, every Java and Bedrock name with the same spelling shares one listed name, so a ban on either
+bans both. This is pre-existing, and the whitelist state is shared the same way.
 
 ## Console command arguments
 

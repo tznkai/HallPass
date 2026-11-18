@@ -378,7 +378,7 @@ async def test_the_bedrock_name_is_still_banned_after_a_default_reason() -> None
 
 async def test_a_java_ban_whose_reason_ends_in_a_colon_does_not_ban_the_bedrock_name() -> None:
     # Only the `ban(s):` header ends in a colon that starts an entry, so `griefing:` then `.Tim` is not a ban on `.Tim`.
-    text = ("There are 1 ban(s):Bob was banned by Admin: griefing:"
+    text = ("There are 2 ban(s):Bob was banned by Admin: griefing:"
             ".Tim was banned by Admin: spam.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
@@ -487,9 +487,9 @@ async def test_a_subject_whose_bedrock_twin_is_banned_is_banned_external_from_th
     assert outcomes(hallpass) == [("r1", "banned_external", None)]
 
 
-# The same rule for a Bedrock name: with a `.` or `*` prefix, a Bedrock entry counts only after the start of the reply,
-# whitespace, `:`, or the prefix that follows a name character. A Java ban whose reason ends in a non-name character
-# and then the prefix must not ban the Bedrock name.
+# The same rule for a Bedrock name: with a `.` or `*` prefix, a Bedrock entry counts only after a line break, after the
+# `ban(s):` header (with or without a space), or after a letter, digit or `_` and then `.` or the prefix. A Java ban
+# whose reason ends in a non-name character and then the prefix must not ban the Bedrock name.
 
 @pytest.mark.parametrize(("prefix", "reason"), [
     (".", "...(2nd offence)"),
@@ -499,7 +499,8 @@ async def test_a_subject_whose_bedrock_twin_is_banned_is_banned_external_from_th
 ])
 async def test_a_java_ban_whose_reason_ends_before_the_prefix_does_not_ban_the_bedrock_name(
         prefix: str, reason: str) -> None:
-    text = f"There are 1 ban(s):{reason}{prefix}Tim was banned by Server: Banned by an operator."
+    text = (f"There are 2 ban(s):Bob was banned by Admin: {reason}{prefix}Tim was banned by Server: "
+            "Banned by an operator.")
     state = server_state(handler=ban_list_reply(text), prefix=prefix)
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
@@ -515,6 +516,31 @@ async def test_a_bedrock_entry_first_after_a_space_or_after_a_line_break_is_bann
     hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert outcomes(hallpass) == [("r2", "banned_external", None)]
+
+
+@pytest.mark.parametrize("prefix", [".", "*"])
+async def test_a_java_reason_ending_in_a_space_before_the_prefix_does_not_ban_the_bedrock_name(prefix: str) -> None:
+    # A space is neither a line break nor the `ban(s):` header, so `griefing .Tim` does not start a Bedrock entry.
+    text = (f"There are 2 ban(s):Bob was banned by Admin: griefing {prefix}Tim was banned by Server: "
+            "Banned by an operator.")
+    state = server_state(handler=ban_list_reply(text), prefix=prefix)
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port, prefix=prefix)
+    assert "fwhitelist add Tim" in state.commands
+    assert outcomes(hallpass) == [("r2", "allowed", None)]
+
+
+@pytest.mark.parametrize("prefix", [".", "*"])
+async def test_a_bedrock_entry_after_a_line_break_inside_the_list_is_banned(prefix: str) -> None:
+    text = (f"There are 2 ban(s):Bob was banned by Admin: griefing\n{prefix}Tim was banned by Server: "
+            "Banned by an operator.")
+    state = server_state(handler=ban_list_reply(text), prefix=prefix)
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port, prefix=prefix)
     assert state.commands == LIST_COMMANDS
     assert outcomes(hallpass) == [("r2", "banned_external", None)]
 

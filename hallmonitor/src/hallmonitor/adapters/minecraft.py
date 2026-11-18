@@ -97,14 +97,14 @@ def _before_name(prefix: str, bedrock: bool) -> str:
     """The lookbehind that must hold just before a listed name's first character for a ban entry to count. A name
     character before it never counts. With a `.` or `*` prefix, a Java name counts only when the character before it is
     not a name character and not the prefix, or when the prefix follows a name character (`operator.Tim`). A Bedrock
-    name starts with the prefix, so it counts at the start of the reply, after whitespace or the `ban(s):` header, or
-    after a letter, digit or `_` then `.` or the prefix (`operator..Tim`, `operator.*Tim`). Other colons never count."""
+    name starts with the prefix, so it counts only after a line break, after the `ban(s):` header (with or without a
+    space), or after a letter, digit or `_` then `.` or the prefix (`operator..Tim`, `operator.*Tim`)."""
     if prefix in SEPARATOR_PREFIXES and not bedrock:
         sep = re.escape(prefix)
         return rf"(?:(?<![A-Za-z0-9_{sep}])|(?<=[A-Za-z0-9_]{sep}))"
     if prefix in SEPARATOR_PREFIXES:
         sep = re.escape(prefix)
-        return rf"(?:^|(?<=\s)|(?<=ban\(s\):)|(?<=[A-Za-z0-9_][.{sep}]))"
+        return rf"(?:(?<=[\r\n])|(?<=ban\(s\):)|(?<=ban\(s\): )|(?<=[A-Za-z0-9_][.{sep}]))"
     return r"(?<![A-Za-z0-9_])"
 
 

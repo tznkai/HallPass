@@ -106,9 +106,13 @@ placeholders such as `<mc-host>`.
   after the full stop of the reason. Each entry is `NAME was banned by BANNER: REASON`. A name counts as banned
   wherever an entry begins it, but never when a letter, digit or underscore comes before it, so a name that appears
   only as the banner or in the reason is not banned. Line breaks still work. With a `.` or `*` prefix, a Java name does
-  not count right after its Bedrock twin's prefix (`..Tim`), and a Bedrock name counts only at the start of the reply,
-  after whitespace, after the `ban(s):` header, or after a letter, digit or `_` and then `.` or the prefix
-  (`operator..Tim`, `operator.*Tim`). A reason's colon never counts. The matcher's accepted costs are in `REVIEW.md`.
+  not count right after its Bedrock twin's prefix (`..Tim`), and a Bedrock name counts only after a line break, after
+  the `ban(s):` header (with or without a space), or after a letter, digit or `_` and then `.` or the prefix
+  (`operator..Tim`, `operator.*Tim`). A space or a reason's colon never starts a Bedrock name (`griefing .Tim`,
+  `griefing:.Tim`). Under `.` or `*` the matcher has the residual misses and false matches listed in `REVIEW.md`,
+  including a Java ban whose reason ends in `x.*` read as Bedrock `*Tim`, which is kept on purpose. Under `_`, a Java
+  name starting with `_` is the same listed name as Bedrock `Tim`, and under an empty prefix a Java name and its Bedrock
+  twin share one listed name; a ban on either bans both.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
   `still_connected`, and the subject is not reported as suspended.
