@@ -16,19 +16,19 @@ Run 2026-11-13 with `tools/live/fluxer_check.py` against a dedicated test accoun
 - **Base and auth.** `<fluxer-api>/v1/admin/...`, where `<fluxer-api>` is `endpoints.api_public` from
   `<instance>/.well-known/fluxer` without the trailing `/v1`. Headers: `Authorization: Admin <key>` and
   `X-Audit-Log-Reason: <text>` (the audit header is required on enforcement routes).
-- **Lookup.** `GET /v1/admin/users/{id}` → 200 with a wrapped body, `{"users": [<user>]}`.
+- **Lookup.** `GET /v1/admin/users/{id}` -> 200 with a wrapped body, `{"users": [<user>]}`.
   - `flags` is a **string** holding a 64-bit integer. Parse it with `int()`, never as a float.
   - DISABLED is `1 << 38`. `1 << 39` is `HAS_SESSION_STARTED` and is normal on an account that has signed in.
   - `temp_banned_until` and `enforcement_decision_id` are null on an account with no suspension.
   - The user object also carries `email`, `date_of_birth`, `last_active_ip`, `last_active_location` and more.
     Hallmonitor reads only `id` and `flags` from it and never logs or stores any other field.
 - **Sessions.**
-  - `GET /v1/admin/users/{id}/sessions` → `{"sessions": [...]}`. The list also holds ended sessions: an entry with
+  - `GET /v1/admin/users/{id}/sessions` -> `{"sessions": [...]}`. The list also holds ended sessions: an entry with
     `deleted_at` set has been terminated, and only entries with `deleted_at` null are active.
-  - `DELETE /v1/admin/users/{id}/sessions` → 200 `{"terminated_count": <n>}`. Observed: 2 active before, 2
+  - `DELETE /v1/admin/users/{id}/sessions` -> 200 `{"terminated_count": <n>}`. Observed: 2 active before, 2
     terminated, 0 active after, and the test client was signed out at once. It needs `user:update_flags`.
 - **Suspension needs an enforcement decision.** `PUT /v1/admin/users/{id}/ban` with
-  `{"duration_hours": 0, "decision": {}}` → 400. In the source the body is
+  `{"duration_hours": 0, "decision": {}}` -> 400. In the source the body is
   `{duration_hours, decision: {reason_code, source, automation, statement?, ...}}`, where:
   - `reason_code` must be a rule-violation code (spam, harassment, ban evasion and so on). The neutral codes
     (user requested, other, inactivity) are excluded;
@@ -39,10 +39,10 @@ Run 2026-11-13 with `tools/live/fluxer_check.py` against a dedicated test accoun
 - **Lift.** Not exercised. In the source a decision ends with
   `POST /v1/admin/enforcement-decisions/{id}/end` and `{"outcome": "lifted" | "reversed", "statement"?}`.
 - **SSO identity lookup.**
-  - `GET /v1/admin/users/{id}/sso-identities` → `{"sso_identities": [{provider_id, subject, user_id, claimed_at}]}`.
-  - `GET /v1/admin/sso-identities?provider_id=<provider_id>&subject=<sub>` → `{"sso_identity": {...} | null}`, and
-    returned the right Fluxer user. Both query parameters are required (subject alone → 400). It needs `user:lookup`.
-- **ACLs.** `GET /v1/admin/api-keys` → 403 for this key, so the key's own ACL list is not visible through it.
+  - `GET /v1/admin/users/{id}/sso-identities` -> `{"sso_identities": [{provider_id, subject, user_id, claimed_at}]}`.
+  - `GET /v1/admin/sso-identities?provider_id=<provider_id>&subject=<sub>` -> `{"sso_identity": {...} | null}`, and
+    returned the right Fluxer user. Both query parameters are required (subject alone -> 400). It needs `user:lookup`.
+- **ACLs.** `GET /v1/admin/api-keys` -> 403 for this key, so the key's own ACL list is not visible through it.
   With the design change below the key needs `user:lookup`, `user:list_sessions` and `user:update_flags`
   (Fluxer files session termination under `update_flags`).
 
@@ -93,8 +93,9 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 ## Minecraft
 
-Not yet recorded from a live server. Until `tools/live/minecraft_check.py` is run, the adapter follows the plan's
-defaults, and each item below is pending live confirmation. Hosts and names are placeholders such as `<mc-host>`.
+Only the setup note at the end is from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
+follows the plan's defaults, and each other item below is pending live confirmation. Hosts and names are
+placeholders such as `<mc-host>`.
 
 - **End-of-response sentinel.** A Minecraft command is sent alone. Its sentinel (type 200) follows only after the first
   response packet for that command has arrived, and never in the same read as the command, because a vanilla server
@@ -109,8 +110,9 @@ defaults, and each item below is pending live confirmation. Hosts and names are 
   the same class for now, since spaces are refused until the live check shows how Floodgate passes them.
 - **Setup (seen 2026-11-18).** `HOST` is a bare host name or IP, never a URL: with `https://` in front, every cycle
   failed as `unreachable` though the port was open. `PORT` is `rcon.port`, not the game port, and on Pterodactyl it
-  must be one of the server's allocations. An operator joins even when not on the whitelist, so test a hold with an
-  account that is not an op.
+  must be one of the server's allocations. A hold does not keep an op (an account in `ops.json`) out: ops skip the
+  whitelist, so a held op is kicked but can rejoin at once while the adapter reports `suspended`. Keep op status off
+  accounts that hallpass may hold, and test a hold with an account that is not an op.
 
 ## Palworld
 
