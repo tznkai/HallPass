@@ -107,6 +107,10 @@ defaults, and each item below is pending live confirmation. Hosts and names are 
   `still_connected`, and the subject is not reported as suspended.
 - **Names sent to the console.** A Java name matches 1 to 16 letters, digits or underscores. A Bedrock gamertag uses
   the same class for now, since spaces are refused until the live check shows how Floodgate passes them.
+- **Setup (seen 2026-11-18).** `HOST` is a bare host name or IP, never a URL: with `https://` in front, every cycle
+  failed as `unreachable` though the port was open. `PORT` is `rcon.port`, not the game port, and on Pterodactyl it
+  must be one of the server's allocations. An operator joins even when not on the whitelist, so test a hold with an
+  account that is not an op.
 
 ## Palworld
 
