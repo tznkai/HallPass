@@ -40,11 +40,11 @@ UNIVERSE = re.compile(r"[0-5]")
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
 
 
-def _steam_id(subject: Subject) -> str | None:
+def steam_id_of(subject: Subject) -> str | None:
     return next((identity.value for identity in subject.identities if identity.kind == STEAM_KIND), None)
 
 
-def _source_id(steam_id: str, universe: str) -> str | None:
+def source_id_of(steam_id: str, universe: str) -> str | None:
     """The Source ID for a SteamID64, or None when it cannot be built into a valid ID."""
     try:
         sid = steam2(steam_id, universe)
@@ -53,22 +53,22 @@ def _source_id(steam_id: str, universe: str) -> str | None:
     return sid if SOURCE_ID.fullmatch(sid) is not None else None
 
 
-def _identity_error(subject: Subject, universe: str) -> Observed | None:
+def identity_error(subject: Subject, universe: str) -> Observed | None:
     """Refuses a subject whose steam_id is missing or malformed. The value is never echoed."""
-    steam_id = _steam_id(subject)
+    steam_id = steam_id_of(subject)
     if steam_id is None:
         return Observed("error", "no_identity")
-    if not valid_steam64(steam_id) or _source_id(steam_id, universe) is None:
+    if not valid_steam64(steam_id) or source_id_of(steam_id, universe) is None:
         return Observed("error", "bad_identity")
     return None
 
 
-def _known_source_ids(subjects: Sequence[Subject], universe: str) -> set[str]:
+def known_source_ids(subjects: Sequence[Subject], universe: str) -> set[str]:
     known: set[str] = set()
     for subject in subjects:
-        steam_id = _steam_id(subject)
+        steam_id = steam_id_of(subject)
         if steam_id is not None and valid_steam64(steam_id):
-            sid = _source_id(steam_id, universe)
+            sid = source_id_of(steam_id, universe)
             if sid is not None:
                 known.add(sid)
     return known
@@ -108,12 +108,12 @@ class SourceRconAdapter:
         await self._db.run(lambda c: own.forget_own(c, self._slug, steam_id))
 
     async def _observe_one(self, subject: Subject, listed: set[str]) -> Observed:
-        failure = _identity_error(subject, self._universe)
+        failure = identity_error(subject, self._universe)
         if failure is not None:
             return failure
-        steam_id = _steam_id(subject)
+        steam_id = steam_id_of(subject)
         assert steam_id is not None
-        sid = _source_id(steam_id, self._universe)
+        sid = source_id_of(steam_id, self._universe)
         assert sid is not None
         if sid not in listed:
             if await self._owned(steam_id):
@@ -157,19 +157,19 @@ class SourceRconAdapter:
     async def apply(self, subject: Subject, desired: str) -> Observed:
         if desired not in ("allowed", "suspended"):
             raise ValueError("desired must be allowed or suspended")
-        failure = _identity_error(subject, self._universe)
+        failure = identity_error(subject, self._universe)
         if failure is not None:
             return failure
-        steam_id = _steam_id(subject)
+        steam_id = steam_id_of(subject)
         assert steam_id is not None
-        sid = _source_id(steam_id, self._universe)
+        sid = source_id_of(steam_id, self._universe)
         assert sid is not None
         if desired == "suspended":
             return await self._suspend(steam_id, sid)
         return await self._restore(steam_id, sid)
 
     async def unmanaged_count(self, subjects: Sequence[Subject]) -> int | None:
-        known = _known_source_ids(subjects, self._universe)
+        known = known_source_ids(subjects, self._universe)
         async with self._session() as client:
             listed = await self._listed(client)
         return sum(1 for sid in listed if sid not in known)
