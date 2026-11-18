@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallmonitor
 
-Last verified: 2026-11-16
+Last verified: 2026-11-18
 
 ## Purpose
 
