@@ -157,8 +157,10 @@ class PalworldAdapter:
 
     async def _restore(self, steam_id: str) -> Observed:
         if not await self._owned(steam_id):
-            # No ban of ours to lift. Read the list again: a listed id is a ban we did not place, and an unlisted one
-            # was lifted by an earlier restore of a subject that shares this id. Nothing is sent or written here.
+            # No ban of ours to lift. Read the list again. A listed id is a ban we did not place, or our own just-lifted
+            # ban that the file does not show as gone yet: Palworld forgets its record right after unban, without a
+            # re-read. An unlisted one was usually lifted by an earlier restore of a subject that shares this id.
+            # Nothing is sent or written here.
             if _userid(steam_id) in set(await self._ban_entries()):
                 return Observed("banned_external")
             return Observed("allowed")

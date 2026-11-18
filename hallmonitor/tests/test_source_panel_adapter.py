@@ -428,7 +428,7 @@ async def test_a_restore_after_the_shared_ban_is_lifted_reads_the_file_and_sends
         assert await lab.adapter.apply(steam_subject("r1", OWN_ID, "allowed"), "allowed") == Observed("allowed")
         sent = len(lab.state.commands)
         assert await lab.adapter.apply(steam_subject("r2", OWN_ID, "allowed"), "allowed") == Observed("allowed")
-    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in lab.state.commands[sent:])
+    assert lab.state.commands[sent:] == []
     assert OWN_SID not in lab.state.files[(SERVER, BANLIST)]
 
 
@@ -438,6 +438,17 @@ async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_sen
     assert result == Observed("allowed")
     assert lab.state.commands == []
     assert lab.state.files[(SERVER, BANLIST)] == f"banid 0 {OTHER_SID}\n"
+
+
+@pytest.mark.parametrize(("status", "reason"), [(404, "not_found"), (500, "http")])
+async def test_a_restore_with_no_own_record_whose_reread_fails_raises_the_reason_and_sends_nothing(
+        tmp_path: Path, status: int, reason: str) -> None:
+    async with lab_with(tmp_path) as lab:
+        lab.state.fail_next = {"contents": status}
+        with pytest.raises(AdapterError) as info:
+            await lab.adapter.apply(steam_subject("r1", OWN_ID, "allowed"), "allowed")
+    assert info.value.reason == reason
+    assert lab.state.commands == []
 
 
 # Identity: a malformed or missing steam_id is refused before any command or file line --------------------------

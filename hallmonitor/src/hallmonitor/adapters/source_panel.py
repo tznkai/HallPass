@@ -143,7 +143,7 @@ class SourcePanelAdapter:
     async def _restore(self, steam_id: str, sid: str) -> Observed:
         if not await self._owned(steam_id):
             # No ban of ours to lift. Read the file again: a listed id is a ban we did not place, and an unlisted one
-            # was lifted by an earlier restore of a subject that shares this id. Nothing is sent or written here.
+            # was usually lifted by an earlier restore of a subject that shares this id. Nothing is sent or written here.
             return Observed("banned_external") if sid in await self._listed() else Observed("allowed")
         await self._command(f"removeid {sid}")
         await self._command("writeid")

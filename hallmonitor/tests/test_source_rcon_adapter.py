@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from hallmonitor import own
-from hallmonitor.adapters.base import Observed
+from hallmonitor.adapters.base import AdapterError, Observed
 from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.adapters.registry import build_adapter
 from hallmonitor.adapters.source_rcon import SourceRconAdapter
@@ -291,7 +291,7 @@ async def test_a_restore_after_the_shared_ban_is_lifted_reads_the_list_and_sends
         sent = len(state.commands)
         assert await adapter.apply(second, "allowed") == Observed("allowed")
     assert state.source_bans == []
-    assert not any(cmd.startswith(("banid", "removeid", "writeid")) for cmd in state.commands[sent:])
+    assert state.commands[sent:] == ["listid"]
 
 
 async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_changes_nothing(db: Database,
@@ -398,3 +398,22 @@ async def test_unmanaged_counts_listed_ids_that_match_no_subject(db: Database, h
         adapter = adapter_for(db, http, port)
         assert await adapter.unmanaged_count([own_subject]) == 1
         assert await adapter.unmanaged_count([other_subject]) == 0
+
+
+async def test_a_restore_with_no_own_record_and_a_wrong_password_raises_auth_and_sends_nothing(
+        db: Database, http: httpx.AsyncClient) -> None:
+    state = server_state(password=PASSWORD)
+    subj = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    async with rcon_server(state) as port:
+        with pytest.raises(AdapterError) as info:
+            await adapter_for(db, http, port, rcon_password=WRONG_PASSWORD).apply(subj, "allowed")
+    assert info.value.reason == "auth"
+    assert state.commands == []
+
+
+async def test_a_restore_with_no_own_record_and_an_unreachable_server_raises_unreachable(
+        db: Database, http: httpx.AsyncClient) -> None:
+    subj = Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2)
+    with pytest.raises(AdapterError) as info:
+        await adapter_for(db, http, closed_port()).apply(subj, "allowed")
+    assert info.value.reason == "unreachable"

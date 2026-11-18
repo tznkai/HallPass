@@ -18,7 +18,7 @@ import httpx
 import pytest
 
 from hallmonitor import own
-from hallmonitor.adapters.base import Capabilities, Observed
+from hallmonitor.adapters.base import AdapterError, Capabilities, Observed
 from hallmonitor.adapters.context import AdapterContext
 from hallmonitor.adapters.palworld import PalworldAdapter
 from hallmonitor.adapters.registry import build_adapter
@@ -465,3 +465,16 @@ async def test_a_restore_with_no_own_record_and_no_listed_ban_is_allowed_and_wri
     assert result == Observed("allowed")
     assert pal.requests == []
     assert file_text(ptero) == f"steam_{OTHER_ID},{player_uid(f'steam_{OTHER_ID}')}\n"
+
+
+@pytest.mark.parametrize(("status", "reason"), [(404, "not_found"), (500, "http")])
+async def test_a_restore_with_no_own_record_whose_reread_fails_raises_the_reason_and_sends_nothing(
+        db: Database, status: int, reason: str) -> None:
+    pal, ptero = pal_state(), banlist()
+    ptero.fail_next = {"contents": status}
+    async with httpx.AsyncClient(transport=make_palworld_transport(pal, ptero)) as http:
+        with pytest.raises(AdapterError) as info:
+            await palworld(db, http).apply(Subject("r1", (Identity("steam_id", OWN_ID),), "allowed", 2), "allowed")
+    assert info.value.reason == reason
+    assert pal.requests == []
+    assert file_text(ptero) == ""
