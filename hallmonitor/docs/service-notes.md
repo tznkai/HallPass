@@ -160,3 +160,18 @@ Verdict: automated (permitted list through Pterodactyl, live reload). Checked on
 ## The Ship
 
 ## Abiotic Factor
+
+Verdict: manual for now (adapter deferred). Researched on 2026-11-18. Holds are applied by hand in the in-game admin
+menu, and the hallpass service uses adapter `manual`, not automatically suspendable.
+
+- **Admin file.** `AbioticFactor/Saved/SaveGames/Server/Admin.ini` under the server root, moved by `-AdminIniPath=`
+  (relative to `Saved/`). The server under test has a `[BannedPlayers]` section in it.
+- **Documented.** The official dedicated-server wiki covers `[Moderators]` with `Moderator=<steam-id>` lines (Steam
+  only), says to close the server before editing, and documents `-AdminPassword=` for in-game admin by password. It
+  does not mention `[BannedPlayers]`.
+- **Reported by hosting guides, not confirmed here.** A ban is a `BannedPlayer=<steam-id>` line under
+  `[BannedPlayers]`, and deleting the line lifts it. Edits are made with the server stopped. There are no console or
+  RCON moderation commands, and there is no allowlist.
+- **Before automating.** Check live the exact line an in-game ban writes, the file's encoding and line endings,
+  whether a hand edit takes effect at once or only after a restart, and whether a running server rewrites the file
+  on save or shutdown. A file-based ban list would need its own records, so that it lifts only the bans it placed.

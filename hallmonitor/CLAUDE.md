@@ -99,6 +99,6 @@ code updates `REVIEW.md` in the same change.
 Live scripts live in `tools/live/` (Fluxer, Minecraft, Palworld, Pterodactyl files, The Ship). They are hand-run
 only, never run by CI. Results are recorded in `docs/service-notes.md`, with placeholders in place of real hosts and
 ids. Fluxer, Palworld, Valheim and the Pterodactyl permissions are recorded. The Minecraft section lists the adapter's
-assumptions as pending, and The Ship and Abiotic Factor sections are still empty. Until a service's check is recorded,
-that adapter's framing and parsing are unconfirmed. Writing a file through Pterodactyl needs `file.create`,
-not `file.update`.
+assumptions as pending, Abiotic Factor is manual for now (adapter deferred), and The Ship section is still empty.
+Until a service's check is recorded, that adapter's framing and parsing are unconfirmed. Writing a file through
+Pterodactyl needs `file.create`, not `file.update`.
