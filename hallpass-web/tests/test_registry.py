@@ -225,29 +225,66 @@ async def test_identities_of_all_four_kinds_then_remove_one(db: Database) -> Non
     ]
 
 
-async def test_duplicate_identity_for_same_service_kind_value_raises_integrity_error(db: Database) -> None:
-    first = await make(db, display_name="First", account_type="child")
-    second = await make(db, display_name="Second", account_type="child")
+async def test_duplicate_identity_for_the_same_person_raises_integrity_error(db: Database) -> None:
+    person = await make(db, display_name="First", account_type="child")
     await make_service(db, "minecraft")
-    await db.run(lambda c: registry.add_identity(c, first.id, "minecraft", "java_name", "kidplayer"))
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "kidplayer"))
     with pytest.raises(sqlite3.IntegrityError):
-        await db.run(lambda c: registry.add_identity(c, second.id, "minecraft", "java_name", "kidplayer"))
+        await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "kidplayer"))
+
+
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag", "steam_id"])
+async def test_the_same_identity_may_be_held_by_two_people(db: Database, kind: str) -> None:
+    value = STEAM_ID if kind == "steam_id" else "PlayerOne"
+    service = "steam" if kind == "steam_id" else "minecraft"
+    one = await make(db, display_name="One", account_type="child")
+    two = await make(db, display_name="Two", account_type="child")
+    await make_service(db, service)
+    await db.run(lambda c: registry.add_identity(c, one.id, service, kind, value))
+    await db.run(lambda c: registry.add_identity(c, two.id, service, kind, value))
+    assert [(i.kind, i.value) for i in await db.run(lambda c: registry.identities_of(c, two.id))] == [(kind, value)]
 
 
 @pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
 @pytest.mark.parametrize("first, second", [("PlayerOne", "playerone"), ("playerone", "PlayerOne")],
                          ids=["upper-then-lower", "lower-then-upper"])
-async def test_a_case_variant_minecraft_name_on_another_person_is_refused(db: Database, kind: str, first: str,
-                                                                          second: str) -> None:
+async def test_a_case_variant_minecraft_name_may_be_held_by_another_person_with_its_case_kept(
+        db: Database, kind: str, first: str, second: str) -> None:
     one = await make(db, display_name="One", account_type="child")
     two = await make(db, display_name="Two", account_type="child")
     await make_service(db, "minecraft")
     await db.run(lambda c: registry.add_identity(c, one.id, "minecraft", kind, first))
+    await db.run(lambda c: registry.add_identity(c, two.id, "minecraft", kind, second))
+    stored_one = await db.run(lambda c: registry.identities_of(c, one.id))
+    stored_two = await db.run(lambda c: registry.identities_of(c, two.id))
+    assert [(i.kind, i.value) for i in stored_one] == [(kind, first)]
+    assert [(i.kind, i.value) for i in stored_two] == [(kind, second)]
+
+
+async def test_a_fluxer_user_id_held_by_another_person_is_refused(db: Database) -> None:
+    one = await make(db, display_name="One", account_type="child")
+    two = await make(db, display_name="Two", account_type="child")
+    await make_service(db, "fluxer")
+    await db.run(lambda c: registry.add_identity(c, one.id, "fluxer", "fluxer_user_id", "1001"))
     with pytest.raises(sqlite3.IntegrityError):
-        await db.run(lambda c: registry.add_identity(c, two.id, "minecraft", kind, second))
+        await db.run(lambda c: registry.add_identity(c, two.id, "fluxer", "fluxer_user_id", "1001"))
     assert await db.run(lambda c: registry.identities_of(c, two.id)) == []
-    stored = await db.run(lambda c: registry.identities_of(c, one.id))
-    assert [(i.kind, i.value) for i in stored] == [(kind, first)]
+
+
+async def test_other_holders_names_the_other_people_who_hold_the_same_identity(db: Database) -> None:
+    one = await make(db, display_name="One", account_type="child")
+    two = await make(db, display_name="Two", account_type="child")
+    three = await make(db, display_name="Three", account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, one.id, "minecraft", "java_name", "PlayerOne"))
+    await db.run(lambda c: registry.add_identity(c, two.id, "minecraft", "java_name", "playerone"))
+    await db.run(lambda c: registry.add_identity(c, three.id, "minecraft", "java_name", "Other"))
+
+    def holders(conn) -> dict[str, list[int]]:
+        return {i.value: [p.id for p in registry.other_holders(conn, i)]
+                for i in registry.identities_of(conn, one.id) + registry.identities_of(conn, three.id)}
+
+    assert await db.run(holders) == {"PlayerOne": [two.id], "Other": []}
 
 
 @pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])

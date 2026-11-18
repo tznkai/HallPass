@@ -11,13 +11,29 @@ import re
 
 import httpx
 import pytest
+from markupsafe import escape
 
-from hallpass import registry, text
+from hallpass import registry, services, text
 from tests.fake_authentik import InvitationUsed, add_user, enrol
-from tests.helpers import BASE_URL, Env, admin_client, api_routes, form, make_service, sign_in, signed_in_person
+from tests.helpers import (
+    ADMIN_SUB,
+    BASE_URL,
+    NOW,
+    Env,
+    accept_for,
+    admin_client,
+    api_routes,
+    form,
+    make_service,
+    sign_in,
+    signed_in_person,
+)
 
 OTHER_SUB = "00000000-0000-4000-8000-0000000000c2"
 INVITE_MARK = "/if/flow/invite/?itoken="
+
+# The notice as Jinja writes it into HTML (the apostrophe is escaped).
+SHARED_NOTICE_HTML = str(escape(text.SHARED_IDENTITY_PAUSED))
 
 
 async def post(env: Env, path: str, **fields) -> httpx.Response:
@@ -425,7 +441,7 @@ async def test_a_duplicate_identity_is_refused(env: Env):
     assert text.IDENTITY_TAKEN in response.text
 
 
-async def test_a_case_variant_minecraft_name_held_by_another_person_is_refused_with_the_same_message(env: Env):
+async def test_a_case_variant_minecraft_name_held_by_another_person_is_accepted_and_both_pages_name_the_other(env: Env):
     await admin_client(env)
     first = await create_person(env, "First", account_type="child")
     second = await create_person(env, "Second", account_type="child")
@@ -434,9 +450,12 @@ async def test_a_case_variant_minecraft_name_held_by_another_person_is_refused_w
                        value="PlayerOne")).status_code == 303
     response = await post(env, f"/admin/people/{second}/identities", service_slug="minecraft", kind="java_name",
                           value="playerone")
-    assert response.status_code == 400
-    assert text.IDENTITY_TAKEN in response.text
-    assert await env.db.run(lambda c: registry.identities_of(c, second)) == []
+    assert response.status_code == 303
+    assert await env.db.run(lambda c: [i.value for i in registry.identities_of(c, second)]) == ["playerone"]
+    page = (await env.client.get(f"/admin/people/{second}")).text
+    assert f"{text.IDENTITY_ALSO_HELD} First" in page
+    assert text.IDENTITY_ALSO_HELD in page
+
 
 
 # AC2.4: the Fluxer address ----------------------------------------------------------------------------
@@ -509,3 +528,26 @@ async def test_the_admin_pages_are_reachable_for_the_admin(env: Env):
     await admin_client(env)
     for path in ("/admin/people", "/admin/groups"):
         assert (await env.client.get(path)).status_code == 200
+
+
+async def test_the_admin_page_names_the_suspended_holder_of_a_paused_shared_identity_and_the_holder_page_does_not(
+        env: Env):
+    await admin_client(env)
+    admin_person = await env.db.run(lambda c: registry.get_by_uuid(c, ADMIN_SUB))
+    holder = await create_person(env, "Holder Ann", account_type="child")
+    adult = await create_person(env, "Bo Adult")
+    await accept_for(env, adult)
+    minecraft = await env.db.run(lambda c: services.create_service(
+        c, slug="minecraft", name="Minecraft", kind="game", adapter="minecraft", auto_suspendable=True, url=None,
+        actor_id=admin_person.id, now=NOW))
+    await env.db.run(lambda c: services.add_entitlement(c, minecraft.id, "type", "adult", "grant",
+                                                        actor_id=admin_person.id, now=NOW))
+    await env.db.run(lambda c: registry.add_identity(c, holder, "minecraft", "java_name", "PlayerOne"))
+    await env.db.run(lambda c: registry.add_identity(c, adult, "minecraft", "java_name", "playerone"))
+
+    adult_page = (await env.client.get(f"/admin/people/{adult}")).text
+    holder_page = (await env.client.get(f"/admin/people/{holder}")).text
+
+    assert SHARED_NOTICE_HTML in adult_page
+    assert f"{text.SHARED_PAUSE_CAUSES} Holder Ann" in adult_page
+    assert text.SHARED_PAUSE_CAUSES not in holder_page

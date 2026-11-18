@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from hallpass import desired, grants, holds, registry, services, terms, text
+from hallpass import access, desired, grants, holds, registry, services, terms, text
 from hallpass.db import Database
 from hallpass.registry import Person
 from hallpass.services import Service
@@ -335,3 +335,137 @@ async def test_a_pair_that_returns_starts_at_generation_one_with_no_old_report(d
     desired_row, found = await stored_rows(db, ann, minecraft)
     assert (desired_row, found) == (("allowed", 1), None)
     assert desired.report_status(desired_row, found, False) == text.NOT_YET_CONFIRMED
+
+
+# Shared identities ------------------------------------------------------------------------------------
+
+# Built from parts so no tracked file holds a 15+ digit run. A SteamID64 shape, not a real account.
+STEAM_ID = str(registry.STEAM64_BASE + 1001)
+
+
+async def shared_setup(db: Database, admin: Person) -> tuple[Service, Service, Person, Person, Person]:
+    """A and B share the gamertag X on bedrock; B and C share the Steam id Y on steam. B holds both."""
+    bedrock = await make_service(db, admin, slug="bedrock", adapter="minecraft")
+    steam = await make_service(db, admin, slug="steam", adapter="steam")
+    ann = await make_person(db, admin, name="Ann")
+    bo = await make_person(db, admin, name="Bo")
+    cy = await make_person(db, admin, name="Cy")
+    await add_identity(db, ann, "bedrock", "bedrock_gamertag", "GamerX")
+    await add_identity(db, bo, "bedrock", "bedrock_gamertag", "GamerX")
+    await add_identity(db, bo, "steam", "steam_id", STEAM_ID)
+    await add_identity(db, cy, "steam", "steam_id", STEAM_ID)
+    return bedrock, steam, ann, bo, cy
+
+
+def hold_on(db: Database, admin: Person, person: Person, service: Service, when: datetime):
+    def change(conn) -> None:
+        holds.place(conn, actor=holds.Actor("admin", admin.id), target_id=person.id, service_ids=[service.id],
+                    now=when, window=timedelta(hours=24), admin_email=None)
+    return db.run(change)
+
+
+def lift_on(db: Database, admin: Person, person: Person, service: Service, when: datetime):
+    def change(conn) -> None:
+        holds.lift(conn, actor=holds.Actor("admin", admin.id), target_id=person.id, service_ids=[service.id],
+                   now=when, window=timedelta(hours=24), admin_email=None)
+    return db.run(change)
+
+
+def by_pair(rows: list[desired.DesiredRow]) -> dict[tuple[str, int], desired.DesiredRow]:
+    return {(row.service.slug, row.person.id): row for row in rows}
+
+
+async def test_a_hold_on_one_holder_pauses_only_the_shared_identity(db: Database, admin: Person) -> None:
+    bedrock, _, ann, bo, cy = await shared_setup(db, admin)
+    await hold_on(db, admin, ann, bedrock, LATER)
+
+    rows = by_pair(await refresh(db, LATER))
+
+    assert rows[("bedrock", ann.id)].desired == "suspended"
+    assert rows[("bedrock", ann.id)].identities == (("bedrock_gamertag", "GamerX"),)
+    assert ("bedrock", bo.id) not in rows
+    assert rows[("steam", bo.id)].desired == "allowed"
+    assert rows[("steam", bo.id)].identities == (("steam_id", STEAM_ID),)
+    assert rows[("steam", cy.id)].identities == (("steam_id", STEAM_ID),)
+
+
+async def test_any_suspension_reason_pauses_a_shared_identity(db: Database, admin: Person) -> None:
+    bedrock = await make_service(db, admin, slug="bedrock", adapter="minecraft")
+    await db.run(lambda c: services.add_entitlement(c, bedrock.id, "type", "child", "grant", actor_id=admin.id,
+                                                    now=NOW))
+    child = await make_person(db, admin, name="Kid", account_type="child")
+    adult = await make_person(db, admin, name="Ann")
+    await add_identity(db, child, "bedrock", "bedrock_gamertag", "GamerX")
+    await add_identity(db, adult, "bedrock", "bedrock_gamertag", "GamerX")
+
+    rows = by_pair(await refresh(db))
+
+    decision = await db.run(lambda c: access.evaluate(c, registry.get_person(c, child.id), bedrock))
+    assert decision.reasons == ("not_active",)
+    assert rows[("bedrock", child.id)].identities == (("bedrock_gamertag", "GamerX"),)
+    assert ("bedrock", adult.id) not in rows
+
+
+async def test_an_allowed_subject_left_with_only_paused_identities_is_not_sent(db: Database, admin: Person) -> None:
+    bedrock = await make_service(db, admin, slug="bedrock", adapter="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    bo = await make_person(db, admin, name="Bo")
+    await add_identity(db, ann, "bedrock", "bedrock_gamertag", "GamerX")
+    await add_identity(db, bo, "bedrock", "bedrock_gamertag", "GamerX")
+    await hold_on(db, admin, ann, bedrock, LATER)
+
+    rows = by_pair(await refresh(db, LATER))
+
+    assert set(rows) == {("bedrock", ann.id)}
+
+
+async def test_minecraft_names_that_differ_only_in_case_pause_together(db: Database, admin: Person) -> None:
+    bedrock = await make_service(db, admin, slug="bedrock", adapter="minecraft")
+    ann = await make_person(db, admin, name="Ann")
+    bo = await make_person(db, admin, name="Bo")
+    await add_identity(db, ann, "bedrock", "bedrock_gamertag", "GamerX")
+    await add_identity(db, bo, "bedrock", "bedrock_gamertag", "gamerx")
+    await hold_on(db, admin, ann, bedrock, LATER)
+
+    rows = by_pair(await refresh(db, LATER))
+
+    assert set(rows) == {("bedrock", ann.id)}
+
+
+async def test_lifting_the_hold_restores_the_shared_identity_to_the_allowed_holder(db: Database,
+                                                                                   admin: Person) -> None:
+    bedrock, _, ann, bo, _ = await shared_setup(db, admin)
+    await hold_on(db, admin, ann, bedrock, LATER)
+    await refresh(db, LATER)
+    later = LATER + timedelta(hours=1)
+    await lift_on(db, admin, ann, bedrock, later)
+
+    rows = by_pair(await refresh(db, later))
+
+    assert rows[("bedrock", ann.id)].desired == "allowed"
+    assert rows[("bedrock", bo.id)].identities == (("bedrock_gamertag", "GamerX"),)
+    assert rows[("bedrock", ann.id)].identities == (("bedrock_gamertag", "GamerX"),)
+
+
+async def test_shared_pause_names_the_other_suspended_holders_only_where_an_identity_is_paused(
+        db: Database, admin: Person) -> None:
+    bedrock, steam, ann, bo, _ = await shared_setup(db, admin)
+    await hold_on(db, admin, ann, bedrock, LATER)
+    await refresh(db, LATER)
+
+    def pauses(conn) -> dict[str, desired.SharedPause | None]:
+        bo_person = registry.get_person(conn, bo.id)
+        ann_person = registry.get_person(conn, ann.id)
+        return {
+            "bo_bedrock": desired.shared_pause(conn, bo_person, bedrock),
+            "bo_steam": desired.shared_pause(conn, bo_person, steam),
+            "ann_bedrock": desired.shared_pause(conn, ann_person, bedrock),
+        }
+
+    found = await db.run(pauses)
+
+    assert found == {
+        "bo_bedrock": desired.SharedPause(causes=(ann.id,)),
+        "bo_steam": None,
+        "ann_bedrock": desired.SharedPause(causes=()),
+    }

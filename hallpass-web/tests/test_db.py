@@ -145,14 +145,14 @@ async def test_failing_migration_rolls_back_and_keeps_previous_data(tmp_path: Pa
         assert "bad" not in _tables(c)
 
 
-# Identity case (migration 0006) ---------------------------------------------------------------------
+# Identity case (migration 0006) and shared identities (migration 0007) -------------------------------
 
-def _make_db_before_identity_case(path: Path) -> None:
-    """A database at the schema the shipped migrations left before 0006, with no runner involved."""
+def _make_db_at(path: Path, version: int) -> None:
+    """A database at the schema the shipped migrations leave at `version`, with no runner involved."""
     with contextlib.closing(sqlite3.connect(path, isolation_level=None)) as c:
-        for version, sql in dbmod.load_migrations():
-            if version < 6:
-                c.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;")
+        for step, sql in dbmod.load_migrations():
+            if step <= version:
+                c.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {step};\nCOMMIT;")
 
 
 def _add_identity_rows(path: Path, rows: list[tuple[int, str, str, str]]) -> None:
@@ -164,9 +164,13 @@ def _add_identity_rows(path: Path, rows: list[tuple[int, str, str, str]]) -> Non
         c.commit()
 
 
-async def test_identity_case_migration_keeps_distinct_identities_and_adds_the_index(tmp_path: Path) -> None:
+def _indexes(conn: sqlite3.Connection) -> set[str]:
+    return {r[1] for r in conn.execute("PRAGMA index_list(external_identity)")}
+
+
+async def test_identity_case_migration_keeps_distinct_identities(tmp_path: Path) -> None:
     path = tmp_path / "hallpass.db"
-    _make_db_before_identity_case(path)
+    _make_db_at(path, 5)
     _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "Other"),
                               (2, "minecraft-bedrock", "bedrock_gamertag", "PlayerOne"),
                               (1, "steam", "steam_id", "1001")])
@@ -176,15 +180,13 @@ async def test_identity_case_migration_keeps_distinct_identities_and_adds_the_in
         assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
         values = await database.run(lambda c: c.execute("SELECT value FROM external_identity ORDER BY id").fetchall())
         assert values == [("PlayerOne",), ("Other",), ("PlayerOne",), ("1001",)]
-        indexes = await database.run(lambda c: {r[1] for r in c.execute("PRAGMA index_list(external_identity)")})
-        assert "external_identity_case" in indexes
     finally:
         database.close()
 
 
 async def test_identity_case_migration_on_a_colliding_database_fails_and_keeps_every_row(tmp_path: Path) -> None:
     path = tmp_path / "hallpass.db"
-    _make_db_before_identity_case(path)
+    _make_db_at(path, 5)
     _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "playerone")])
 
     with pytest.raises(sqlite3.IntegrityError, match="external_identity_case"):
@@ -196,9 +198,90 @@ async def test_identity_case_migration_on_a_colliding_database_fails_and_keeps_e
         assert rows == [("PlayerOne",), ("playerone",)]
 
 
-async def test_a_new_database_has_the_identity_case_index(db: Database) -> None:
-    indexes = await db.run(lambda c: {r[1] for r in c.execute("PRAGMA index_list(external_identity)")})
-    assert "external_identity_case" in indexes
+async def test_a_new_database_has_the_per_person_identity_index_and_not_the_old_ones(db: Database) -> None:
+    indexes = await db.run(lambda c: _indexes(c))
+    assert "external_identity_person" in indexes
+    assert "external_identity_fluxer_user" in indexes
+    assert "external_identity_case" not in indexes
+
+
+# Shared identities (migration 0007) ----------------------------------------------------------------
+
+def _insert(path: Path, row_id: int, person_id: int, slug: str, kind: str, value: str) -> None:
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        c.execute("INSERT INTO external_identity (id, person_id, service_slug, kind, value) VALUES (?, ?, ?, ?, ?)",
+                  (row_id, person_id, slug, kind, value))
+        c.commit()
+
+
+async def test_shared_identity_migration_keeps_every_row_and_its_id_on_a_v6_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 6)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "Other"),
+                              (2, "steam", "steam_id", "1001"), (1, "fluxer", "fluxer_user_id", "2001")])
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        before = c.execute("SELECT id, person_id, service_slug, kind, value FROM external_identity ORDER BY id")
+        before_rows = before.fetchall()
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        after = await database.run(lambda c: c.execute(
+            "SELECT id, person_id, service_slug, kind, value FROM external_identity ORDER BY id").fetchall())
+        assert after == before_rows
+        indexes = await database.run(_indexes)
+        assert "external_identity_case" not in indexes
+        assert {"external_identity_person", "external_identity_fluxer_user"} <= indexes
+    finally:
+        database.close()
+
+
+async def test_shared_identity_migration_on_an_empty_v6_database(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 6)
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        assert await database.run(lambda c: c.execute("SELECT count(*) FROM external_identity").fetchone()[0]) == 0
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize("value", ["PlayerOne", "playerone"])
+async def test_after_the_shared_identity_migration_a_person_cannot_hold_an_identity_twice(tmp_path: Path,
+                                                                                         value: str) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 6)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne")])
+    Database.open(path).close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert(path, 99, 1, "minecraft", "java_name", value)
+
+
+async def test_after_the_shared_identity_migration_two_people_may_hold_one_minecraft_name(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 6)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne")])
+    database = Database.open(path)
+    database.close()
+
+    _insert(path, 50, 2, "minecraft", "java_name", "playerone")
+    _insert(path, 51, 2, "minecraft", "java_name", "Other")
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        assert c.execute("SELECT count(*) FROM external_identity").fetchone()[0] == 3
+
+
+async def test_after_the_shared_identity_migration_a_fluxer_user_id_stays_unique_across_people(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_at(path, 6)
+    _add_identity_rows(path, [(1, "fluxer", "fluxer_user_id", "2001")])
+    database = Database.open(path)
+    database.close()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert(path, 60, 2, "fluxer", "fluxer_user_id", "2001")
 
 
 # Quarantine -----------------------------------------------------------------------------------------

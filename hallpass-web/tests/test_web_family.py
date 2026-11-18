@@ -8,11 +8,13 @@ Covers hallpass.AC4.1, AC4.3 (through HTTP) and AC4.4 (display).
 from __future__ import annotations
 
 import httpx
+from markupsafe import escape
 
-from hallpass import registry, text
+from hallpass import registry, services, text
 from hallpass.registry import Person
 from tests.fake_authentik import enrol
 from tests.helpers import (
+    NOW,
     Env,
     accept_current,
     admin_client,
@@ -25,6 +27,9 @@ from tests.helpers import (
 )
 
 NOW_TEXT = "2026-11-13T12:00:00+00:00"
+
+# The notice as Jinja writes it into HTML (the apostrophe is escaped).
+SHARED_NOTICE_HTML = str(escape(text.SHARED_IDENTITY_PAUSED))
 
 
 async def post(env: Env, path: str, **fields) -> httpx.Response:
@@ -158,3 +163,24 @@ async def test_the_children_link_shows_only_for_a_parent_with_linked_children(en
 
     assert 'href="/children"' in (await parent_browser.get("/")).text
     assert 'href="/children"' not in (await child_browser.get("/")).text
+
+
+async def test_a_parent_sees_the_shared_identity_notice_on_a_child_row_without_the_other_persons_name(env: Env):
+    # The child holds a gamertag that a non-entitled person also holds, so the gamertag is paused for the child.
+    parent, child, parent_browser, _ = await family(env)
+    parent_person = await env.db.run(lambda c: registry.get_person(c, parent))
+    minecraft = await env.db.run(lambda c: services.create_service(
+        c, slug="minecraft", name="Minecraft", kind="game", adapter="minecraft", auto_suspendable=True, url=None,
+        actor_id=parent_person.id, now=NOW))
+    await env.db.run(lambda c: services.add_entitlement(c, minecraft.id, "type", "child", "grant",
+                                                        actor_id=parent_person.id, now=NOW))
+    other = await env.db.run(lambda c: registry.create_person(c, display_name="Zara Other", account_type="adult",
+                                                               now=NOW))
+    await env.db.run(lambda c: registry.add_identity(c, child, "minecraft", "java_name", "PlayerOne"))
+    await env.db.run(lambda c: registry.add_identity(c, other.id, "minecraft", "java_name", "playerone"))
+
+    response = await parent_browser.get(f"/children/{child}")
+
+    assert response.status_code == 200
+    assert SHARED_NOTICE_HTML in response.text
+    assert "Zara Other" not in response.text

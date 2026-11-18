@@ -11,6 +11,7 @@ import re
 
 import httpx
 import pytest
+from markupsafe import escape
 
 from hallpass import registry, services, text, tokens
 from hallpass.registry import Person
@@ -28,6 +29,9 @@ from tests.test_web_family import family
 TOKEN_IN_URL = re.compile(r"token=([A-Za-z0-9_-]+)")
 FEED_URL = "https://feeds.hallpass.test/feed.ics"
 STEAM_ID = str(registry.STEAM64_BASE + 1001)   # a canonical SteamID64 built from the base; the store wants one
+
+# The notice as Jinja writes it into HTML (the apostrophe is escaped).
+SHARED_NOTICE_HTML = str(escape(text.SHARED_IDENTITY_PAUSED))
 
 
 async def create_service(env: Env, slug: str, kind: str, *, actor: Person, auto: bool = False,
@@ -255,3 +259,33 @@ async def test_a_linked_parent_sees_the_childs_services_but_not_its_tokens(env: 
     assert "Tokens" not in response.text
 
 
+
+
+# Shared identities: the notice on a member's row, which does not name the other person ----------------------
+
+async def test_a_member_row_with_a_paused_shared_identity_shows_the_notice_without_naming_the_other_person(env: Env):
+    await publish_terms(env)
+    person, browser = await signed_in_person(env, account_type="adult")
+    minecraft = await create_service(env, "minecraft", "game", actor=person, auto=True)
+    await grant(env, minecraft, "type", "adult", person)
+    other = await env.db.run(lambda c: registry.create_person(c, display_name="Zara Other", account_type="child",
+                                                               now=NOW))
+    await env.db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "PlayerOne"))
+    await env.db.run(lambda c: registry.add_identity(c, other.id, "minecraft", "java_name", "playerone"))
+
+    page = (await browser.get("/")).text
+
+    assert SHARED_NOTICE_HTML in page
+    assert "Zara Other" not in page
+
+
+async def test_a_member_row_without_a_shared_identity_shows_no_shared_notice(env: Env):
+    await publish_terms(env)
+    person, browser = await signed_in_person(env, account_type="adult")
+    minecraft = await create_service(env, "minecraft", "game", actor=person, auto=True)
+    await grant(env, minecraft, "type", "adult", person)
+    await env.db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "PlayerOne"))
+
+    page = (await browser.get("/")).text
+
+    assert SHARED_NOTICE_HTML not in page
