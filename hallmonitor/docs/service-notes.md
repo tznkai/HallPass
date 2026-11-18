@@ -107,8 +107,8 @@ placeholders such as `<mc-host>`.
   wherever an entry begins it, but never when a letter, digit or underscore comes before it, so a name that appears
   only as the banner or in the reason is not banned. Line breaks still work. With a `.` or `*` prefix, a Java name does
   not count right after its Bedrock twin's prefix (`..Tim`), and a Bedrock name counts only at the start of the reply,
-  after whitespace or `:`, or after the prefix that follows a name character (`operator..Tim`). The matcher's accepted
-  costs are in `REVIEW.md`.
+  after whitespace, after the `ban(s):` header, or after a letter, digit or `_` and then `.` or the prefix
+  (`operator..Tim`, `operator.*Tim`). A reason's colon never counts. The matcher's accepted costs are in `REVIEW.md`.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
   `still_connected`, and the subject is not reported as suspended.

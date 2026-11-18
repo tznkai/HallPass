@@ -365,7 +365,7 @@ async def test_a_bedrock_ban_after_a_default_reason_does_not_ban_the_java_name(p
 
 
 async def test_the_bedrock_name_is_still_banned_after_a_default_reason() -> None:
-    # Only the `.` prefix: with `*`, the default reason's `.` is not the prefix, so the Bedrock rule does not see it.
+    # The default reason's `.` is followed by the `.` prefix, so the Bedrock name counts after a name character and `.`.
     text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
             ".Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
@@ -374,6 +374,30 @@ async def test_the_bedrock_name_is_still_banned_after_a_default_reason() -> None
         await run(hallpass, port)
     assert state.commands == LIST_COMMANDS
     assert outcomes(hallpass) == [("r2", "banned_external", None)]
+
+
+async def test_a_java_ban_whose_reason_ends_in_a_colon_does_not_ban_the_bedrock_name() -> None:
+    # Only the `ban(s):` header ends in a colon that starts an entry, so `griefing:` then `.Tim` is not a ban on `.Tim`.
+    text = ("There are 1 ban(s):Bob was banned by Admin: griefing:"
+            ".Tim was banned by Admin: spam.")
+    state = server_state(handler=ban_list_reply(text))
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert "fwhitelist add Tim" in state.commands
+    assert outcomes(hallpass) == [("r2", "allowed", None)]
+
+
+async def test_a_bedrock_ban_after_the_default_reason_with_the_star_prefix_is_banned_and_the_java_name_is_not() -> None:
+    # The default reason ends in `.`, so `operator.*Tim` is a Bedrock `*Tim` ban. Java `Tim` is not banned by it.
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
+            "*Tim was banned by Server: Banned by an operator.")
+    state = server_state(handler=ban_list_reply(text), prefix="*")
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), generation=2),
+                          subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port, prefix="*")
+    assert outcomes(hallpass) == [("r1", "allowed", None), ("r2", "banned_external", None)]
 
 
 @pytest.mark.parametrize("prefix", [".", "*"])
