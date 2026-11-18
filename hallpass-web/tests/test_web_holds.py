@@ -7,10 +7,12 @@ Covers hallpass.AC6.1, AC6.4, AC6.5 (row text), AC6.6, AC7.7 and AC8.2 through t
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import httpx
 import pytest
+from markupsafe import escape
 
 from hallpass import authentik_sync, grants, holds, registry, services, text
 from hallpass.registry import Person
@@ -21,6 +23,7 @@ from tests.helpers import (
     Env,
     admin_client,
     form,
+    section_of,
     signed_in_person,
 )
 
@@ -232,7 +235,7 @@ async def test_in_strict_mode_a_restore_of_another_parents_hold_is_403_with_thei
     response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.fluxer.id}/lift")
 
     assert response.status_code == 403
-    assert "Ben" in response.text
+    assert str(escape(text.STRICT_NOT_YOURS.format(names="Ben"))) in response.text
     assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"]}
 
 
@@ -340,7 +343,7 @@ async def test_a_refused_restore_from_the_children_page_rerenders_the_children_p
 
     assert response.status_code == 403
     assert "<h1>Children</h1>" in response.text
-    assert "Ben" in response.text
+    assert str(escape(text.STRICT_NOT_YOURS.format(names="Ben"))) in response.text
     assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"]}
 
 
@@ -353,6 +356,55 @@ async def test_a_refused_revoke_from_the_children_page_rerenders_the_children_pa
     assert response.status_code == 403
     assert "<h1>Children</h1>" in response.text
     assert text.NOT_YOUR_CHILD in response.text
+    assert await hold_pairs(env, world.kid) == {}
+
+
+FORM = re.compile(r'<form method="post" action="([^"]+)" class="[^"]*">(.*?)</form>', re.DOTALL)
+FIELD = re.compile(r'<input type="hidden" name="([^"]+)" value="([^"]*)">')
+
+
+def rendered_form(page: str, action: str, marker: str) -> dict[str, str]:
+    """The hidden fields of the rendered form that posts to `action` and contains `marker`, as a browser sends them."""
+    for found_action, body in FORM.findall(page):
+        if found_action == action and marker in body:
+            return dict(FIELD.findall(body))
+    raise AssertionError(f"no form posting to {action} with {marker!r}")
+
+
+async def test_the_forms_on_the_children_page_post_back_to_that_childs_section(env: Env):
+    world = await build_world(env)
+    kid, fluxer = world.kid.id, world.fluxer.id
+
+    page = (await world.ann_browser.get("/children")).text
+    revoke = rendered_form(section_of(page, kid), f"/children/{kid}/holds", f'value="{fluxer}"')
+    assert revoke["back"] == "children"
+    revoked = await world.ann_browser.post(f"/children/{kid}/holds", data=revoke)
+    assert revoked.status_code == 303
+    assert revoked.headers["location"] == f"/children#child-{kid}"
+    assert await hold_pairs(env, world.kid) == {fluxer: ["parent"]}
+
+    page = (await world.ann_browser.get("/children")).text
+    restore = rendered_form(section_of(page, kid), f"/children/{kid}/holds/{fluxer}/lift", "")
+    assert restore["back"] == "children"
+    restored = await world.ann_browser.post(f"/children/{kid}/holds/{fluxer}/lift", data=restore)
+    assert restored.status_code == 303
+    assert restored.headers["location"] == f"/children#child-{kid}"
+    assert await hold_pairs(env, world.kid) == {}
+
+
+async def test_the_forms_on_the_child_page_post_back_to_the_child_page(env: Env):
+    world = await build_world(env)
+    kid, fluxer = world.kid.id, world.fluxer.id
+    await post_as(env, world.ann_browser, f"/children/{kid}/holds", service_id=str(fluxer), back="children")
+
+    page = (await world.ann_browser.get(f"/children/{kid}")).text
+    revoke_all = rendered_form(page, f"/children/{kid}/holds", 'value="all"')
+    assert revoke_all["back"] == "child"
+    restore = rendered_form(page, f"/children/{kid}/holds/{fluxer}/lift", "")
+    assert restore["back"] == "child"
+    restored = await world.ann_browser.post(f"/children/{kid}/holds/{fluxer}/lift", data=restore)
+    assert restored.status_code == 303
+    assert restored.headers["location"] == f"/children/{kid}"
     assert await hold_pairs(env, world.kid) == {}
 
 

@@ -36,14 +36,14 @@ GRANT_ASK = ("Approving lets {child} use the services. You confirm that you acce
              "on the child's behalf.")
 GRANT_APPROVED_WAITING = "This child is approved. They become active when they sign in."
 # The children page's helper text, shown once at the top. Each sentence is checked against holds.py and the modes.
-CHILDREN_HELP = ("Each child linked to you is listed here with their services, and opening a child's name shows that "
-                 "child's page alone. "
-                 "Approving accepts the current terms on the child's behalf, and their services can then turn on unless "
-                 "a hold is in place. "
-                 "Revoke turns one service off for the child, and Revoke everything turns off all of their services "
-                 "at once. "
-                 "Restore lifts the parent holds you may lift, which in strict mode is only your own. "
-                 "Administrator holds and lockdowns stay until the administrator lifts them.")
+CHILDREN_HELP = ("Each child linked to you is listed here with their services; open a child's name for their page "
+                 "alone. Approving accepts the current terms for the child, and their services turn on once the "
+                 "child is active, unless a hold is in place or the service is not open to them. "
+                 "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
+                 "Restore lifts your own hold, and another parent's hold too unless your family agreed that each "
+                 "parent lifts only their own. "
+                 "On a service that can't be suspended automatically, the administrator carries out a revoke by "
+                 "hand and alone restores it, and only the administrator lifts an administrator hold or a lockdown.")
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
@@ -89,6 +89,9 @@ IDENTITY_REMOVE_NOTE = ("Removing an identity stops hallmonitor from managing th
 # holder is; the administrator's page names the holders who caused the pause.
 SHARED_IDENTITY_PAUSED = ("Someone who shares one of your ids on this service can't use it right now, so that id is "
                           "paused for everyone who uses it.")
+# A parent's view of the child's paused identity. The child is the one who holds the id, so the wording says so.
+SHARED_IDENTITY_PAUSED_PARENT = ("Someone who shares one of this child's ids on this service can't use it right now, "
+                                 "so that id is paused for everyone who uses it.")
 SHARED_PAUSE_CAUSES = "Paused because of the suspension of"
 IDENTITY_ALSO_HELD = "Also held by"
 ENTITLEMENT_TAKEN = "That grant or deny is already set for this service."

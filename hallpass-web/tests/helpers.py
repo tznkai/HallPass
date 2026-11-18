@@ -275,6 +275,13 @@ async def form(env: Env, page: str, *, client: httpx.AsyncClient | None = None, 
     return {"csrf": match.group(1), **fields}
 
 
+def section_of(page: str, child_id: int) -> str:
+    """The part of the children page that belongs to one child: from its section to the next child's section."""
+    start = page.index(f'data-child="{child_id}"')
+    end = page.find('data-child="', start + 1)
+    return page[start:] if end == -1 else page[start:end]
+
+
 async def store_person(env: Env, **fields) -> registry.Person:
     kwargs = {"display_name": "Kid", "account_type": "child", "now": NOW, **fields}
     return await env.db.run(lambda c: registry.create_person(c, **kwargs))

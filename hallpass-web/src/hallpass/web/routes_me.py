@@ -41,12 +41,14 @@ def _reason_text(reason: str, person: Person) -> str:
     return REASON_TEXT[reason]
 
 
-def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairPauses) -> list[dict]:
+def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairPauses, *,
+                 shared_note: str = text.SHARED_IDENTITY_PAUSED) -> list[dict]:
     """One row per service the person can see: the status with its reasons, whether it can be suspended automatically,
     who placed each hold, a note when a game service has no external identity for the person, the report status
     hallmonitor's last report gives (None for a service it does not monitor), and whether one of the person's shared
     identities is paused. `pauses` is the second result of `desired.refresh_with_pauses`, which the caller runs first.
-    The pause carries holder ids only, and the member's wording never names the other holder."""
+    The pause carries holder ids only, and the member's wording never names the other holder. A parent's view of a
+    child passes its own `shared_note`, which describes the child."""
     identity_slugs = {identity.service_slug for identity in registry.identities_of(conn, person.id)}
     marked = holds.marked_service_ids(conn, person.id)
     rows = []
@@ -74,7 +76,7 @@ def service_rows(conn: sqlite3.Connection, person: Person, pauses: desired.PairP
             "identity_note": text.NO_GAME_IDENTITY if missing_identity else "",
             "report_status": report_status,
             "shared_pause": pause,
-            "shared_identity_note": text.SHARED_IDENTITY_PAUSED if pause is not None else "",
+            "shared_identity_note": shared_note if pause is not None else "",
         })
     return rows
 

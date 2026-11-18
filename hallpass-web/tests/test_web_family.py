@@ -23,6 +23,7 @@ from tests.helpers import (
     form,
     new_client,
     publish_terms,
+    section_of,
     sign_in,
     signed_in_person,
     store_person,
@@ -32,6 +33,20 @@ NOW_TEXT = "2026-11-13T12:00:00+00:00"
 
 # The notice as Jinja writes it into HTML (the apostrophe is escaped).
 SHARED_NOTICE_HTML = str(escape(text.SHARED_IDENTITY_PAUSED))
+# A parent's view of a child's paused identity: the parent wording, pinned as written.
+PARENT_NOTICE_HTML = str(escape(
+    "Someone who shares one of this child's ids on this service can't use it right now, so that id is paused for "
+    "everyone who uses it."))
+# The children page's helper text, pinned as written.
+CHILDREN_HELP_TEXT = (
+    "Each child linked to you is listed here with their services; open a child's name for their page alone. "
+    "Approving accepts the current terms for the child, and their services turn on once the child is active, "
+    "unless a hold is in place or the service is not open to them. "
+    "Revoke turns one service off for the child, and Revoke everything turns all of them off. "
+    "Restore lifts your own hold, and another parent's hold too unless your family agreed that each parent lifts "
+    "only their own. "
+    "On a service that can't be suspended automatically, the administrator carries out a revoke by hand and alone "
+    "restores it, and only the administrator lifts an administrator hold or a lockdown.")
 ON_BEHALF_HTML = str(escape("on the child's behalf"))
 
 
@@ -194,7 +209,8 @@ async def test_a_parent_sees_the_shared_identity_notice_on_a_child_row_without_t
     response = await parent_browser.get(f"/children/{child}")
 
     assert response.status_code == 200
-    assert SHARED_NOTICE_HTML in response.text
+    assert PARENT_NOTICE_HTML in response.text
+    assert SHARED_NOTICE_HTML not in response.text
     assert "Zara Other" not in response.text
 
 
@@ -389,13 +405,6 @@ async def test_an_admin_turns_an_active_adult_into_a_child_who_waits_for_a_paren
 
 # Phase 8 task 1: each child's services on the children page -------------------------------------------------
 
-def section_of(page: str, child_id: int) -> str:
-    """The part of the children page that belongs to one child: from its section to the next child's section."""
-    start = page.index(f'data-child="{child_id}"')
-    end = page.find('data-child="', start + 1)
-    return page[start:] if end == -1 else page[start:end]
-
-
 async def _minecraft_for_child_type(env: Env, parent: int) -> services.Service:
     publisher = await env.db.run(lambda c: registry.get_person(c, parent))
     minecraft = await env.db.run(lambda c: services.create_service(
@@ -440,7 +449,8 @@ async def test_the_children_page_shows_the_shared_identity_note_without_the_othe
 
     page = (await parent_browser.get("/children")).text
 
-    assert SHARED_NOTICE_HTML in section_of(page, child)
+    assert PARENT_NOTICE_HTML in section_of(page, child)
+    assert SHARED_NOTICE_HTML not in page
     assert "Zara Other" not in page
 
 
@@ -463,8 +473,8 @@ async def test_the_children_page_explains_the_controls_once_at_the_top(env: Env)
 
     page = (await parent_browser.get("/children")).text
 
-    assert str(escape(text.CHILDREN_HELP)) in page
-    assert page.index(str(escape(text.CHILDREN_HELP))) < page.index('data-child="')
+    assert str(escape(CHILDREN_HELP_TEXT)) in page
+    assert page.index(str(escape(CHILDREN_HELP_TEXT))) < page.index('data-child="')
 
 
 async def test_a_parent_sees_only_their_own_children_rows(env: Env):
