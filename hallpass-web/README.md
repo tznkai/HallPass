@@ -93,9 +93,16 @@ forces them to exit. The exit codes are:
 - 4: a listener failed to start, and the other listener is stopped too.
 
 Hallpass compares Minecraft Java names and Bedrock gamertags without case. If an existing database already has two
-such identities on one service that differ only in case, the upgrade to schema version 6 stops with exit 1 and
-leaves the database at version 5. Hallpass cannot start until then, so remove one identity of each pair from
-the `external_identity` table with the `sqlite3` tool, then start again.
+identities of the same kind on one service that differ only in case, the upgrade to schema version 6 stops with
+exit 1 and leaves the database at version 5. Hallpass cannot start until each pair is resolved. Find the pairs with
+the `sqlite3` tool:
+
+```
+SELECT service_slug, kind, lower(value), count(*) FROM external_identity
+WHERE kind IN ('java_name', 'bedrock_gamertag') GROUP BY 1, 2, 3 HAVING count(*) > 1;
+```
+
+Delete one row of each pair from `external_identity`, then start hallpass again.
 
 Before you retire a game service or remove an identity, lift its holds first, and clean up the game server
 by hand if it needs it. hallmonitor stops managing that service and person pair and leaves its last applied
