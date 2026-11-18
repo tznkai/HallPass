@@ -425,6 +425,20 @@ async def test_a_duplicate_identity_is_refused(env: Env):
     assert text.IDENTITY_TAKEN in response.text
 
 
+async def test_a_case_variant_minecraft_name_held_by_another_person_is_refused_with_the_same_message(env: Env):
+    await admin_client(env)
+    first = await create_person(env, "First", account_type="child")
+    second = await create_person(env, "Second", account_type="child")
+    await make_service(env.db, "minecraft")
+    assert (await post(env, f"/admin/people/{first}/identities", service_slug="minecraft", kind="java_name",
+                       value="PlayerOne")).status_code == 303
+    response = await post(env, f"/admin/people/{second}/identities", service_slug="minecraft", kind="java_name",
+                          value="playerone")
+    assert response.status_code == 400
+    assert text.IDENTITY_TAKEN in response.text
+    assert await env.db.run(lambda c: registry.identities_of(c, second)) == []
+
+
 # AC2.4: the Fluxer address ----------------------------------------------------------------------------
 
 async def test_a_bound_child_shows_the_plus_address_until_an_override_is_set(env: Env):

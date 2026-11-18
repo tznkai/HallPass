@@ -234,6 +234,63 @@ async def test_duplicate_identity_for_same_service_kind_value_raises_integrity_e
         await db.run(lambda c: registry.add_identity(c, second.id, "minecraft", "java_name", "kidplayer"))
 
 
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
+@pytest.mark.parametrize("first, second", [("PlayerOne", "playerone"), ("playerone", "PlayerOne")],
+                         ids=["upper-then-lower", "lower-then-upper"])
+async def test_a_case_variant_minecraft_name_on_another_person_is_refused(db: Database, kind: str, first: str,
+                                                                          second: str) -> None:
+    one = await make(db, display_name="One", account_type="child")
+    two = await make(db, display_name="Two", account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, one.id, "minecraft", kind, first))
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.run(lambda c: registry.add_identity(c, two.id, "minecraft", kind, second))
+    assert await db.run(lambda c: registry.identities_of(c, two.id)) == []
+    stored = await db.run(lambda c: registry.identities_of(c, one.id))
+    assert [(i.kind, i.value) for i in stored] == [(kind, first)]
+
+
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
+async def test_a_case_variant_minecraft_name_on_the_same_person_is_refused(db: Database, kind: str) -> None:
+    person = await make(db, display_name="One", account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", kind, "PlayerOne"))
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", kind, "playerone"))
+    stored = await db.run(lambda c: registry.identities_of(c, person.id))
+    assert [(i.kind, i.value) for i in stored] == [(kind, "PlayerOne")]
+
+
+@pytest.mark.parametrize("kind", ["java_name", "bedrock_gamertag"])
+async def test_a_minecraft_name_is_stored_with_the_case_it_was_entered(db: Database, kind: str) -> None:
+    person = await make(db, display_name="One", account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", kind, "PlayerOne"))
+    stored = await db.run(lambda c: registry.identities_of(c, person.id))
+    assert [(i.kind, i.value) for i in stored] == [(kind, "PlayerOne")]
+
+
+async def test_a_fluxer_user_id_is_compared_without_case_folding(db: Database) -> None:
+    one = await make(db, display_name="One", account_type="child")
+    two = await make(db, display_name="Two", account_type="child")
+    await make_service(db, "fluxer")
+    await db.run(lambda c: registry.add_identity(c, one.id, "fluxer", "fluxer_user_id", "AbC"))
+    await db.run(lambda c: registry.add_identity(c, two.id, "fluxer", "fluxer_user_id", "abc"))
+    first = await db.run(lambda c: registry.identities_of(c, one.id))
+    second = await db.run(lambda c: registry.identities_of(c, two.id))
+    assert [i.value for i in first + second] == ["AbC", "abc"]
+
+
+@pytest.mark.parametrize("kind, value, expected", [
+    ("java_name", "PlayerOne", "playerone"),
+    ("bedrock_gamertag", "PlayerOne", "playerone"),
+    ("fluxer_user_id", "PlayerOne", "PlayerOne"),
+    ("steam_id", "1001", "1001"),
+])
+def test_identity_key_lowers_only_minecraft_names(kind: str, value: str, expected: str) -> None:
+    assert registry.identity_key(kind, value) == expected
+
+
 async def test_identity_for_an_unknown_service_is_refused_and_stores_nothing(db: Database) -> None:
     person = await make(db, account_type="child")
     with pytest.raises(ValueError, match="unknown service"):

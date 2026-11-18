@@ -20,6 +20,7 @@ from hallpass import display_names, text
 
 ACCOUNT_TYPES = ("adult", "parent", "child")
 IDENTITY_KINDS = ("fluxer_user_id", "java_name", "bedrock_gamertag", "steam_id")
+CASE_FOLDED_KINDS = ("java_name", "bedrock_gamertag")
 _DIGITS = re.compile(r"[0-9]+")
 # The SteamID64 base: universe public (1 << 56), account type individual (1 << 52), instance 1 (1 << 32). The individual
 # account range is the base plus a 32-bit account number, so its limit is exclusive. Computed, never written out.
@@ -327,6 +328,13 @@ def _canonical_steam64(value: str) -> bool:
         return False
     number = int(value)
     return str(number) == value and STEAM64_BASE <= number < STEAM64_LIMIT
+
+
+def identity_key(kind: str, value: str) -> str:
+    """The form in which two identities of one service and kind count as the same. Minecraft names fold to lower case;
+    every other kind is compared as stored. The unique index on external_identity applies the same rule in SQL
+    (migration 0006), so change both together."""
+    return value.lower() if kind in CASE_FOLDED_KINDS else value
 
 
 def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, kind: str, value: str) -> int:

@@ -145,6 +145,62 @@ async def test_failing_migration_rolls_back_and_keeps_previous_data(tmp_path: Pa
         assert "bad" not in _tables(c)
 
 
+# Identity case (migration 0006) ---------------------------------------------------------------------
+
+def _make_db_before_identity_case(path: Path) -> None:
+    """A database at the schema the shipped migrations left before 0006, with no runner involved."""
+    with contextlib.closing(sqlite3.connect(path, isolation_level=None)) as c:
+        for version, sql in dbmod.load_migrations():
+            if version < 6:
+                c.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;")
+
+
+def _add_identity_rows(path: Path, rows: list[tuple[int, str, str, str]]) -> None:
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        for person_id in sorted({row[0] for row in rows}):
+            c.execute("INSERT INTO person (id, ref, display_name, account_type, created_at) "
+                      "VALUES (?, ?, 'P', 'child', '2026-11-13T00:00:00Z')", (person_id, f"ref-{person_id}"))
+        c.executemany("INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, ?, ?, ?)", rows)
+        c.commit()
+
+
+async def test_identity_case_migration_keeps_distinct_identities_and_adds_the_index(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_before_identity_case(path)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "Other"),
+                              (2, "minecraft-bedrock", "bedrock_gamertag", "PlayerOne"),
+                              (1, "steam", "steam_id", "1001")])
+
+    database = Database.open(path)
+    try:
+        assert await database.run(lambda c: c.execute("PRAGMA user_version").fetchone()[0]) == dbmod.LATEST_VERSION
+        values = await database.run(lambda c: c.execute("SELECT value FROM external_identity ORDER BY id").fetchall())
+        assert values == [("PlayerOne",), ("Other",), ("PlayerOne",), ("1001",)]
+        indexes = await database.run(lambda c: {r[1] for r in c.execute("PRAGMA index_list(external_identity)")})
+        assert "external_identity_case" in indexes
+    finally:
+        database.close()
+
+
+async def test_identity_case_migration_on_a_colliding_database_fails_and_keeps_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "hallpass.db"
+    _make_db_before_identity_case(path)
+    _add_identity_rows(path, [(1, "minecraft", "java_name", "PlayerOne"), (2, "minecraft", "java_name", "playerone")])
+
+    with pytest.raises(sqlite3.Error):
+        Database.open(path)
+
+    with contextlib.closing(sqlite3.connect(path)) as c:
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 5
+        rows = c.execute("SELECT value FROM external_identity ORDER BY id").fetchall()
+        assert rows == [("PlayerOne",), ("playerone",)]
+
+
+async def test_a_new_database_has_the_identity_case_index(db: Database) -> None:
+    indexes = await db.run(lambda c: {r[1] for r in c.execute("PRAGMA index_list(external_identity)")})
+    assert "external_identity_case" in indexes
+
+
 # Quarantine -----------------------------------------------------------------------------------------
 
 async def test_garbage_db_is_quarantined_with_side_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
