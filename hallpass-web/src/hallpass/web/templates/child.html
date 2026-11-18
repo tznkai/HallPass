@@ -13,8 +13,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <form method="post" action="/children/{{ child.id }}/holds" class="stack">
     <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
     <input type="hidden" name="service_id" value="all">
+    <input type="hidden" name="back" value="child">
     <button type="submit">Revoke everything</button>
   </form>
-  {% include "_service_rows.html" %}
+  {% with back = "child" %}{% include "_service_rows.html" %}{% endwith %}
 </section>
 {% endblock %}

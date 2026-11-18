@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import httpx
+import pytest
 
 from hallpass import authentik_sync, grants, holds, registry, services, text
 from hallpass.registry import Person
@@ -265,6 +266,105 @@ async def test_the_child_page_names_the_administrator_for_an_admin_hold(env: Env
     page = (await world.kid_browser.get("/")).text
 
     assert "Suspended by the administrator" in page
+
+
+# Phase 8 task 1: where a hold change returns -------------------------------------------------------------
+
+async def test_revoke_from_the_children_page_returns_to_that_childs_section(env: Env):
+    world = await build_world(env)
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds",
+                             service_id=str(world.fluxer.id), back="children")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/children#child-{world.kid.id}"
+    assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"]}
+
+
+async def test_revoke_everything_from_the_children_page_returns_to_that_childs_section(env: Env):
+    world = await build_world(env)
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all",
+                             back="children")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/children#child-{world.kid.id}"
+    assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"], world.abiotic.id: ["parent"]}
+
+
+async def test_restore_from_the_children_page_returns_to_that_childs_section(env: Env):
+    world = await build_world(env)
+    await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all")
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.fluxer.id}/lift",
+                             back="children")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/children#child-{world.kid.id}"
+    assert world.fluxer.id not in await hold_pairs(env, world.kid)
+
+
+async def test_the_same_forms_from_the_child_page_still_return_to_the_child_page(env: Env):
+    world = await build_world(env)
+
+    revoked = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all",
+                            back="child")
+    restored = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.fluxer.id}/lift",
+                             back="child")
+
+    assert revoked.headers["location"] == f"/children/{world.kid.id}"
+    assert restored.headers["location"] == f"/children/{world.kid.id}"
+
+
+@pytest.mark.parametrize("back", ["", "elsewhere", "children/../x", "//elsewhere.invalid/x",
+                                  "https://elsewhere.invalid/", "Children"])
+async def test_an_unknown_back_value_returns_to_the_child_page(env: Env, back: str):
+    world = await build_world(env)
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="all",
+                             back=back)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/children/{world.kid.id}"
+
+
+async def test_a_refused_restore_from_the_children_page_rerenders_the_children_page_at_403(env: Env):
+    world = await build_world(env)
+    await env.db.run(lambda c: holds.set_mode(c, child_id=world.kid.id, mode="strict", agreement_note=None,
+                                              apply_to_siblings=False, admin_id=world.ben.id, now=NOW))
+    await env.db.run(lambda c: holds.place(c, actor=holds.Actor("parent", world.ben.id), target_id=world.kid.id,
+                                           service_ids=[world.fluxer.id], now=NOW, window=WINDOW, admin_email=None))
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds/{world.fluxer.id}/lift",
+                             back="children")
+
+    assert response.status_code == 403
+    assert "<h1>Children</h1>" in response.text
+    assert "Ben" in response.text
+    assert await hold_pairs(env, world.kid) == {world.fluxer.id: ["parent"]}
+
+
+async def test_a_refused_revoke_from_the_children_page_rerenders_the_children_page_at_403(env: Env):
+    world = await build_world(env)
+
+    response = await post_as(env, world.cy_browser, f"/children/{world.kid.id}/holds", service_id="all",
+                             back="children")
+
+    assert response.status_code == 403
+    assert "<h1>Children</h1>" in response.text
+    assert text.NOT_YOUR_CHILD in response.text
+    assert await hold_pairs(env, world.kid) == {}
+
+
+async def test_a_malformed_service_id_from_the_children_page_rerenders_the_children_page_at_400(env: Env):
+    world = await build_world(env)
+
+    response = await post_as(env, world.ann_browser, f"/children/{world.kid.id}/holds", service_id="fluxer",
+                             back="children")
+
+    assert response.status_code == 400
+    assert "<h1>Children</h1>" in response.text
+    assert text.INVALID_INPUT in response.text
 
 
 # Helpers -----------------------------------------------------------------------------------------------

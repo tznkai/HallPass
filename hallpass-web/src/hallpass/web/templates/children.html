@@ -7,9 +7,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 {% block content %}
 <h1>Children</h1>
 {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<p>{{ help_text }}</p>
 {% for row in rows %}
-<section class="stack" data-child="{{ row.child.id }}">
-  <h2>{{ row.child.display_name }}</h2>
+<section class="stack" id="child-{{ row.child.id }}" data-child="{{ row.child.id }}">
+  <h2><a href="/children/{{ row.child.id }}">{{ row.child.display_name }}</a></h2>
   <p>Status: {{ row.child.status }}</p>
   {% if row.can_approve %}
   <form method="post" action="/children/{{ row.child.id }}/grant" class="stack">
@@ -29,6 +30,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     {% endfor %}
   </ul>
   {% endif %}
+  <h3>Services</h3>
+  <form method="post" action="/children/{{ row.child.id }}/holds" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <input type="hidden" name="service_id" value="all">
+    <input type="hidden" name="back" value="children">
+    <button type="submit">Revoke everything</button>
+  </form>
+  {% with rows = row.services, controls_for = row.child.id, back = "children" %}
+  {% include "_service_rows.html" %}
+  {% endwith %}
 </section>
 {% else %}
 <p>No children are linked to you.</p>

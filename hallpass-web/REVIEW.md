@@ -94,6 +94,7 @@ as the code they cite.
 - `src/hallpass/holds.py:405` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
 - `src/hallpass/web/routes_admin.py:952` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
 - `src/hallpass/holds.py:418` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
+- `src/hallpass/web/routes_family.py:103` `def hold_return(back` — the open-redirect guard for a hold change: the form's `back` field is honoured only as the fixed value `children`, and any other value goes to the child's page, so no address from the request is ever redirected to
 
 ## Outbox
 

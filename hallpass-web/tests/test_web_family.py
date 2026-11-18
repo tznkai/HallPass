@@ -385,3 +385,109 @@ async def test_an_admin_turns_an_active_adult_into_a_child_who_waits_for_a_paren
     assert (await mum_browser.post(f"/children/{ana}/grant", data={"csrf": token})).status_code == 303
     assert (await person_row(env, ana)).status == "active"
     assert await in_fluxer_group(env, ana)
+
+
+# Phase 8 task 1: each child's services on the children page -------------------------------------------------
+
+def section_of(page: str, child_id: int) -> str:
+    """The part of the children page that belongs to one child: from its section to the next child's section."""
+    start = page.index(f'data-child="{child_id}"')
+    end = page.find('data-child="', start + 1)
+    return page[start:] if end == -1 else page[start:end]
+
+
+async def _minecraft_for_child_type(env: Env, parent: int) -> services.Service:
+    publisher = await env.db.run(lambda c: registry.get_person(c, parent))
+    minecraft = await env.db.run(lambda c: services.create_service(
+        c, slug="minecraft", name="Minecraft", kind="game", adapter="minecraft", auto_suspendable=True, url=None,
+        actor_id=publisher.id, now=NOW))
+    await env.db.run(lambda c: services.add_entitlement(c, minecraft.id, "type", "child", "grant",
+                                                        actor_id=publisher.id, now=NOW))
+    return minecraft
+
+
+async def test_the_children_page_shows_each_childs_service_rows_and_a_link_to_the_child_page(env: Env):
+    parent, child, parent_browser, _ = await family(env)
+    await _minecraft_for_child_type(env, parent)
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+
+    page = (await parent_browser.get("/children")).text
+
+    assert f'<a href="/children/{child}">Kid</a>' in page
+    assert "Minecraft" in section_of(page, child)
+    assert text.STATUS_ALLOWED in section_of(page, child)
+    assert "No services yet." not in section_of(page, child)
+
+
+async def test_a_child_with_no_services_shows_the_shared_no_services_line(env: Env):
+    _, child, parent_browser, _ = await family(env)
+
+    page = (await parent_browser.get("/children")).text
+
+    assert "No services yet." in section_of(page, child)
+
+
+async def test_the_children_page_shows_the_shared_identity_note_without_the_other_persons_name(env: Env):
+    parent, child, parent_browser, _ = await family(env)
+    await _minecraft_for_child_type(env, parent)
+    other = await env.db.run(lambda c: registry.create_person(c, display_name="Zara Other", account_type="adult",
+                                                               now=NOW))
+    await env.db.run(lambda c: registry.add_identity(c, child, "minecraft", "java_name", "PlayerOne"))
+    await env.db.run(lambda c: registry.add_identity(c, other.id, "minecraft", "java_name", "playerone"))
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+
+    page = (await parent_browser.get("/children")).text
+
+    assert SHARED_NOTICE_HTML in section_of(page, child)
+    assert "Zara Other" not in page
+
+
+async def test_the_children_page_names_the_parent_who_placed_a_hold(env: Env):
+    parent, child, parent_browser, _ = await family(env)
+    minecraft = await _minecraft_for_child_type(env, parent)
+    token = (await form(env, "/children", client=parent_browser))["csrf"]
+    assert (await parent_browser.post(f"/children/{child}/grant", data={"csrf": token})).status_code == 303
+    assert (await parent_browser.post(f"/children/{child}/holds",
+                                      data={"csrf": token, "service_id": str(minecraft.id), "back": "children"})
+            ).status_code == 303
+
+    page = (await parent_browser.get("/children")).text
+
+    assert "Suspended by Mum" in section_of(page, child)
+
+
+async def test_the_children_page_explains_the_controls_once_at_the_top(env: Env):
+    _, child, parent_browser, _ = await family(env)
+
+    page = (await parent_browser.get("/children")).text
+
+    assert str(escape(text.CHILDREN_HELP)) in page
+    assert page.index(str(escape(text.CHILDREN_HELP))) < page.index('data-child="')
+
+
+async def test_a_parent_sees_only_their_own_children_rows(env: Env):
+    parent, child, parent_browser, _ = await family(env)
+    dad = await create_person(env, "Dad", "parent")
+    ottoline = await create_person(env, "Ottoline", "child")
+    assert (await post(env, f"/admin/people/{ottoline}/parents", parent_id=dad)).status_code == 303
+
+    page = (await parent_browser.get("/children")).text
+
+    assert "Ottoline" not in page
+    assert f'data-child="{ottoline}"' not in page
+
+
+async def test_each_child_gets_its_own_controls_posting_to_its_own_id(env: Env):
+    parent, kid, parent_browser, _ = await family(env)
+    await _minecraft_for_child_type(env, parent)
+    tam = await create_person(env, "Tam", "child")
+    assert (await post(env, f"/admin/people/{tam}/parents", parent_id=parent)).status_code == 303
+
+    page = (await parent_browser.get("/children")).text
+
+    assert f'action="/children/{kid}/holds"' in section_of(page, kid)
+    assert f'action="/children/{tam}/holds"' not in section_of(page, kid)
+    assert f'action="/children/{tam}/holds"' in section_of(page, tam)
+    assert f'action="/children/{kid}/holds"' not in section_of(page, tam)

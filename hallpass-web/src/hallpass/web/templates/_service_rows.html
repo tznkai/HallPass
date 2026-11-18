@@ -18,12 +18,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <form method="post" action="/children/{{ controls_for }}/holds" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
           <input type="hidden" name="service_id" value="{{ row.service_id }}">
+          <input type="hidden" name="back" value="{{ back }}">
           <button type="submit">Revoke</button>
         </form>
         {% endif %}
         {% if row.restore %}
         <form method="post" action="/children/{{ controls_for }}/holds/{{ row.service_id }}/lift" class="inline">
           <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+          <input type="hidden" name="back" value="{{ back }}">
           <button type="submit">Restore</button>
         </form>
         {% endif %}

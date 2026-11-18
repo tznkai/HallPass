@@ -35,6 +35,15 @@ TERMS_CHILD_NOT_COVERED = "No parent has accepted these terms yet, so your servi
 GRANT_ASK = ("Approving lets {child} use the services. You confirm that you accept terms version {version}, "
              "on the child's behalf.")
 GRANT_APPROVED_WAITING = "This child is approved. They become active when they sign in."
+# The children page's helper text, shown once at the top. Each sentence is checked against holds.py and the modes.
+CHILDREN_HELP = ("Each child linked to you is listed here with their services, and opening a child's name shows that "
+                 "child's page alone. "
+                 "Approving accepts the current terms on the child's behalf, and their services can then turn on unless "
+                 "a hold is in place. "
+                 "Revoke turns one service off for the child, and Revoke everything turns off all of their services "
+                 "at once. "
+                 "Restore lifts the parent holds you may lift, which in strict mode is only your own. "
+                 "Administrator holds and lockdowns stay until the administrator lifts them.")
 # One message per grants.GrantRefused reason.
 GRANT_REFUSED = {
     "not_linked_parent": "Only a parent linked to this child can approve them.",
