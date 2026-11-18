@@ -70,7 +70,10 @@ costs: inside it a moderator's ban on the same id counts as ours and is lifted o
 reported as suspended and not re-enforced until the window ends. The `source_rcon` adapter has no window: its console
 list is re-read after `writeid`, so an id the list does not show is forgotten at once. The `source_panel` adapter has
 the Palworld-style grace window, with the same accepted costs: inside it a moderator's ban on the same id counts as
-ours and is lifted on restore, and a moderator's unban is reported as suspended until the window ends.
+ours and is lifted on restore, and a moderator's unban is reported as suspended until the window ends. A third cost
+is accepted for `source_panel`: if `writeid` keeps failing for the whole window after an accepted `banid`, the
+record is forgotten while the console may still hold the ban in memory, so a later restore sends no `removeid`
+and the ban lasts until the server restarts (the file never had it, so the restart clears it).
 
 The Valheim file has no compare-and-swap in Pterodactyl, so a write replaces the whole file with the text read just before it. A moderator's edit saved between that read and that write would be overwritten. The window holds one read and one write with only a local database call between them, and the race is accepted on that basis.
 
