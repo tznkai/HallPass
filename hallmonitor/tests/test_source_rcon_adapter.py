@@ -143,20 +143,27 @@ def ignore_banid(state: FakeRconState, cmd: str) -> str:
     return source_handler(state, cmd)
 
 
-# AC12.3: a suspension bans with kick, persists the list, and records the ban as ours ------------------
+# AC12.3: a suspension bans, kicks by id, persists the list, and records the ban as ours ---------------------
 
-async def test_a_suspension_bans_with_kick_persists_the_list_and_records_the_ban(db: Database,
-                                                                                  http: httpx.AsyncClient) -> None:
+async def test_a_suspension_bans_kicks_by_id_persists_the_list_and_records_the_ban(db: Database,
+                                                                                   http: httpx.AsyncClient) -> None:
     state = server_state()
     hallpass = source_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
     async with rcon_server(state) as port:
         await run(db, http, hallpass, port)
     assert state.source_bans == [OWN_SID]
-    ban = f"banid 0 {OWN_SID} kick"
-    assert ban in state.commands
-    assert state.commands[state.commands.index(ban) + 1] == "writeid"
+    assert [cmd for cmd in state.commands if cmd != "listid"] == [f"banid 0 {OWN_SID}", f"kickid {OWN_SID}", "writeid"]
     assert await record_of(db, OWN_ID) == ("ban", NOW)
     assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
+async def test_a_suspension_never_sends_banid_with_a_trailing_kick(db: Database, http: httpx.AsyncClient) -> None:
+    """The live check showed `banid 0 <steam2> kick` does not kick a player who is connected, so no command has it."""
+    state = server_state()
+    hallpass = source_service(subject("r1", "suspended", steam(OWN_ID), generation=3))
+    async with rcon_server(state) as port:
+        await run(db, http, hallpass, port)
+    assert not any(cmd.endswith(" kick") for cmd in state.commands)
 
 
 async def test_the_source_id_is_built_from_the_configured_universe(db: Database, http: httpx.AsyncClient) -> None:
@@ -190,7 +197,7 @@ async def test_a_steady_suspension_sends_no_second_ban(db: Database, http: httpx
     async with rcon_server(state) as port:
         await run(db, http, hallpass, port)
         await run(db, http, hallpass, port)
-    assert [cmd for cmd in state.commands if cmd.startswith("banid")] == [f"banid 0 {OWN_SID} kick"]
+    assert [cmd for cmd in state.commands if cmd.startswith("banid")] == [f"banid 0 {OWN_SID}"]
     assert outcomes(hallpass) == [("r1", "suspended", None), ("r1", "suspended", None)]
 
 
@@ -277,7 +284,7 @@ async def test_a_server_that_does_not_confirm_the_ban_is_not_applied_and_not_rec
     async with rcon_server(state) as port:
         await run(db, http, hallpass, port)
     assert state.source_bans == []
-    assert f"banid 0 {OWN_SID} kick" in state.commands
+    assert f"banid 0 {OWN_SID}" in state.commands
     assert await record_of(db, OWN_ID) is None
     assert outcomes(hallpass) == [("r1", "error", "not_applied")]
 

@@ -135,14 +135,17 @@ def _source_listid(state: FakeRconState) -> str:
 
 
 def source_handler(state: FakeRconState, cmd: str) -> str:
-    """The Source console's ban commands: `banid <minutes> <id> [kick]`, `removeid <id>`, `writeid` and `listid`."""
+    """The Source console's ban commands: `banid <minutes> <id>`, `kickid <id>`, `removeid <id>`, `writeid` and
+    `listid`. `banid` takes no trailing `kick`: the live check showed that a Steam id given that way does not kick."""
     verb, _, args = cmd.partition(" ")
     fields = args.split()
-    if verb == "banid" and len(fields) in (2, 3) and fields[0].isdigit() and fields[2:] in ([], ["kick"]):
+    if verb == "banid" and len(fields) == 2 and fields[0].isdigit():
         sid = fields[1]
         if sid not in state.source_bans:
             state.source_bans.append(sid)
         return f"Banned {sid}"
+    if verb == "kickid" and len(fields) == 1:
+        return f"Kicked {fields[0]}"
     if verb == "removeid" and len(fields) == 1:
         sid = fields[0]
         if sid not in state.source_bans:

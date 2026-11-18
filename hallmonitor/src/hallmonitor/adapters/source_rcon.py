@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The Source RCON adapter for The Ship: bans and unbans through the server's console, in the `source` dialect.
 
-A suspension is `banid 0 <id> kick`, persisted with `writeid`. A lift is `removeid <id>`, persisted the same way. The
+A suspension is `banid 0 <id>`, `kickid <id>` and `writeid`. A lift is `removeid <id>` and `writeid`. The live check
+on 2026-11-18 showed `banid 0 <id> kick` does not kick a player given a Steam id, so that form is never sent. The
 console lists bans with `listid`. A ban is ours only when hallmonitor recorded it in `own_suspension`, so a listed ban
 without that record is `banned_external` and is never removed.
 
@@ -131,7 +132,8 @@ class SourceRconAdapter:
             if sid in await self._listed(client):
                 # Re-checked here, because a moderator's ban may have appeared since observe. Ours is already in force.
                 return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")
-            await client.command(f"banid 0 {sid} kick")
+            await client.command(f"banid 0 {sid}")
+            await client.command(f"kickid {sid}")
             await client.command("writeid")
             if sid not in await self._listed(client):
                 log_event(log, "not_applied", service="source_rcon", outcome="listing_disagrees",
