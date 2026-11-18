@@ -55,6 +55,7 @@ class _Entry:
     arg: str       # the name the add or remove command takes
     listed: str    # the name the vanilla list shows, which is also the name `kick` takes
     safe: bool     # the name matches its kind's pattern, and the prefix is allowlisted
+    bedrock: bool  # a Bedrock gamertag, whose listed name starts with the Floodgate prefix
 
 
 def _entries(subject: Subject, prefix: str) -> list[_Entry]:
@@ -63,10 +64,10 @@ def _entries(subject: Subject, prefix: str) -> list[_Entry]:
     for identity in subject.identities:
         if identity.kind == JAVA_KIND:
             safe = JAVA_NAME.fullmatch(identity.value) is not None
-            entries.append(_Entry("whitelist", identity.value, identity.value, safe))
+            entries.append(_Entry("whitelist", identity.value, identity.value, safe, False))
         elif identity.kind == BEDROCK_KIND:
             safe = BEDROCK_NAME.fullmatch(identity.value) is not None and prefix in FLOODGATE_PREFIXES
-            entries.append(_Entry("fwhitelist", identity.value, prefix + identity.value, safe))
+            entries.append(_Entry("fwhitelist", identity.value, prefix + identity.value, safe, True))
     return entries
 
 
@@ -87,12 +88,29 @@ def _online_names(text: str) -> set[str]:
     return {name.strip().lower() for name in match.group(1).split(",") if name.strip()}
 
 
-def _is_banned(name: str, ban_text: str) -> bool:
+# A `.` or `*` Floodgate prefix is one character outside the name class, so it marks a Bedrock name. A Java name must
+# not match a Bedrock twin's entry, so a Java name counts only after a separator (see _before_name).
+SEPARATOR_PREFIXES = frozenset({".", "*"})
+
+
+def _before_name(prefix: str, bedrock: bool) -> str:
+    """The lookbehind that must hold just before a listed name's first character for a ban entry to count. A name
+    character before it never counts. With a `.` or `*` prefix, a Java name counts only when the character before it is
+    not a name character and not the prefix, or when the prefix itself follows a name character (`operator.Tim`). So a
+    Bedrock ban on `.Tim` (`operator..Tim`, `ban(s):.Tim`, ` .Tim`) never bans the Java name `Tim`."""
+    if prefix in SEPARATOR_PREFIXES and not bedrock:
+        sep = re.escape(prefix)
+        return rf"(?:(?<![A-Za-z0-9_{sep}])|(?<=[A-Za-z0-9_]{sep}))"
+    return r"(?<![A-Za-z0-9_])"
+
+
+def _is_banned(entry: _Entry, prefix: str, ban_text: str) -> bool:
     """True when the ban list holds an entry for the name. A vanilla entry reads `NAME was banned by BANNER: REASON`.
     Paper 26.3 sends the whole reply on one line with the entries run together, so an entry is found anywhere in the
     reply. The name may not follow a name character, so `Xbob was banned by` is not a ban on Bob. The banner is one
-    word, so a name that appears only as the banner or in the reason is not the banned player."""
-    pattern = rf"(?<![A-Za-z0-9_]){re.escape(name)} was banned by \S+: "
+    word, so a name that appears only as the banner or in the reason is not the banned player. The Java and Bedrock
+    rules differ only for a `.` or `*` prefix, see _before_name."""
+    pattern = _before_name(prefix, entry.bedrock) + re.escape(entry.listed) + r" was banned by \S+: "
     return re.search(pattern, ban_text, re.IGNORECASE) is not None
 
 
@@ -130,7 +148,7 @@ class MinecraftAdapter:
             return Observed("error", "no_identity")
         if not all(entry.safe for entry in entries):
             return Observed("error", "bad_identity")
-        if any(_is_banned(entry.listed, ban_text) for entry in entries):
+        if any(_is_banned(entry, self._prefix, ban_text) for entry in entries):
             return Observed("banned_external")
         state = _listed_state(entries, listed_lower)
         if state == "partial":
