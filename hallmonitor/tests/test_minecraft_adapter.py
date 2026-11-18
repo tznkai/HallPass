@@ -29,7 +29,7 @@ from hallmonitor.logs import JsonFormatter
 from hallmonitor.reconcile import cycle
 from tests.fake_hallpass import TOKEN, FakeHallpassState
 from tests.fake_hallpass import make_transport as make_hallpass_transport
-from tests.fake_rcon import LOOPBACK, FakeRconState, default_minecraft_handler, rcon_server
+from tests.fake_rcon import LOOPBACK, FakeRconState, Handler, default_minecraft_handler, rcon_server
 
 URL = "https://hallpass.invalid"
 PASSWORD = "test-pass"
@@ -246,6 +246,105 @@ async def test_a_managed_name_that_only_appears_in_a_ban_reason_is_allowed_when_
 async def test_a_managed_name_on_its_own_ban_line_is_banned_whatever_the_case() -> None:
     state = server_state(bans=[ban("steve", by="Admin", reason="spam")])
     hallpass = mc_service(subject("r1", "allowed", java_identity("Steve"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+
+
+# The ban list as Paper 26.3 sends it over RCON: one line, with the entries run together and no line breaks ------
+
+LIVE_BAN_LIST = "There are 1 ban(s):Bob was banned by Server: Banned by an operator."
+
+
+def ban_list_reply(text: str) -> Handler:
+    """A server whose `banlist players` reply is exactly `text`, and that answers every other command as usual."""
+    def handler(state: FakeRconState, cmd: str) -> str:
+        if cmd == "banlist players":
+            return text
+        return default_minecraft_handler(state, cmd)
+    return handler
+
+
+async def test_the_live_one_line_ban_reply_bans_the_named_player() -> None:
+    state = server_state(handler=ban_list_reply(LIVE_BAN_LIST))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert state.whitelist == []
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+
+
+async def test_two_ban_entries_run_together_on_one_line_are_both_seen() -> None:
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
+            "Tim was banned by Server: Banned by an operator.")
+    state = server_state(handler=ban_list_reply(text))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2),
+                          subject("r2", "allowed", java_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert outcomes(hallpass) == [("r1", "banned_external", None), ("r2", "banned_external", None)]
+
+
+async def test_a_bedrock_entry_run_together_after_a_reason_is_banned() -> None:
+    text = ("There are 2 ban(s):Bob was banned by Server: Banned by an operator."
+            ".Tim was banned by Server: Banned by an operator.")
+    state = server_state(handler=ban_list_reply(text))
+    hallpass = mc_service(subject("r2", "allowed", bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert outcomes(hallpass) == [("r2", "banned_external", None)]
+
+
+async def test_a_ban_entry_on_its_own_line_after_a_line_break_is_banned() -> None:
+    state = server_state(handler=ban_list_reply("There are 1 ban(s):\nBob was banned by Admin: griefing"))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+
+
+async def test_a_no_bans_reply_bans_nobody() -> None:
+    state = server_state(handler=ban_list_reply("There are no bans"))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Bob"]
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+async def test_a_name_that_only_banned_someone_on_one_line_is_not_banned() -> None:
+    state = server_state(handler=ban_list_reply("There are 1 ban(s):Tim was banned by Bob: griefing"))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Bob"]
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+async def test_a_name_that_is_the_end_of_a_longer_banned_name_on_one_line_is_not_banned() -> None:
+    state = server_state(handler=ban_list_reply("There are 1 ban(s):Xbob was banned by Server: Banned by an operator."))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Bob"]
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+async def test_a_name_that_only_appears_in_a_reason_on_one_line_is_not_banned() -> None:
+    state = server_state(handler=ban_list_reply("There are 1 ban(s):Tim was banned by Admin: alt of Bob."))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Bob"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Bob"]
+    assert outcomes(hallpass) == [("r1", "allowed", None)]
+
+
+async def test_a_ban_on_one_line_matches_the_name_whatever_the_case() -> None:
+    state = server_state(handler=ban_list_reply("There are 1 ban(s):BOB was banned by server: banned by an operator."))
+    hallpass = mc_service(subject("r1", "allowed", java_identity("bob"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
     assert outcomes(hallpass) == [("r1", "banned_external", None)]

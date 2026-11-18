@@ -93,16 +93,20 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 ## Minecraft
 
-Only the last three notes are from a live server. Until `tools/live/minecraft_check.py` is run, the adapter
-follows the plan's defaults, and each other item below is pending live confirmation. Hosts and names are
+The ban-list note and the last three notes are from a live server. Until `tools/live/minecraft_check.py` is run, the
+adapter follows the plan's defaults, and each other item below is pending live confirmation. Hosts and names are
 placeholders such as `<mc-host>`.
 
 - **End-of-response sentinel.** A Minecraft command is sent alone. Its sentinel (type 200) follows only after the first
   response packet for that command has arrived, and never in the same read as the command, because a vanilla server
   may drop the connection when it receives both at once. The Source dialect keeps its pipelined empty sentinel.
 - **Whitelist list.** Parsed from `There are N whitelisted player(s): a, b, c`, or `There are no whitelisted players`.
-- **Ban list.** Each entry is read as `NAME was banned by BANNER: REASON`. A name counts as banned only at the start
-  of an entry line, so a name that appears only as the banner or in the reason is not banned.
+- **Ban list (seen 2026-11-18).** Paper 26.3 sends `banlist players` as one line with no line breaks, for example
+  `There are 1 ban(s):<name> was banned by Server: Banned by an operator.`, and with more bans the entries run together
+  after the full stop of the reason. Each entry is `NAME was banned by BANNER: REASON`. A name counts as banned
+  wherever an entry begins it, but never when a letter, digit or underscore comes before it, so a name that appears
+  only as the banner or in the reason is not banned. Line breaks still work. The matcher's accepted costs are in
+  `REVIEW.md`.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
   `still_connected`, and the subject is not reported as suspended.

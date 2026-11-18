@@ -35,7 +35,6 @@ DEFAULT_KICK_MESSAGE = "Access paused. Ask a parent or the administrator."
 NO_WHITELISTED = "There are no whitelisted players"
 WHITELIST_LINE = re.compile(r"whitelisted player(?:s|\(s\))?:\s*(.*)$")  # the plan's player(s), or plural or singular
 ONLINE_LINE = re.compile(r"players online:\s*(.*)$")  # the plan's default `list` reply, unconfirmed until the live check
-BAN_HEADER = re.compile(r"There are (?:no bans|\d+ ban\(s\):)")
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
 
 # Console command arguments. A target selector (@a, @e[...], @p, @r) would make `whitelist remove` and `kick` act on
@@ -88,15 +87,13 @@ def _online_names(text: str) -> set[str]:
     return {name.strip().lower() for name in match.group(1).split(",") if name.strip()}
 
 
-def _ban_names(text: str) -> str:
-    """The ban list without its header lines, each line stripped, so `There are 1 ban(s):` never matches a name."""
-    return "\n".join(line.strip() for line in text.splitlines() if not BAN_HEADER.fullmatch(line.strip()))
-
-
 def _is_banned(name: str, ban_text: str) -> bool:
-    """True when an entry line starts with the name. A vanilla entry reads `NAME was banned by BANNER: REASON`, so a
-    name that appears only as the banner or in the reason is not the banned player."""
-    return re.search(rf"^{re.escape(name)}(?!\w)", ban_text, re.IGNORECASE | re.MULTILINE) is not None
+    """True when the ban list holds an entry for the name. A vanilla entry reads `NAME was banned by BANNER: REASON`.
+    Paper 26.3 sends the whole reply on one line with the entries run together, so an entry is found anywhere in the
+    reply. The name may not follow a name character, so `Xbob was banned by` is not a ban on Bob. The banner is one
+    word, so a name that appears only as the banner or in the reason is not the banned player."""
+    pattern = rf"(?<![A-Za-z0-9_]){re.escape(name)} was banned by \S+: "
+    return re.search(pattern, ban_text, re.IGNORECASE) is not None
 
 
 def _listed_state(entries: Sequence[_Entry], listed_lower: set[str]) -> ListState:
@@ -145,7 +142,7 @@ class MinecraftAdapter:
     async def observe(self, subjects: Sequence[Subject]) -> Mapping[str, Observed]:
         async with self._session() as client:
             listed = _parse_whitelist(await client.command("whitelist list"))
-            ban_text = _ban_names(await client.command("banlist players"))
+            ban_text = await client.command("banlist players")
         listed_lower = {name.lower() for name in listed}
         return {subject.ref: self._observe_subject(subject, listed_lower, ban_text) for subject in subjects}
 
