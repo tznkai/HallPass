@@ -43,12 +43,16 @@ these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
 - Authentik's worker must reach `<public_url>/auth/backchannel-logout`. The worker posts the logout token to it, not the
   browser. Delivery is queued, and a delivery that fails is retried several times over a few minutes (seen live,
   `docs/authentik-notes.md`). Copy the Logout URI exactly: a stray character sends every token to a missing path.
+  The Logout URI is `<public_url>/auth/backchannel-logout`. Do not enter `<public_url>/signed-out` there: that is the
+  post-logout redirect URI, of type Logout, under Redirect URIs.
 
 The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
 and 400 for anything else, with no body. If a fetch of the provider's keys fails and none are cached, logout tokens are
 refused until the provider answers again and for up to 60 seconds after the failed fetch. Authentik retries a refused
-delivery, so a later attempt usually gets through; if every attempt is refused, the sessions they name end at max age
-or at sign-out instead.
+delivery. Observed: a delivery refused with 404 (a wrong Logout URI) was retried, and the retry after the URI was
+restored ended the session. Inferred, not observed: a 400 is retried the same way, so a later attempt usually gets
+through. How many retries there are, and for how long, is not known (see `docs/authentik-notes.md`). If every attempt
+is refused, the sessions they name end at max age or at sign-out instead.
 
 ## Caddy
 

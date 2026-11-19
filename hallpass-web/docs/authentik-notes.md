@@ -122,8 +122,9 @@ Hallpass ran against the test Authentik at `<hallpass>` behind the reverse proxy
 
 ## Phase 8: sign-out and back-channel logout
 
-Research on Authentik 2026.8.5, from its source and documentation, then checked live on 2026-11-19 with test plan
-Part H (H1 to H7 passed). Each item says what the live run showed.
+Research on Authentik 2026.8.5, from its source and documentation, then checked live on 2026-11-18 with test plan
+Part H. H1, H2, H4, H5 and H7 passed; H3 passed after the Logout URI was corrected; H6 passed and showed the
+research wrong on retries. Each item says what the live run showed.
 
 - **End-session redirect.** The discovery document's `end_session_endpoint` takes `id_token_hint` and
   `post_logout_redirect_uri`. `post_logout_redirect_uri` needs the hint, and it must match a redirect URI of type
@@ -134,23 +135,32 @@ Part H (H1 to H7 passed). Each item says what the live run showed.
 - **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends one logout token to the
   Logout URI, and hallpass ends that session on the next request.
 - **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory,
-  Users, the user's Sessions tab) sends a logout token per session, and both of that person's browsers had to sign in
-  again.
+  Users, the user's Sessions tab) sends logout tokens, and both of that person's browsers had to sign in again. Not
+  shown: one token per session. The log count of `outcome=ok` lines was not taken.
 - **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their hallpass session on the next
   page. The run did not show whether the token carried a `sid` or the subject alone.
 - **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed hallpass's checks (`outcome=ok`), so the `iss`
   matched the discovery `issuer`, the `kid` was in the `jwks_uri` document, and the token was signed RS256.
-- **`sid` match.** Confirmed (H1, H2): a logout token ended the session it named and left another person's session in
-  a second browser signed in, so the `sid` in the token matched the one in that session's ID token.
+- **`sid` match.** Shown (H1, H2): a logout token ended the session it named and left another person's session in a
+  second browser signed in. Not shown directly: that the token carried a `sid`, or that the `sid` matched the one in
+  that session's ID token. The run cannot tell a sid token from a subject-only token, because the surviving session
+  belonged to another person. What would show it: a `revoked_session` row holding that session's `sid` after the
+  logout, or a second session of the same person surviving a logout token that named only one session.
 - **Cookie size.** Confirmed (every sign-in in Part H): the session cookie holds a handle to the ID token kept on the
   server, not the token, and sign-in did not loop.
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
-  User Logout stage. Confirmed (H1) with the provider on `default-invalidation-flow`: a sign-out at hallpass ends the
-  Authentik session. The provider default was not tried.
+  User Logout stage (from the research, not checked live). Not checked live: the run used `default-invalidation-flow`
+  (works, H1); the provider default was not tried.
 - **Retry after a failed delivery.** Wrong in the research (H6): Authentik retries a delivery that fails. With a wrong
   Logout URI answering 404, the worker log showed the send task failing and being queued again several times, about
   30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`) and
-  the session ended on the next request. A 400 from hallpass is a failure too, so it is retried in the same way.
-- **Logout URI typo.** Seen live: a Logout URI copied with a trailing full stop (`<public_url>/signed-out.`) made the
-  worker post to a path that answers 404, and nothing was revoked until it was corrected. Copy the URI exactly; the
-  hallpass access log shows the worker's `POST` and the path it used.
+  the session ended on the next request. Observed: a 404 was retried, more than once. Inferred, not observed: a 400 from
+  hallpass is retried the same way, since Authentik's task raises on any non-2xx response. Not observed: how many
+  retries there are, how long they continue, and whether a retry resends the same token or a rebuilt one. That last
+  point matters. A resent token can lapse at `exp`, after which the `exp` + 60 s check in `logout.py` refuses it. A
+  rebuilt token carries a later `iat`, which weakens the guarantee at `revocation.py:40` only if the person signs in
+  again within the retry period.
+- **Logout URI typo.** Seen live (H3, first attempt): the post-logout redirect URI `/signed-out` was entered as the
+  Logout URI, with a trailing full stop (`<public_url>/signed-out.`). The worker's `POST /signed-out.` was answered
+  404, and nothing was revoked until the Logout URI was corrected to `/auth/backchannel-logout`. Copy the URI exactly;
+  the hallpass access log shows the worker's `POST` and the path it used.

@@ -154,7 +154,9 @@ as the code they cite.
 - `src/hallpass/revocation.py:63` `return started_at is None or row[0] > started_at` — a subject-wide revocation ends only sessions that started before it; a session with no start time is ended by session_ended, which every request uses first
 - `src/hallpass/auth.py:149` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make hallpass fetch the provider's keys more than once per window
   Accepted risk, agreed by the user on 2026-11-18: after a failed key fetch with no keys cached, every logout token
-  is refused for up to FORCED_REFRESH_COOLDOWN_SECONDS (60 s). Authentik retries a refused delivery (seen live on
-  2026-11-19), so a retry after the window usually gets through; a session ends at max age or at sign-out only if
-  every attempt is refused. The trade is a bounded number of outbound key fetches against a delayed revocation.
+  is refused for up to FORCED_REFRESH_COOLDOWN_SECONDS (60 s). Observed on 2026-11-18: Authentik retried a delivery
+  refused with 404 (a wrong Logout URI), and a retry after the URI was restored ended the session. Inferred, not
+  observed: a 400 from this endpoint is retried the same way, since Authentik's task raises on any non-2xx response,
+  so a retry after the window usually gets through. A session ends at max age or at sign-out only if every attempt
+  is refused. The trade is a bounded number of outbound key fetches against a delayed revocation.
 - `src/hallpass/revocation.py:40` `ended_at = min(issued_at, now)` — a subject-wide revocation is stamped with the logout token's issue time, never later than now, so a late or replayed delivery cannot end sessions started after the logout event
