@@ -659,6 +659,15 @@ async def test_a_player_with_only_one_of_two_names_listed_is_brought_fully_onto_
     assert outcomes(hallpass) == [("r1", "allowed", None)]
 
 
+async def test_a_held_player_with_only_one_of_two_names_listed_loses_every_listed_name() -> None:
+    state = server_state(whitelist=["Steve"], online={"Steve"})
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), bedrock_identity("Tim"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert outcomes(hallpass) == [("r1", "suspended", None)]
+
+
 # The whitelist list format: the plan's default strings, parsed exactly -----------------------------------
 
 @pytest.mark.parametrize(("text", "names"), [
@@ -902,4 +911,19 @@ async def test_observe_of_a_subject_with_some_names_banned_and_its_unbanned_name
     async with rcon_server(state) as port:
         result = await make_adapter(port).observe([partly])
     assert result == {"r1": Observed("suspended", "partly_banned")}
+    assert state.whitelist == ["Steve"]
+
+
+# Observe of a split listing with no bans: the observation is the opposite of the desired state, with detail partial ---
+
+@pytest.mark.parametrize(("desired", "observed"), [("allowed", "suspended"), ("suspended", "allowed")])
+async def test_observe_of_a_split_listing_with_no_bans_reports_the_opposite_state_and_partial(
+        desired: str, observed: str) -> None:
+    state = server_state(whitelist=["Steve"])
+    split = Subject(ref="r1", identities=(Identity(kind=JAVA_KIND, value="Steve"),
+                                          Identity(kind=JAVA_KIND, value="Alex")),
+                    desired=desired, generation=2)
+    async with rcon_server(state) as port:
+        result = await make_adapter(port).observe([split])
+    assert result == {"r1": Observed(observed, "partial")}
     assert state.whitelist == ["Steve"]
