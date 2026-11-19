@@ -64,11 +64,20 @@ async def _sync_every_bound(deps) -> bool:
 
 # People ----------------------------------------------------------------------------------------------
 
+def _duplicate_flag(duplicate: registry.SingleDuplicate) -> str:
+    return text.SINGLE_IDENTITY_DUPLICATE_FLAG.format(kind=text.SINGLE_IDENTITY_KIND_NAMES[duplicate.kind],
+                                                      service=duplicate.service_name)
+
+
 async def _people_page(request: Request, admin: Person, *, status: int = 200, error: str | None = None) -> Response:
-    people, missing = await _deps(request).db.run(
-        lambda c: (registry.list_people(c), registry.people_missing_fluxer_address(c)))
+    people, missing, duplicates = await _deps(request).db.run(
+        lambda c: (registry.list_people(c), registry.people_missing_fluxer_address(c),
+                   registry.single_identity_duplicates(c)))
+    by_id = {person.id: person for person in people}
+    flagged = [(by_id[d.person_id], _duplicate_flag(d)) for d in duplicates]
     return page(request, "admin/people.html", viewer=admin, status_code=status, error=error, people=people,
-                missing=missing, account_types=registry.ACCOUNT_TYPES, no_address_flag=text.NO_FLUXER_ADDRESS_FLAG)
+                missing=missing, flagged=flagged, account_types=registry.ACCOUNT_TYPES,
+                no_address_flag=text.NO_FLUXER_ADDRESS_FLAG)
 
 
 @router.get("/people")
@@ -179,6 +188,8 @@ def _person_context(conn, person: Person) -> dict:
         "identity_also_held": text.IDENTITY_ALSO_HELD,
         "identity_kinds": registry.IDENTITY_KINDS,
         "identity_note": text.IDENTITY_REMOVE_NOTE,
+        "duplicate_flags": [_duplicate_flag(d) for d in registry.single_identity_duplicates(conn)
+                            if d.person_id == person.id],
         "hold_rows": _hold_rows(conn, person.id),
         "modes": holds.MODES,
         "services": services.list_services(conn),
@@ -380,6 +391,8 @@ async def add_identity(request: Request, person_id: int, admin: Admin,
 
     try:
         await deps.db.run(change)
+    except LinkRefused as error:
+        return await _person_page(request, admin, person_id, status=400, error=str(error))
     except ValueError:
         return await _person_page(request, admin, person_id, status=400, error=text.INVALID_INPUT)
     except sqlite3.IntegrityError:

@@ -634,3 +634,64 @@ async def test_an_update_to_a_name_with_a_control_character_is_refused_and_chang
         await db.run(lambda c: registry.update_person(c, person.id, display_name="Ann\r\nX", account_type="adult",
                                                        email=None, phone=None, fluxer_email_override=None))
     assert (await db.run(lambda c: registry.get_person(c, person.id))).display_name == "Ann"
+
+
+# One Steam id and one Fluxer id per person and service -------------------------------------------------
+
+async def test_a_second_steam_id_on_the_same_service_is_refused_and_stores_nothing(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", STEAM_ID))
+    other = str(registry.STEAM64_BASE + 1002)
+    with pytest.raises(LinkRefused, match="already has a Steam id"):
+        await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", other))
+    assert [i.value for i in await db.run(lambda c: registry.identities_of(c, person.id))] == [STEAM_ID]
+
+
+async def test_a_second_fluxer_id_on_the_same_service_is_refused_and_stores_nothing(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "fluxer")
+    await db.run(lambda c: registry.add_identity(c, person.id, "fluxer", "fluxer_user_id", "1001"))
+    with pytest.raises(LinkRefused, match="already has a Fluxer id"):
+        await db.run(lambda c: registry.add_identity(c, person.id, "fluxer", "fluxer_user_id", "1002"))
+    assert [i.value for i in await db.run(lambda c: registry.identities_of(c, person.id))] == ["1001"]
+
+
+async def test_one_steam_id_on_each_of_two_services_is_allowed(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    await make_service(db, "steam-two")
+    await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", STEAM_ID))
+    await db.run(lambda c: registry.add_identity(c, person.id, "steam-two", "steam_id", str(registry.STEAM64_BASE + 7)))
+    assert len(await db.run(lambda c: registry.identities_of(c, person.id))) == 2
+
+
+async def test_two_java_names_on_one_service_are_still_allowed(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "minecraft")
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "KidOne"))
+    await db.run(lambda c: registry.add_identity(c, person.id, "minecraft", "java_name", "KidTwo"))
+    assert len(await db.run(lambda c: registry.identities_of(c, person.id))) == 2
+
+
+async def test_two_steam_ids_already_stored_are_listed_as_duplicates_and_nothing_fails(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    other = str(registry.STEAM64_BASE + 1002)
+
+    def seed_legacy(c: sqlite3.Connection) -> list[registry.SingleDuplicate]:
+        # Rows written before the refusal existed: the table's own indexes allow two different steam ids.
+        for value in (STEAM_ID, other):
+            c.execute("INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, 'steam', "
+                      "'steam_id', ?)", (person.id, value))
+        return registry.single_identity_duplicates(c)
+
+    found = await db.run(seed_legacy)
+    assert found == [registry.SingleDuplicate(person_id=person.id, service_name="Steam", kind="steam_id")]
+
+
+async def test_a_single_steam_id_is_not_listed_as_a_duplicate(db: Database) -> None:
+    person = await make(db, account_type="child")
+    await make_service(db, "steam")
+    await db.run(lambda c: registry.add_identity(c, person.id, "steam", "steam_id", STEAM_ID))
+    assert await db.run(lambda c: registry.single_identity_duplicates(c)) == []

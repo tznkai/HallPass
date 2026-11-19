@@ -18,7 +18,7 @@ as the code they cite.
 ## Enrollment binding
 
 - `src/hallpass/auth.py:281` `async def resolve_sign_in` — the order of the binding decisions: a known sub, then an enrollment ref, then the admin bootstrap, then refusal
-- `src/hallpass/registry.py:202` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
+- `src/hallpass/registry.py:204` `enrollment_ref = NULL, invite_url = NULL` — binding clears the ref, so a second Authentik account that carries the same ref matches no person
 
 ## Sessions and CSRF
 
@@ -40,7 +40,7 @@ as the code they cite.
 
 ## Fluxer address
 
-- `src/hallpass/registry.py:401` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
+- `src/hallpass/registry.py:427` `def fluxer_address` — the order is the override, then the person's own email, then a parent's plus-address; changing it changes which address Fluxer uses
 
 ## Authentik calls
 
@@ -65,7 +65,7 @@ as the code they cite.
 - `src/hallpass/grants.py:125` `raise GrantRefused("already_granted")` — the second approval of an invited, not yet enrolled child is refused while a grant by a linked parent counts, so the approval is never recorded twice; an enrolled child is approved again and made active instead
 - `src/hallpass/grants.py:86` `AND p.status != 'locked'` — a grant by a locked parent counts for nothing, so it neither settles a child at sign-in nor blocks another parent's approval
 - `src/hallpass/grants.py:176` `if to_child == (old_type == "child"):` — a change between adult and parent moves no status; an active person made a child waits for a parent's grant, and an awaiting child made an adult becomes active
-- `src/hallpass/web/routes_admin.py:263` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
+- `src/hallpass/web/routes_admin.py:274` `grants.change_account_type(conn, person_id` — the admin's type change moves the status in the same transaction as the account type, so the person is never left active as a child
 
 ## Entitlement resolution
 
@@ -104,7 +104,7 @@ as the code they cite.
 - `src/hallpass/holds.py:390` `if any(hold.kind in ("admin", "lockdown") for hold in held):` — a parent asking to lift a service held only by admin or lockdown holds is refused, so a parent never removes those
 - `src/hallpass/holds.py:217` `def _pend_manual_restores` — a parent's lift that leaves a marked manual service with no hold keeps the mark as a pending restore and mails the administrator once; the mark is kept, not cleared, so the suspension done by hand is never forgotten. A lockdown that the same lift causes is decided first, so it holds the service and no restore is pended
 - `src/hallpass/holds.py:474` `DELETE FROM hold WHERE review_id = ? AND kind = 'lockdown'` — the only place lockdown holds are deleted, shared by a resolution with the lift option and by the administrator's later lift
-- `src/hallpass/web/routes_admin.py:957` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
+- `src/hallpass/web/routes_admin.py:970` `@router.post("/reviews/{review_id}/lift"` — the administrator's lift of a resolved review's lockdown, the only route that lifts one after its resolution; it is gated by `require_admin` and CSRF
 - `src/hallpass/holds.py:487` `raise ValueError("review is still open")` — a lockdown cannot be lifted while its review is open
 - `src/hallpass/web/routes_family.py:103` `def hold_return(back` — the open-redirect guard for a hold change: the form's `back` field is honoured only as the fixed value `children`, and any other value goes to the child's page, so no address from the request is ever redirected to
 

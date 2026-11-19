@@ -23,6 +23,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 </section>
 
 <section class="stack">
+  <h2>More than one Steam or Fluxer id</h2>
+  {% if flagged %}
+  <ul>
+    {% for person, message in flagged %}
+    <li><a href="/admin/people/{{ person.id }}">{{ person.display_name }}</a>: <span class="notice warning">{{ message }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Nobody holds more than one Steam or Fluxer id on a service.</p>
+  {% endif %}
+</section>
+
+<section class="stack">
   <h2>All people</h2>
   <table>
     <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Signed in</th></tr></thead>

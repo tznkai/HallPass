@@ -21,6 +21,8 @@ from hallpass import display_names, text
 ACCOUNT_TYPES = ("adult", "parent", "child")
 IDENTITY_KINDS = ("fluxer_user_id", "java_name", "bedrock_gamertag", "steam_id")
 CASE_FOLDED_KINDS = ("java_name", "bedrock_gamertag")
+# A person holds at most one identity of these kinds per service. Java names and Bedrock gamertags may repeat.
+SINGLE_ACCOUNT_KINDS = ("steam_id", "fluxer_user_id")
 _DIGITS = re.compile(r"[0-9]+")
 # The SteamID64 base: universe public (1 << 56), account type individual (1 << 52), instance 1 (1 << 32). The individual
 # account range is the base plus a 32-bit account number, so its limit is exclusive. Computed, never written out.
@@ -355,10 +357,34 @@ def add_identity(conn: sqlite3.Connection, person_id: int, service_slug: str, ki
         raise ValueError("java_name must be 1 to 16 letters, digits or underscores")
     if kind == "bedrock_gamertag" and not BEDROCK_GAMERTAG.fullmatch(clean):
         raise ValueError("bedrock_gamertag must be 1 to 16 letters, digits or underscores")
+    # The same value again is left to the unique index, which reports it as already recorded.
+    if kind in SINGLE_ACCOUNT_KINDS and conn.execute(
+            "SELECT 1 FROM external_identity WHERE person_id = ? AND service_slug = ? AND kind = ? AND value <> ? "
+            "LIMIT 1", (person_id, slug, kind, clean)).fetchone() is not None:
+        raise LinkRefused(text.SINGLE_IDENTITY_TAKEN[kind])
     return conn.execute(
         "INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, ?, ?, ?)",
         (person_id, slug, kind, clean),
     ).lastrowid
+
+
+@dataclass(frozen=True)
+class SingleDuplicate:
+    """A person who holds more than one identity of a single-account kind on one service. Rows written before the
+    refusal existed can do this, so the admin pages flag it rather than fail."""
+    person_id: int
+    service_name: str
+    kind: str
+
+
+def single_identity_duplicates(conn: sqlite3.Connection) -> list[SingleDuplicate]:
+    rows = conn.execute(
+        "SELECT e.person_id, s.name, e.kind FROM external_identity e JOIN service s ON s.slug = e.service_slug "
+        "WHERE e.kind IN (?, ?) GROUP BY e.person_id, e.service_slug, e.kind HAVING COUNT(*) > 1 "
+        "ORDER BY e.person_id, e.service_slug, e.kind",
+        SINGLE_ACCOUNT_KINDS,
+    ).fetchall()
+    return [SingleDuplicate(person_id=row[0], service_name=row[1], kind=row[2]) for row in rows]
 
 
 def remove_identity(conn: sqlite3.Connection, identity_id: int) -> None:

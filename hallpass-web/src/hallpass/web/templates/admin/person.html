@@ -124,6 +124,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <section class="stack">
   <h2>External identities</h2>
   <p>{{ identity_note }}</p>
+  {% for flag in duplicate_flags %}<p class="notice warning">{{ flag }}</p>{% endfor %}
   <table>
     <thead><tr><th>Service</th><th>Kind</th><th>Value</th><th></th></tr></thead>
     <tbody>

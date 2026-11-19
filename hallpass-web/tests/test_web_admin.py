@@ -442,6 +442,33 @@ async def test_a_duplicate_identity_is_refused(env: Env):
     assert text.IDENTITY_TAKEN in response.text
 
 
+async def test_a_second_steam_id_on_the_same_service_is_refused_by_the_admin_route_and_stores_nothing(env: Env):
+    await admin_client(env)
+    person_id = await create_person(env, "Kid", account_type="child")
+    await make_service(env.db, "steam")
+    assert (await post(env, f"/admin/people/{person_id}/identities", service_slug="steam", kind="steam_id",
+                       value=str(registry.STEAM64_BASE + 1001))).status_code == 303
+    response = await post(env, f"/admin/people/{person_id}/identities", service_slug="steam", kind="steam_id",
+                          value=str(registry.STEAM64_BASE + 1002))
+    assert response.status_code == 400
+    assert text.SINGLE_IDENTITY_TAKEN["steam_id"] in response.text
+    assert [i.value for i in await env.db.run(lambda c: registry.identities_of(c, person_id))] == [
+        str(registry.STEAM64_BASE + 1001)]
+
+
+async def test_a_person_with_two_steam_ids_already_stored_is_flagged_on_both_admin_pages(env: Env):
+    await admin_client(env)
+    person_id = await create_person(env, "Kid", account_type="child")
+    await make_service(env.db, "steam")
+    for offset in (1001, 1002):
+        await env.db.run(lambda c, v=str(registry.STEAM64_BASE + offset): c.execute(
+            "INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, 'steam', 'steam_id', ?)",
+            (person_id, v)))
+    flag = text.SINGLE_IDENTITY_DUPLICATE_FLAG.format(kind="Steam ids", service="Steam")
+    assert flag in (await env.client.get(f"/admin/people/{person_id}")).text
+    assert flag in (await env.client.get("/admin/people")).text
+
+
 async def test_a_case_variant_minecraft_name_held_by_another_person_is_accepted_and_both_pages_name_the_other(env: Env):
     await admin_client(env)
     first = await create_person(env, "First", account_type="child")

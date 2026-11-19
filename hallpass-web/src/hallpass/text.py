@@ -23,6 +23,13 @@ SIGNED_OUT_SIGN_IN = "Sign in"
 NOT_FOUND = "That page does not exist."
 INVALID_INPUT = "Check the values and try again."
 IDENTITY_TAKEN = "That identity is already recorded for this service."
+# A person holds one Steam id and one Fluxer id per service. Each kind's refusal names the kind.
+SINGLE_IDENTITY_TAKEN = {
+    "steam_id": "This person already has a Steam id on this service; remove it first.",
+    "fluxer_user_id": "This person already has a Fluxer id on this service; remove it first.",
+}
+SINGLE_IDENTITY_KIND_NAMES = {"steam_id": "Steam ids", "fluxer_user_id": "Fluxer ids"}
+SINGLE_IDENTITY_DUPLICATE_FLAG = "This person has more than one {kind} on {service}; remove the extra ones."
 GROUP_TAKEN = "A group with that name already exists."
 ENTITLEMENT_DENY_NOT_PERSON = ("A deny applies only to one person. For an account type or a group, "
                                "remove the grant instead.")
