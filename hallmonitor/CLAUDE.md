@@ -55,10 +55,11 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
   other failure stays with its subject.
 - **Ban ownership.** Hallmonitor lifts only bans it placed. Every ban it places is recorded in `own.py`
   (`own_suspension`); a listed ban with no own record is `banned_external`, and restore never unbans or `removeid`s
-  without that record. Valheim is the exception: it never writes the ban list, and its own records only time its
-  restart rule. They do not decide ownership, because the permitted list is hallpass's to control, like the Minecraft
-  whitelist. Fluxer places and lifts no bans at all: its only mutation is ending sessions, and a disabled account is
-  `banned_external`.
+  without that record. A Minecraft subject with several names is `banned_external` only when every name is banned;
+  otherwise it carries the detail `partly_banned`, and apply touches only the unbanned names, never pardoning a banned
+  one. Valheim is the exception: it never writes the ban list, and its own records only time its restart rule. They do
+  not decide ownership, because the permitted list is hallpass's to control, like the Minecraft whitelist. Fluxer places
+  and lifts no bans at all: its only mutation is ending sessions, and a disabled account is `banned_external`.
 - **Identity allowlists.** Every identity passes an allowlist before any command or file line is built from it:
   Minecraft Java/Bedrock name patterns and the Floodgate prefix set, and a canonical SteamID64 (`adapters/steam.py`)
   for Palworld, Valheim and Source. An unsafe value is `bad_identity`. Never widen these without a live check.
@@ -103,7 +104,7 @@ never run by CI. Results are recorded in `docs/service-notes.md`, with placehold
 Fluxer, Palworld, Valheim, the Pterodactyl permissions and The Ship (`source_panel`, checked 2026-11-18) are recorded.
 The Minecraft section records the RCON setup, the server versions, the Java and Bedrock holds working end to end, and
 the one-line ban list format (all 2026-11-18). It lists its other items (framing, whitelist parsing, the kick check,
-name patterns) as pending. Abiotic Factor is manual for now (adapter deferred). The Ship's 204 check for the subuser's
-console route was recorded on 2026-11-18.
+name patterns, the partly banned check, test plan D5) as pending. Abiotic Factor is manual for now (adapter deferred).
+The Ship's 204 check for the subuser's console route was recorded on 2026-11-18.
 Until a service's check is recorded, that adapter's framing and parsing are unconfirmed. Writing a file through
 Pterodactyl needs `file.create`, not `file.update`.
