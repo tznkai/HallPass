@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated, Any, Protocol
 from urllib.parse import urlsplit
 
-# Authlib 1.9.5 warns at import that its httpx integration is deprecated. That is upstream, not hallpass code, so
+# Authlib 1.9.5 warns at import that its httpx integration is deprecated. That is upstream, not the Console's code, so
 # only that message is muted, and only for this import. authlib.deprecate must load first: it installs its own
 # "always" filter for that warning class, which would otherwise sit in front of the one below.
 import authlib.deprecate  # noqa: F401
@@ -44,13 +44,13 @@ from hallpass.registry import Person
 logger = logging.getLogger(__name__)
 SESSION_COOKIE = "hallpass_session"
 # A forced key refetch (an unknown kid on a logout token) is honoured at most once in this many seconds, so an
-# unauthenticated sender cannot make hallpass fetch the provider's keys on every request.
+# unauthenticated sender cannot make the Console fetch the provider's keys on every request.
 FORCED_REFRESH_COOLDOWN_SECONDS = 60
 
 
 @dataclass(frozen=True)
 class Identity:
-    """What a sign-in tells hallpass. sid is the ID token's session id (None when the token has none), which
+    """What a sign-in tells the Console. sid is the ID token's session id (None when the token has none), which
     back-channel logout matches. id_token is the raw token: it is kept on the server, never in the cookie, and
     sign-out sends it back as the hint."""
     sub: str
@@ -80,7 +80,7 @@ class SignInError(Exception):
 # errors (an IdP error reply, a state mismatch). JoseError is joserfc's base, which authlib uses to validate the ID
 # token: a bad signature, an undecodable token, or a failed issuer, audience, nonce or expiry check. httpx covers an
 # unreachable or non-2xx IdP or metadata endpoint, and KeyError and ValueError cover a reply without the claims
-# hallpass reads.
+# the Console reads.
 _OIDC_ERRORS = (httpx.HTTPError, AuthlibBaseError, JoseError, KeyError, ValueError)
 
 

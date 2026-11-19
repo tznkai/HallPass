@@ -29,7 +29,7 @@ _DIGITS = re.compile(r"[0-9]+")
 STEAM64_BASE = (1 << 56) | (1 << 52) | (1 << 32)
 STEAM64_LIMIT = STEAM64_BASE + (1 << 32)
 MAX_STEAM64_DIGITS = 20  # a 64-bit integer has at most 20 decimal digits
-# A Minecraft name reaches a console command in hallmonitor, so it must match in full. A selector such as @a is refused.
+# A Minecraft name reaches a console command in HallMonitor, so it must match in full. A selector such as @a is refused.
 # A Bedrock gamertag uses the Java class for now: spaces stay refused until the live check shows how Floodgate passes them.
 JAVA_NAME = re.compile(r"[A-Za-z0-9_]{1,16}")
 BEDROCK_GAMERTAG = re.compile(r"[A-Za-z0-9_]{1,16}")
@@ -183,7 +183,7 @@ def get_by_uuid(conn: sqlite3.Connection, uuid: str) -> Person | None:
 
 
 def get_by_ref(conn: sqlite3.Connection, ref: str) -> Person | None:
-    """The person with this public ref, the only person id that leaves hallpass on the monitor API."""
+    """The person with this public ref, the only person id that leaves the Console on the monitor API."""
     return _one(conn, "ref = ?", (ref,))
 
 

@@ -403,7 +403,7 @@ async def test_a_failing_unmanaged_count_does_not_stop_the_reports() -> None:
     assert state.unmanaged == []
 
 
-# Hallpass down, and the report post -----------------------------------------------------------------
+# HallPass Console down, and the report post ---------------------------------------------------------
 
 async def test_when_hallpass_is_down_nothing_is_applied_and_the_cycle_reports_not_fetched() -> None:
     state = FakeHallpassState(fail_desired=True, services=[service("a", [subject("r1", "Steve", "allowed", 1)])])

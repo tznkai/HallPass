@@ -84,7 +84,7 @@ the provider preview for the enrolled user showed:
 - `sub` equal to the user's bare `uuid` (8-4-4-4-12 hex, no prefix or hash);
 - a `hallpass_enrollment` claim with the enrolment value.
 
-The Fluxer `email` mapping is checked with the Fluxer SSO run (hallmonitor `docs/service-notes.md`).
+The Fluxer `email` mapping is checked with the Fluxer SSO run (HallMonitor `docs/service-notes.md`).
 
 ## token_lifetime
 
@@ -93,17 +93,17 @@ but does not apply while `expiring` is false.
 
 ## Phase 2 sign-in
 
-Hallpass ran against the test Authentik at `<hallpass>` behind the reverse proxy, with the strict redirect URI
-`<hallpass>/auth/callback` on the hallpass OIDC provider.
+HallPass Console ran against the test Authentik at `<hallpass>` behind the reverse proxy, with the strict redirect URI
+`<hallpass>/auth/callback` on the Console OIDC provider.
 
 - **Admin bootstrap:** signing in as the Authentik admin, whose `sub` is listed in `HALLPASS_ADMIN_SUBS`, made that
-  person the hallpass admin.
+  person the Console admin.
 - **Invite:** the admin created a child with no email. The page showed an invite URL of the form
   `<authentik>/if/flow/<flow-slug>/?itoken=<pk>`.
 - **Enrolment:** in a private window, the invite URL led through username and password to a new Authentik
   account. The flow then ended on Authentik's own application library (`<authentik>/if/user/#library`), not on
-  hallpass, because the invite URL carries no `next`.
-- **First sign-in and binding:** opening `<hallpass>/` in the same window signed the child in to hallpass. The
+  the Console, because the invite URL carries no `next`.
+- **First sign-in and binding:** opening `<hallpass>/` in the same window signed the child in to the Console. The
   admin's people page then showed the child's username, so the enrolment value bound the record to the account.
 - **Single use:** opening the invite URL a second time was refused.
 
@@ -128,26 +128,26 @@ research wrong on retries. Each item says what the live run showed.
 
 - **End-session redirect.** The discovery document's `end_session_endpoint` takes `id_token_hint` and
   `post_logout_redirect_uri`. `post_logout_redirect_uri` needs the hint, and it must match a redirect URI of type
-  Logout. Confirmed (H1): a sign-out at hallpass returns the browser to `<public_url>/signed-out`.
+  Logout. Confirmed (H1): a sign-out at the Console returns the browser to `<public_url>/signed-out`.
 - **Invalidation flow.** The end-session request runs the provider's invalidation flow, and that ends the Authentik
   session only when the flow has a User Logout stage. Confirmed (H1, on `default-invalidation-flow`): after the
-  sign-out, a visit to hallpass asks for sign-in again and Authentik asks for the password.
+  sign-out, a visit to the Console asks for sign-in again and Authentik asks for the password.
 - **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends a logout token to the Logout
-  URI, and hallpass ends that session on the next request. For that sign-out the worker log showed one send task and the
-  hallpass access log one `POST /auth/backchannel-logout` (200).
+  URI, and the Console ends that session on the next request. For that sign-out the worker log showed one send task and
+  the Console access log one `POST /auth/backchannel-logout` (200).
 - **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory, Users,
   the user's Sessions tab) sends logout tokens, and both of that person's browsers had to sign in again. Not shown: one
   token per session. The log count of `outcome=ok` lines was not taken.
-- **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their hallpass session on the next
+- **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their Console session on the next
   page. The run did not show whether the token carried a `sid` or the subject alone.
-- **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed hallpass's checks (`outcome=ok`), so the `iss`
+- **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed the Console's checks (`outcome=ok`), so the `iss`
   matched the discovery `issuer`, the `kid` was in the `jwks_uri` document, and the token was signed RS256.
 - **`sid` match.** Shown (H2): a logout token ended the session it named. Shown (H1): another person's session in a
-  second browser stayed signed in after a sign-out at hallpass; whether a logout token arrived in H1 was not recorded.
-  Not shown directly: that the token carried a `sid`, or that the `sid` matched the one in that session's ID token. The
-  run cannot tell a sid token from a subject-only token, because the surviving session belonged to another person. What
-  would show it: a `revoked_session` row holding that session's `sid` after the logout, or a second session of the same
-  person surviving a logout token that named only one session.
+  second browser stayed signed in after a sign-out at the Console; whether a logout token arrived in H1 was not
+  recorded. Not shown directly: that the token carried a `sid`, or that the `sid` matched the one in that session's ID
+  token. The run cannot tell a sid token from a subject-only token, because the surviving session belonged to another
+  person. What would show it: a `revoked_session` row holding that session's `sid` after the logout, or a second session
+  of the same person surviving a logout token that named only one session.
 - **Cookie size.** Seen (every sign-in in Part H): sign-in did not loop. The cookie size was not measured. By design the
   cookie holds a handle to the ID token kept on the server, not the token.
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
@@ -155,14 +155,14 @@ research wrong on retries. Each item says what the live run showed.
   provider default).
 - **Retry after a failed delivery.** Wrong in the research (H6): Authentik retried a delivery that failed with 404. With
   a wrong Logout URI answering 404, the worker log showed the send task failing and being queued again several times,
-  about 30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`)
-  and the session ended on the next request. Observed: a 404 was retried, more than once. Inferred, not observed: a 400
-  from hallpass is retried the same way, since Authentik's task raises on any non-2xx response. Not observed: how many
-  retries there are, how long they continue, and whether a retry resends the same token or a rebuilt one. That last
-  point matters. A resent token can lapse at `exp`, after which the `exp` + 60 s check in `logout.py` refuses it. A
-  rebuilt token carries a later `iat`, which weakens the guarantee at `revocation.py:40` only if the person signs in
-  again within the retry period.
+  about 30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached the Console
+  (`outcome=ok`) and the session ended on the next request. Observed: a 404 was retried, more than once. Inferred, not
+  observed: a 400 from the Console is retried the same way, since Authentik's task raises on any non-2xx response. Not
+  observed: how many retries there are, how long they continue, and whether a retry resends the same token or a rebuilt
+  one. That last point matters. A resent token can lapse at `exp`, after which the `exp` + 60 s check in `logout.py`
+  refuses it. A rebuilt token carries a later `iat`, which weakens the guarantee at `revocation.py:40` only if the
+  person signs in again within the retry period.
 - **Logout URI typo.** Seen live (H3, first attempt): the post-logout redirect URI `/signed-out` was entered as the
   Logout URI, with a trailing full stop (`<public_url>/signed-out.`). The worker's `POST /signed-out.` was answered 404,
   and nothing was revoked until the Logout URI was corrected to `/auth/backchannel-logout`. Copy the URI exactly; the
-  hallpass access log shows the worker's `POST` and the path it used.
+  the Console access log shows the worker's `POST` and the path it used.

@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The hallmonitor database: one serialised SQLite connection, safe startup (quarantine, refusal, backup) and migrations.
+"""The HallMonitor database: one serialised SQLite connection, safe startup (quarantine, refusal, backup)
+and migrations.
 
-Copied from hallpass's db.py. The copy resolves migrations from the hallmonitor package.
+Copied from the Console's db.py. The copy resolves migrations from the hallmonitor package.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from hallmonitor.logs import log_event
 log = logging.getLogger(__name__)
 _MIGRATION = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 SIDE_FILES = ("-wal", "-shm", "-journal")
-# How long a connection waits for another connection's write lock before hallmonitor refuses (db_unavailable).
+# How long a connection waits for another connection's write lock before HallMonitor refuses (db_unavailable).
 BUSY_TIMEOUT_SECONDS = 5.0
 
 

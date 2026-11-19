@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Hallpass holds no service credentials and logs no personal data.
+"""HallPass Console holds no service credentials and logs no personal data.
 
 Structural guards read the config fields, the .env template and the migration columns. The behavioural guard runs a
 full flow with a logging handler that has no redaction filter, so nothing is hidden by a backstop: the log text must

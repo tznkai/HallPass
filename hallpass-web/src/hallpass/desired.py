@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Desired state for hallmonitor: each monitored (service, subject) pair with its desired value and generation.
+"""Desired state for HallMonitor: each monitored (service, subject) pair with its desired value and generation.
 
 `refresh` recomputes `access.evaluate` for every subject of every monitored service and stores the result. A
 shared identity (several people hold it on one service) is paused while any holder is suspended, and is then
@@ -81,7 +81,7 @@ def _store_generation(conn: sqlite3.Connection, *, person_id: int, service_id: i
 
 
 def monitored_services(conn: sqlite3.Connection) -> list[Service]:
-    """The non-retired services hallmonitor reconciles, ordered by slug."""
+    """The non-retired services HallMonitor reconciles, ordered by slug."""
     return sorted((service for service in services.list_services(conn) if service.kind in MONITORED_KINDS),
                   key=lambda service: service.slug)
 
@@ -130,7 +130,7 @@ def _evaluated_subjects(conn: sqlite3.Connection, service: Service) -> list[_Sub
 
 def _shared_holders(subjects: list[_Subject]) -> dict[tuple[str, str], list[_Subject]]:
     """Each identity that two or more subjects hold on the service, keyed by (kind, identity_key). The SSO subject is
-    the hallmonitor record of one person's account, never shared, so it is left out."""
+    the HallMonitor record of one person's account, never shared, so it is left out."""
     holders: dict[tuple[str, str], list[_Subject]] = {}
     for subject in subjects:
         for kind, value in subject.identities:
@@ -145,8 +145,8 @@ def _paused_keys(shared: dict[tuple[str, str], list[_Subject]]) -> set[tuple[str
 
 
 def _sent_identities(subject: _Subject, paused: set[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
-    """The identities hallmonitor is sent for a subject. A paused identity is kept only on a suspended subject, so that
-    hallmonitor removes it there. An allowed subject never gets it, so hallmonitor never adds it back."""
+    """The identities HallMonitor is sent for a subject. A paused identity is kept only on a suspended subject, so that
+    HallMonitor removes it there. An allowed subject never gets it, so HallMonitor never adds it back."""
     return tuple((kind, value) for kind, value in subject.identities
                  if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"
                  or (kind, registry.identity_key(kind, value)) not in paused)
@@ -191,7 +191,7 @@ def refresh_with_pauses(conn: sqlite3.Connection, now: datetime) -> tuple[list[D
     no longer belong (see `_prune`). Returns the rows ordered by service slug, then person id, and the shared pauses
     keyed by (service id, person id), so a page can show them without evaluating the services again.
 
-    A subject whose identities are all paused (see `_sent_identities`) is not a subject for this round: hallmonitor is
+    A subject whose identities are all paused (see `_sent_identities`) is not a subject for this round: HallMonitor is
     not sent it, so it gets no report, and its desired row is marked not sent. A later restore sends it again above its
     old generation.
 
@@ -242,7 +242,7 @@ def report_for(conn: sqlite3.Connection, person_id: int, service_id: int) -> Rep
 
 def report_status(desired_row: tuple[str, int] | None, found: Report | None, manual_mark: bool) -> str | None:
     """The status text a row shows next to its access status. The first rule that applies wins. None for a service that
-    hallmonitor does not monitor, which is one with no desired row."""
+    HallMonitor does not monitor, which is one with no desired row."""
     if desired_row is None:
         return None
     desired_value, desired_generation = desired_row
@@ -253,7 +253,7 @@ def report_status(desired_row: tuple[str, int] | None, found: Report | None, man
     if found.observed == "unsupported":
         return text.MANUALLY_SUSPENDED if manual_mark else text.CANNOT_AUTO_SUSPEND
     if found.observed == "error":
-        # no_adapter means hallmonitor has no settings for the service, not that a call to it failed.
+        # no_adapter means HallMonitor has no settings for the service, not that a call to it failed.
         return text.NOT_CONFIGURED if found.detail == "no_adapter" else text.SERVICE_ERROR
     if found.generation < desired_generation or found.observed != desired_value:
         return text.NOT_YET_CONFIRMED
@@ -263,7 +263,7 @@ def report_status(desired_row: tuple[str, int] | None, found: Report | None, man
 
 
 def monitor_health(conn: sqlite3.Connection, now: datetime) -> dict:
-    """What the administrator's monitor page shows: the last contact from hallmonitor, the services with a report in
+    """What the administrator's monitor page shows: the last contact from HallMonitor, the services with a report in
     error (with how many people), and the unmanaged entries per service. It refreshes first, so the page never counts
     a pair that is no longer a subject. The counts also join on the live pairs and on the monitored services, so a
     stale report cannot be counted even if a refresh did not prune it."""

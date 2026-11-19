@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Page rendering and the exception handlers that turn hallpass errors into pages or redirects."""
+"""Page rendering and the exception handlers that turn HallPass Console errors into pages or redirects."""
 
 from __future__ import annotations
 

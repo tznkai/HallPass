@@ -9,7 +9,7 @@ working if crossplay is turned on later. Prefixes are exact (case included), so 
 Comments (`//`) and blank lines are never entries. Every other line is kept byte for byte. A leading byte-order mark
 is ignored when a line is classified, and it stays where it is in the file.
 
-Hallmonitor never writes the ban list. `bannedlist.txt` is read only, when it is configured, and an id it names is
+HallMonitor never writes the ban list. `bannedlist.txt` is read only, when it is configured, and an id it names is
 `banned_external`, which is never added or removed. Removing the last entry would open the server to anyone, so a
 suspension that would leave no entry writes nothing.
 
@@ -46,8 +46,8 @@ V_PREFIX = "V_"
 ID_PREFIXES = (STEAM_PREFIX, V_PREFIX)  # the prefixed forms a line may take, besides the bare digits
 WRITE_PREFIX = V_PREFIX                 # the form a restore writes
 BOM = "\ufeff"         # the UTF-8 byte-order mark; str.strip does not remove it, so it is removed before a line is read
-OWN_ADD = "add"        # an own record: hallmonitor added the id's line, so a restart must pass before it takes effect
-OWN_REMOVE = "remove"  # an own record: hallmonitor removed the id's line, likewise
+OWN_ADD = "add"        # an own record: HallMonitor added the id's line, so a restart must pass before it takes effect
+OWN_REMOVE = "remove"  # an own record: HallMonitor removed the id's line, likewise
 PENDING = "pending_restart"
 REQUIRED_SETTINGS = ("ptero_url", "ptero_key", "ptero_server", "permittedlist_path")
 LIVE_RELOAD_VALUES = ("true", "false")

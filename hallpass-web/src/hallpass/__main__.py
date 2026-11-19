@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The hallpass process: `python -m hallpass`.
+"""The HallPass Console process: `python -m hallpass`.
 
 Exit codes:
 - 0: stopped on SIGINT or SIGTERM, after both listeners and the database have closed.

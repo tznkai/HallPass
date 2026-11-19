@@ -6,9 +6,9 @@ from `banned_user.cfg` through Pterodactyl. No RCON port is needed.
 A suspension is `banid 0 <id>`, `kickid <id>` and `writeid`, sent through the Pterodactyl Client API's command route. A
 lift is `removeid <id>` and `writeid`. The console holds its ban list in memory, and `writeid` is the only command that
 writes the file, one `banid 0 <id>` line per ban. The server reads that file at startup only when server.cfg runs
-`exec banned_user.cfg`. Hallmonitor never writes the file itself. It reads the file back to see what the server holds.
+`exec banned_user.cfg`. HallMonitor never writes the file itself. It reads the file back to see what the server holds.
 
-A ban is ours only when hallmonitor recorded it in `own_suspension`. A listed ban with no such record is
+A ban is ours only when HallMonitor recorded it in `own_suspension`. A listed ban with no such record is
 `banned_external`, and nothing lifts it. A record for an id the file does not show is kept for the grace window, since
 the file may lag the console, and is forgotten after it.
 

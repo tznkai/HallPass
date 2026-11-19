@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Review guide
 
-This is the review guide for hallmonitor. Each `##` topic lists the spots a reviewer should read first, as
+This is the review guide for HallMonitor. Each `##` topic lists the spots a reviewer should read first, as
 references to code. Each reference is written as ``- `path:line` `anchor` — reason``: the path and line
 point at the code, the anchor is text that must appear on that line, and the reason says why the spot
 matters. `tests/test_review_refs.py` checks every reference, so anchors must be updated in the same change
@@ -13,18 +13,18 @@ as the code they cite.
 
 ## Project layout
 
-- `src/hallmonitor/__init__.py:3` `"""Hallmonitor:` — the package docstring names the project's role
+- `src/hallmonitor/__init__.py:3` `"""HallMonitor:` — the package docstring names the project's role
 
 ## Reconcile decisions
 
-- `src/hallmonitor/reconcile.py:80` `if observed.state in NEVER_APPLIED` — the branch that never applies: an observation of `unsupported`, `banned_external` or `error` is reported as it is, so a ban that hallmonitor did not place is never lifted
+- `src/hallmonitor/reconcile.py:80` `if observed.state in NEVER_APPLIED` — the branch that never applies: an observation of `unsupported`, `banned_external` or `error` is reported as it is, so a ban that HallMonitor did not place is never lifted
 - `src/hallmonitor/reconcile.py:83` `result = await adapter.apply(subject, subject.desired)` — the only apply call in a cycle, reached only when the observation differs from the desired value
 - `src/hallmonitor/reconcile.py:105` `if blocked is not None and _needs_apply(one, subject):` — after an apply fails with a service-wide reason (`auth`, `timeout` or `unreachable`), the service's remaining applies are reported with that reason and never called
 - `src/hallmonitor/adapters/fluxer.py:160` `if error.reason in SERVICE_WIDE_REASONS` — the per-subject containment in Fluxer's observe: an account's `http` or `unexpected` failure is that subject's error, and only `auth` or `unreachable` fail every Fluxer subject
 
 ## Fluxer never bans
 
-- `src/hallmonitor/adapters/fluxer.py:146` `return Observed("banned_external")` — a disabled Fluxer account is reported and left alone whatever the desired value, because hallmonitor places no bans and lifts none
+- `src/hallmonitor/adapters/fluxer.py:146` `return Observed("banned_external")` — a disabled Fluxer account is reported and left alone whatever the desired value, because HallMonitor places no bans and lifts none
 - `src/hallmonitor/adapters/fluxer.py:170` `response = await self._send("DELETE"` — the adapter's only mutating call: it ends the person's sessions, and no ban, enforcement or flags route is ever reached
 
 ## Adapter registry
@@ -98,7 +98,7 @@ bans both. This is pre-existing, and the whitelist state is shared the same way.
 
 - `src/hallmonitor/adapters/palworld.py:95` `own.own_ref(c, self._slug, steam_id)` — the ownership lookup for a Palworld ban: a ban counts as ours only when its steam id has an own record
 - `src/hallmonitor/adapters/palworld.py:139` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — a listed Palworld ban without an own record is `banned_external`, so the reconcile loop never applies to it
-- `src/hallmonitor/adapters/palworld.py:159` `if not await self._owned(steam_id):` — the unban gate: a restore sends no unban unless hallmonitor recorded the ban, so a moderator's ban is never lifted
+- `src/hallmonitor/adapters/palworld.py:159` `if not await self._owned(steam_id):` — the unban gate: a restore sends no unban unless HallMonitor recorded the ban, so a moderator's ban is never lifted
 - `src/hallmonitor/adapters/palworld.py:164` `if _userid(steam_id) in set(await self._ban_entries()):` — a restore with no own record re-reads the list and reports allowed only when the id is unlisted; nothing is sent
 - `src/hallmonitor/adapters/source_rcon.py:134` `return Observed("suspended") if await self._owned(steam_id) else Observed("banned_external")` — the re-check before a Source ban: a moderator ban that appeared after observe is never taken over, because apply reads the list before it runs `banid`
 - `src/hallmonitor/adapters/source_rcon.py:147` `if not await self._owned(steam_id):` — the removeid gate: a restore runs no `removeid` unless the ban is recorded as ours
@@ -151,7 +151,7 @@ one write with only a local database call between them, and the race is accepted
 - `src/hallmonitor/adapters/source_panel.py:109` `return Observed("suspended") if record is not None else Observed("banned_external")` — a listed Source ban without an own record is `banned_external`, so the reconcile loop never applies to it
 - `src/hallmonitor/adapters/source_panel.py:124` `if sid in await self._listed():` — the re-read before a Source ban: a moderator's ban that appeared after observe is never taken over
 - `src/hallmonitor/adapters/source_panel.py:128` `await self._db.run(lambda c: own.record_own(c, self._slug, steam_id, OWN_BAN, now))` — the record is placed before the first console command, so a ban the adapter sends is always recorded as ours
-- `src/hallmonitor/adapters/source_panel.py:144` `if not await self._owned(steam_id):` — the never-lift rule: a restore sends no `removeid` and no `writeid` unless hallmonitor recorded the ban
+- `src/hallmonitor/adapters/source_panel.py:144` `if not await self._owned(steam_id):` — the never-lift rule: a restore sends no `removeid` and no `writeid` unless HallMonitor recorded the ban
 - `src/hallmonitor/adapters/source_panel.py:147` `if sid in await self._listed() else Observed("allowed")` — a restore with no own record re-reads the list and reports allowed only when the id is unlisted; nothing is sent
 - `src/hallmonitor/adapters/source_panel.py:112` `if own.within_grace(record[1], now, self._grace):` — the file-lag window: an own record the file does not show yet is `suspended` inside the grace window, and forgotten after it
 - `src/hallmonitor/adapters/source_panel.py:132` `await self._forget(steam_id)   # banid was refused, so no ban was placed and no record is kept for it` — the forget is only for a refused `banid`: once `banid` is accepted the record is kept, so a ban the console holds keeps its record at least until the grace window ends (see the accepted costs above)

@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The reconcile loop. Each cycle reads hallpass's desired state, asks each adapter what it observes, applies the
+"""The reconcile loop. Each cycle reads the Console's desired state, asks each adapter what it observes, applies the
 differences that may be applied, and posts one report per subject with the generation it acted on.
 
 The decision table lives in `_decide`: an observation that is `unsupported`, `banned_external` or `error` is reported
-as it is and never applied. A ban that hallmonitor did not place is never lifted.
+as it is and never applied. A ban that HallMonitor did not place is never lifted.
 """
 
 from __future__ import annotations

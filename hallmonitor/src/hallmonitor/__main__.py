@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The hallmonitor process: `python -m hallmonitor`. Exit 2 for a bad environment, 3 for a refused database."""
+"""The HallMonitor process: `python -m hallmonitor`. Exit 2 for a bad environment, 3 for a refused database."""
 
 from __future__ import annotations
 

@@ -3,16 +3,16 @@ SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# Hallmonitor
+# HallMonitor
 
-Last verified: 2026-11-18
+Last verified: 2026-11-19
 
 ## Purpose
 
-Hallmonitor reconciles service access with hallpass. It reads hallpass's desired state and applies it to Fluxer
-and to the game servers, so that each service matches the decisions hallpass holds. It has no inbound ports and
-makes outbound calls only. It holds the service credentials, the admin keys for each service. Hallpass is the
-sibling project in this monorepo, and hallmonitor never imports it.
+HallMonitor reconciles service access with the HallPass Console. It reads the Console's desired state and applies it
+to Fluxer and to the game servers, so that each service matches the decisions the Console holds. It has no inbound
+ports and makes outbound calls only. It holds the service credentials, the admin keys for each service. HallPass
+Console is the sibling project in this monorepo, and HallMonitor never imports it.
 
 ## Checks
 
@@ -29,9 +29,9 @@ CI runs exactly these three checks.
 
 - No imports from sibling projects. `tests/test_repo_hygiene.py` enforces this for `fluxer_panel`,
   `fluxer_client`, the source bot and `hallpass`.
-- Hallmonitor holds no names, contacts or parent links. Hallpass sends it only identifiers and access decisions
+- HallMonitor holds no names, contacts or parent links. HallPass Console sends it only identifiers and access decisions
   that a service needs.
-- Hallpass holds no service credentials. Hallmonitor is where they live.
+- HallPass Console holds no service credentials. HallMonitor is where they live.
 - Monitor API types are duplicated, never shared. Each project keeps its own copy of any type that crosses the
   boundary.
 
@@ -39,7 +39,7 @@ CI runs exactly these three checks.
 
 `python -m hallmonitor` runs the reconcile loop (`src/hallmonitor/reconcile.py`). Exit 2 for a bad environment, 3
 for a refused database. Each cycle fetches desired state, observes each service, applies only where the observation
-differs from the desired value, and posts reports back. Migrations in `src/hallmonitor/migrations/` follow hallpass's
+differs from the desired value, and posts reports back. Migrations in `src/hallmonitor/migrations/` follow the Console's
 rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 
 ## Adapters
@@ -53,13 +53,13 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
   `unsupported`, `banned_external`, `error`. The loop never applies to `unsupported`, `banned_external` or `error`.
 - A failure with a service-wide reason (`auth`, `timeout`, `unreachable`) stops that service's remaining applies; any
   other failure stays with its subject.
-- **Ban ownership.** Hallmonitor lifts only bans it placed. Every ban it places is recorded in `own.py`
+- **Ban ownership.** HallMonitor lifts only bans it placed. Every ban it places is recorded in `own.py`
   (`own_suspension`); a listed ban with no own record is `banned_external`, and restore never unbans or `removeid`s
   without that record. A Minecraft subject with several names is `banned_external` only when every name is banned;
   otherwise it carries the detail `partly_banned`, and apply touches only the unbanned names, never pardoning a banned
   one. Valheim is the exception: it never writes the ban list, and its own records only time its restart rule. They do
-  not decide ownership, because the permitted list is hallpass's to control, like the Minecraft whitelist. Fluxer places
-  and lifts no bans at all: its only mutation is ending sessions, and a disabled account is `banned_external`.
+  not decide ownership, because the permitted list is the Console's to control, like the Minecraft whitelist. Fluxer
+  places and lifts no bans at all: its only mutation is ending sessions, and a disabled account is `banned_external`.
 - **Identity allowlists.** Every identity passes an allowlist before any command or file line is built from it:
   Minecraft Java/Bedrock name patterns and the Floodgate prefix set, and a canonical SteamID64 (`adapters/steam.py`)
   for Palworld, Valheim and Source. An unsafe value is `bad_identity`. Never widen these without a live check.
@@ -69,10 +69,10 @@ rule: contiguous `NNNN_*.sql` versions, add a file and never edit a shipped one.
 
 ## Monitor API contract
 
-`tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example
-of the monitor API bodies. It is byte-identical in hallmonitor and hallpass. A change to it must land in both projects
+`tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example of
+the monitor API bodies. It is byte-identical in HallMonitor and the Console. A change to it must land in both projects
 in the same commit, together with the matching change to each project's wire types, so the two copies never drift.
-`tests/test_contract.py` reads it here, and hallpass's `tests/test_monitor_api.py` reads its copy.
+`tests/test_contract.py` reads it here, and the Console's `tests/test_monitor_api.py` reads its copy.
 
 ## Logging
 
@@ -82,12 +82,12 @@ URLs, tokens or message content.
 ## Secrets and publication
 
 - Never read or print any `.env` file. `.env.example` is the only tracked env file.
-- This directory is published by `git subtree split`, so tracked files hold no secrets, ids, hostnames, IPs or
-  instance details. Test fixtures use fake values (`"1001"`, `"https://fluxer.invalid"`), and a SteamID64 is
-  built at runtime from parts.
+- This directory is published as part of the single HallPass repo, built with `git filter-repo`, where `hallmonitor/`
+  keeps its name. Tracked files hold no secrets, ids, hostnames, IPs or instance details. Test fixtures use fake
+  values (`"1001"`, `"https://fluxer.invalid"`), and a SteamID64 is built at runtime from parts.
 - The private denylist is `docs/private/hallmonitor/denylist.txt` in the main checkout. It is gitignored and absent
-  in the published split, so the check skips there. Denylist findings name the path and line only.
-- Private material lives in the main checkout's `docs/private/`, in two places. Hallmonitor's own material (its
+  in the published repo, so the check skips there. Denylist findings name the path and line only.
+- Private material lives in the main checkout's `docs/private/`, in two places. HallMonitor's own material (its
   denylist, and its service-key environment notes) lives in `docs/private/hallmonitor/`. Shared deployment notes,
   including the Fluxer SSO setup, live in `docs/private/hallpass/`. Never copy either into this directory.
 

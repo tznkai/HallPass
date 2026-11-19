@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""JSON-lines logging: an event-name allowlist for hallpass code and a token-redaction backstop."""
+"""JSON-lines logging: an event-name allowlist for HallPass Console code and a token-redaction backstop."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ID_KEYS = frozenset({"person_id", "child_id", "parent_id", "actor_id", "group_id
                      "outbox_id", "terms_version"})
 OTHER_KEYS = frozenset({"outcome", "reason", "status", "kind", "mode", "service", "count", "attempt", "generation",
                         "http_status", "action", "code"})   # code: a SQLite error name, as db_unavailable logs it
-# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and hallpass never logs URLs.
+# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and the Console logs no URLs.
 PINNED_LOGGERS = ("httpx", "httpcore")
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")   # str values of OTHER_KEYS must look like identifiers
 _ID = re.compile(r"[0-9]{1,25}")                      # row ids and other numeric ids, as text
@@ -47,7 +47,7 @@ def clean_fields(fields: Mapping[str, object]) -> dict[str, object]:
 
 
 def log_event(logger: logging.Logger, name: str, *, level: int = logging.INFO, **fields: object) -> None:
-    """The only way hallpass code logs: an event name plus allowlisted fields."""
+    """The only way HallPass Console code logs: an event name plus allowlisted fields."""
     logger.log(level, "%s", name, extra={FIELDS_ATTR: clean_fields(fields)})
 
 
