@@ -399,6 +399,93 @@ async def test_strict_refuses_a_parent_lifting_another_parents_hold(db: Database
     assert await hold_kinds(w, w.child, w.fluxer) == ["parent"]
 
 
+# Unlinked parent: holds become administrator holds ----------------------------------------------------
+
+async def unlink_and_convert(w: World, parent_id: int, *, at: datetime = NOW) -> list[int]:
+    """The admin's unlink as the route runs it: the link goes and the former parent's holds convert, together."""
+    def change(conn) -> list[int]:
+        registry.unlink_parent(conn, w.child, parent_id)
+        return holds.convert_unlinked_parent_holds(conn, child_id=w.child, parent_id=parent_id, admin_id=w.admin,
+                                                   now=at)
+    return await w.db.run(change)
+
+
+async def test_unlinking_a_parent_turns_their_hold_into_an_administrator_hold(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer], reason="bedtime")
+    placed = (await hold_rows(w, w.child, w.fluxer))[0]
+    converted = await unlink_and_convert(w, w.ann, at=NOW + timedelta(hours=1))
+    assert converted == [w.fluxer]
+    (hold,) = await hold_rows(w, w.child, w.fluxer)
+    assert (hold.kind, hold.placed_by, hold.placed_at, hold.reason) == ("admin", w.admin, placed.placed_at, "bedtime")
+    rows = await w.db.run(lambda c: c.execute(
+        "SELECT actor_kind, services FROM decision_log WHERE action = 'holds_converted'").fetchall())
+    assert rows == [("admin", json.dumps([w.fluxer]))]
+
+
+async def test_the_child_stays_held_after_the_conversion(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer])
+    await unlink_and_convert(w, w.ann)
+    decision = await w.db.run(lambda c: access.evaluate(c, registry.get_person(c, w.child),
+                                                        services.get(c, w.fluxer)))
+    assert decision.desired == "suspended"
+    assert "held" in decision.reasons
+
+
+async def test_the_remaining_parents_hold_is_not_converted(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer])
+    await place(w, parent(w.ben), w.child, [w.abiotic])
+    await unlink_and_convert(w, w.ann)
+    assert await hold_kinds(w, w.child, w.fluxer) == ["admin"]
+    assert await hold_kinds(w, w.child, w.abiotic) == ["parent"]
+
+
+async def test_an_administrator_hold_already_on_the_service_absorbs_the_former_parents_hold(db: Database) -> None:
+    w = await build(db)
+    await place(w, admin(w), w.child, [w.fluxer])
+    await place(w, parent(w.ann), w.child, [w.fluxer])
+    assert await unlink_and_convert(w, w.ann) == [w.fluxer]
+    assert await hold_kinds(w, w.child, w.fluxer) == ["admin"]
+
+
+async def test_unlinking_a_parent_with_no_hold_converts_nothing_and_logs_nothing(db: Database) -> None:
+    w = await build(db)
+    assert await unlink_and_convert(w, w.ann) == []
+    assert await w.db.run(lambda c: c.execute(
+        "SELECT COUNT(*) FROM decision_log WHERE action = 'holds_converted'").fetchone()[0]) == 0
+
+
+async def test_a_former_parents_actions_no_longer_count_toward_conflict_history(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer], at=NOW - timedelta(hours=2))
+    await unlink_and_convert(w, w.ann, at=NOW - timedelta(hours=1))
+    assert await w.db.run(lambda c: holds._history(c, w.child)) == []
+    await place(w, parent(w.ben), w.child, [w.abiotic], at=NOW)
+    assert [entry.actor_id for entry in await w.db.run(lambda c: holds._history(c, w.child))] == [w.ben]
+
+
+async def test_the_former_parent_is_not_named_on_the_child_hold_labels(db: Database) -> None:
+    w = await build(db)
+    await place(w, parent(w.ann), w.child, [w.fluxer])
+    await unlink_and_convert(w, w.ann)
+    assert await w.db.run(lambda c: holds.hold_labels(c, w.child, w.fluxer)) == [text.ACTOR_ADMIN]
+
+
+async def test_strict_mode_refuses_the_remaining_parent_with_the_administrator_text_and_no_former_name(
+        db: Database) -> None:
+    w = await build(db, mode="strict")
+    await place(w, parent(w.ann), w.child, [w.fluxer])
+    await unlink_and_convert(w, w.ann)
+    with pytest.raises(holds.HoldRefused) as refused:
+        await lift(w, parent(w.ben), w.child, [w.fluxer])
+    assert refused.value.reason == "admin_or_lockdown"
+    assert refused.value.message == text.LOCKDOWN_ADMIN_ONLY
+    assert "Ann" not in refused.value.message
+    assert await hold_kinds(w, w.child, w.fluxer) == ["admin"]
+
+
 # AC7.8 lockdown and review -----------------------------------------------------------------------------
 
 async def lock_child(w: World) -> int:

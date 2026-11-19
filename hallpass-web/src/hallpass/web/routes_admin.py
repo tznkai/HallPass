@@ -362,10 +362,13 @@ async def remove_parent(request: Request, child_id: int, parent_id: int, admin: 
 
     def change(conn) -> None:
         _ensure_people(conn, child_id, parent_id)
-        # Log only a link that existed, so a repeated or stale form records no change that did not happen.
+        # Log only a link that existed, so a repeated or stale form records no change that did not happen. The
+        # parent's holds on the child become administrator holds in the same transaction: the child stays held.
         if registry.unlink_parent(conn, child_id, parent_id) == 1:
             _log(conn, now=now, admin=admin, action="parent_unlinked", target=child_id,
                  detail={"parent_id": parent_id})
+            holds.convert_unlinked_parent_holds(conn, child_id=child_id, parent_id=parent_id, admin_id=admin.id,
+                                                now=now)
 
     await deps.db.run(change)
     await _sync_affected(deps, child_id)

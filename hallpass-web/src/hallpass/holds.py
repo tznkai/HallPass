@@ -122,6 +122,7 @@ def _history(conn: sqlite3.Connection, child_id: int) -> list[conflict.Entry]:
     """The parents' place and lift actions on this child since the child's last resolved review, for
     conflict.evaluate. A resolution is a fresh start: actions logged at or before its decision_log row are not history.
     The cut-off is the row id, not the timestamp, so actions logged in the same second are ordered correctly.
+    Only parents linked to the child now count: a parent the administrator unlinked has no history here.
     Newest id first: evaluate sorts stably, so the newest action is found as the previous action."""
     cutoff = conn.execute(
         "SELECT COALESCE(MAX(id), 0) FROM decision_log WHERE target_person_id = ? AND action = 'review_resolved'",
@@ -130,8 +131,8 @@ def _history(conn: sqlite3.Connection, child_id: int) -> list[conflict.Entry]:
     rows = conn.execute(
         "SELECT at, actor_person_id, action, services, reversal FROM decision_log "
         "WHERE target_person_id = ? AND actor_kind = 'parent' AND action IN ('hold_placed', 'hold_lifted') "
-        "AND id > ? ORDER BY id DESC",
-        (child_id, cutoff),
+        "AND id > ? AND actor_person_id IN (SELECT parent_id FROM parent_link WHERE child_id = ?) ORDER BY id DESC",
+        (child_id, cutoff, child_id),
     ).fetchall()
     return [
         conflict.Entry(at=datetime.fromisoformat(at), actor_id=actor_id,
@@ -629,3 +630,35 @@ def unmark_manual(conn: sqlite3.Connection, *, admin_id: int, person_id: int, se
     if removed:
         registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin_id,
                               target_person_id=person_id, action="manual_unmarked", services=[service_id])
+
+
+# Unlinked parents --------------------------------------------------------------------------------------
+
+def convert_unlinked_parent_holds(conn: sqlite3.Connection, *, child_id: int, parent_id: int, admin_id: int,
+                                  now: datetime) -> list[int]:
+    """Called in the same transaction as the administrator's removal of a parent link. Every parent hold that parent
+    placed on the child becomes an administrator hold: the service, placed_at and reason stay, and the administrator is
+    recorded as the placer. A service that already has an administrator hold keeps that one, so the parent hold is
+    dropped. The child stays held, and no parent name is left on the hold. Logs one `holds_converted` row whose services
+    are the converted service ids, sorted. Returns those ids, or nothing when the parent placed no hold."""
+    rows = conn.execute(
+        "SELECT id, service_id FROM hold WHERE person_id = ? AND kind = 'parent' AND placed_by = ? ORDER BY id",
+        (child_id, parent_id),
+    ).fetchall()
+    converted: list[int] = []
+    for hold_id, service_id in rows:
+        has_admin = conn.execute(
+            "SELECT 1 FROM hold WHERE person_id = ? AND service_id = ? AND kind = 'admin'",
+            (child_id, service_id),
+        ).fetchone() is not None
+        if has_admin:
+            conn.execute("DELETE FROM hold WHERE id = ?", (hold_id,))
+        else:
+            conn.execute("UPDATE hold SET kind = 'admin', placed_by = ? WHERE id = ?", (admin_id, hold_id))
+        converted.append(service_id)
+    if not converted:
+        return []
+    services_converted = sorted(set(converted))
+    registry.log_decision(conn, at=now, actor_kind="admin", actor_person_id=admin_id, target_person_id=child_id,
+                          action="holds_converted", services=services_converted)
+    return services_converted

@@ -82,6 +82,8 @@ URLs, tokens or message content.
 - Only grants by linked, unlocked parents count toward a child's approval.
 - An admin's type change moves the status in the same transaction: a person made a child waits for a parent's grant,
   and an awaiting child made an adult becomes active.
+- Unlinking a parent turns that parent's holds on the child into administrator holds in the same transaction,
+  so the child stays held and the former parent is no longer named or counted.
 
 ## Manual restores
 

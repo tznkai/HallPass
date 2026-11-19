@@ -8,12 +8,13 @@ Covers hallpass.AC1.1, AC1.4, AC1.6 (Authentik part), AC2.1 to AC2.7.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from markupsafe import escape
 
-from hallpass import registry, services, text
+from hallpass import holds, registry, services, text
 from tests.fake_authentik import InvitationUsed, add_user, enrol
 from tests.helpers import (
     ADMIN_SUB,
@@ -328,6 +329,27 @@ async def test_removing_with_an_unknown_id_is_not_found_and_logs_nothing(env: En
     after = await env.db.run(lambda c: c.execute("SELECT COUNT(*) FROM decision_log").fetchone()[0])
     assert after == before
     assert [p.id for p in await env.db.run(lambda c: registry.parents_of(c, child))] == [parent]
+
+
+async def test_unlinking_a_parent_leaves_their_hold_as_the_administrators_on_the_child_page(env: Env):
+    await admin_client(env)
+    child = await create_person(env, "Kid", account_type="child")
+    parent = await create_person(env, "Former Parent")
+    service = await make_service(env.db, "fluxer")
+    assert (await post(env, f"/admin/people/{child}/parents", parent_id=parent)).status_code == 303
+    await env.db.run(lambda c: registry.add_identity(c, child, "fluxer", "fluxer_user_id", "1001"))
+    moment = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+    await env.db.run(lambda c: holds.place(c, actor=holds.Actor("parent", parent), target_id=child, service_ids=None,
+                                           now=moment, window=timedelta(hours=24), admin_email=None))
+    assert "Suspended by Former Parent" in (await env.client.get(f"/admin/people/{child}")).text
+
+    assert (await post(env, f"/admin/people/{child}/parents/{parent}/remove")).status_code == 303
+
+    page = (await env.client.get(f"/admin/people/{child}")).text
+    assert f"Suspended by {text.ACTOR_ADMIN}" in page
+    assert "Suspended by Former Parent" not in page
+    kinds = await env.db.run(lambda c: [h.kind for h in holds.services_with_holds(c, child)[service.id]])
+    assert kinds == ["admin"]
 
 
 async def test_removing_a_link_or_membership_that_is_not_there_logs_nothing(env: Env):
