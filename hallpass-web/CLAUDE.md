@@ -46,7 +46,7 @@ environment, 3 database refused (quarantined or unreadable), 4 a listener failed
 too), 1 any other uncaught error. A second stop signal forces both listeners to exit.
 
 Migrations are `src/hallpass/migrations/NNNN_*.sql`, applied by `PRAGMA user_version`. Versions must be contiguous
-from 1 (startup raises otherwise); add a new file, never edit a shipped one.
+from 1 (startup raises otherwise); add a new file, never edit a shipped one. The set currently runs 0001 to 0011.
 
 ## Monitor API contract
 
@@ -63,6 +63,35 @@ in the same commit, together with the matching change to each project's wire typ
 
 Log only through `log_event`, with ids, event types and outcomes. Never log names, contacts, addresses, hosts,
 URLs, tokens or message content.
+
+## Sessions and sign-out
+
+- `POST /auth/backchannel-logout` is public and takes no session and no CSRF token: the signed logout token is the only
+  authority. Its body is capped at 16384 bytes, and every failure is a 400 that records nothing.
+- Every request checks `revocation.session_ended`: a session ends when its sid was revoked, when its person was revoked
+  after it started, or when it started more than `HALLPASS_SESSION_MAX_AGE_SECONDS` ago. Pages and forward auth both
+  check. A session with no start time (made before schema 10) ends at its first request, once.
+- Sign-out (`POST /logout`) records the sid locally, ends the session, and sends the browser to Authentik's
+  end-session endpoint, so the Authentik session ends too. A sign-in that starts at `/login` ends any session the
+  browser already holds.
+
+## Children and terms
+
+- A child never accepts the terms. A child is covered while a linked, unlocked parent has accepted the current terms,
+  and a child is never sent to `/terms`.
+- Only grants by linked, unlocked parents count toward a child's approval.
+- An admin's type change moves the status in the same transaction: a person made a child waits for a parent's grant,
+  and an awaiting child made an adult becomes active.
+
+## Manual restores
+
+- A service marked manually suspended keeps its mark as a pending restore when a parent's lift leaves it with no hold,
+  and the administrator is emailed once. The mark stays until the administrator unmarks it or a new hold lands.
+
+## Shared identities
+
+- An identity that two or more people hold on one service is paused while any holder is suspended. An allowed holder
+  is not sent it, and a suspended holder is sent it so hallmonitor removes it there. The SSO subject is never shared.
 
 ## Secrets and publication
 
