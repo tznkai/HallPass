@@ -119,7 +119,7 @@ placeholders such as `<mc-host>`.
   an allowance adds only it, reported with the detail `partly_banned`. The adapter reads the ban list again before it
   changes anything. This is covered by fake-server tests only.
 - **Partly banned live check (test plan D5): pending.** Not run yet. Record here, with the date, Pass or Fail, the
-  observed row (`suspended`, detail `partly banned`), that only the Java name left the whitelist and was kicked, and
+  observed row (`suspended`, detail `partly_banned`), that only the Java name left the whitelist and was kicked, and
   that the Bedrock name stayed banned, after the hold, the hand pardon and the lift.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
