@@ -486,7 +486,7 @@ async def test_a_person_with_two_steam_ids_already_stored_is_flagged_on_both_adm
         await env.db.run(lambda c, v=str(registry.STEAM64_BASE + offset): c.execute(
             "INSERT INTO external_identity (person_id, service_slug, kind, value) VALUES (?, 'steam', 'steam_id', ?)",
             (person_id, v)))
-    flag = text.SINGLE_IDENTITY_DUPLICATE_FLAG.format(kind="Steam ids", service="Steam")
+    flag = text.SINGLE_IDENTITY_DUPLICATE_FLAG.format(kind="Steam id", service="Steam")
     assert flag in (await env.client.get(f"/admin/people/{person_id}")).text
     assert flag in (await env.client.get("/admin/people")).text
 

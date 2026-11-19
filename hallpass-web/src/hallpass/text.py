@@ -28,7 +28,7 @@ SINGLE_IDENTITY_TAKEN = {
     "steam_id": "This person already has a Steam id on this service; remove it first.",
     "fluxer_user_id": "This person already has a Fluxer id on this service; remove it first.",
 }
-SINGLE_IDENTITY_KIND_NAMES = {"steam_id": "Steam ids", "fluxer_user_id": "Fluxer ids"}
+SINGLE_IDENTITY_KIND_NAMES = {"steam_id": "Steam id", "fluxer_user_id": "Fluxer id"}
 SINGLE_IDENTITY_DUPLICATE_FLAG = "This person has more than one {kind} on {service}; remove the extra ones."
 GROUP_TAKEN = "A group with that name already exists."
 ENTITLEMENT_DENY_NOT_PERSON = ("A deny applies only to one person. For an account type or a group, "
