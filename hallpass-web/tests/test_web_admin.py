@@ -488,6 +488,16 @@ async def test_a_child_with_no_address_is_flagged_on_the_people_page(env: Env):
     assert f"/admin/people/{child}" in page
 
 
+async def test_the_flag_names_both_causes_of_a_missing_address(env: Env):
+    """A child is flagged when no linked parent has an email, and also when the child has not enrolled yet, since a
+    parent's address is built from the child's username. The text covers both."""
+    await admin_client(env)
+    await create_person(env, "Not Yet Enrolled", account_type="child")
+    page = (await env.client.get("/admin/people")).text
+    assert "no linked parent has one" in page
+    assert "has not enrolled yet" in page
+
+
 # AC2.5: non-admins and anonymous visitors -------------------------------------------------------------
 
 def admin_routes(env: Env) -> list[tuple[str, str]]:
