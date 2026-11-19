@@ -27,14 +27,16 @@ as the code they cite.
 - `src/hallpass/auth.py:203` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:42` `def safe_next` — the only check on where a sign-in returns the person to, so it
   must refuse off-site URLs
-- `src/hallpass/auth.py:314` `revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid` — the check
-  every page makes: a session whose sid was revoked, or whose person was revoked after it started, is ended
-  here and the person is sent to sign-in
+- `src/hallpass/auth.py:315` `revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid` — the check
+  every page makes: a session whose sid was revoked, whose person was revoked after it started, or that started
+  more than the max age ago, is ended here and the person is sent to sign-in
+- `src/hallpass/web/routes_auth.py:71` `end_session(request)` — a sign-in that starts ends the session the browser
+  already holds, so a request to /login never renews an existing session's cookie
 - `src/hallpass/auth.py:223` `request.session["id_token_handle"] = handle` — the cookie holds only the handle of the ID token kept on the server, never the token, so it carries no name, username or groups
 
 ## Admin check
 
-- `src/hallpass/auth.py:342` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
+- `src/hallpass/auth.py:344` `async def require_admin` — the one gate for every admin page and action; it tests the Authentik sub against the configured admins
 
 ## Fluxer address
 
@@ -48,9 +50,9 @@ as the code they cite.
 
 - `src/hallpass/terms.py:100` `def services_blocked(state: TermsState) -> bool:` — the rule for when a person may use services: no version, no acceptance, or an unaccepted blocking version
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
-- `src/hallpass/auth.py:330` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
+- `src/hallpass/auth.py:332` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
 - `src/hallpass/terms.py:117` `return not any(` — a child is covered only by a linked, unlocked parent who passes the parent rule; a child's own acceptance is never read for the gate
-- `src/hallpass/web/routes_auth.py:104` `if person.account_type != "child" and not state.accepted_current:` — the sign-
+- `src/hallpass/web/routes_auth.py:105` `if person.account_type != "child" and not state.accepted_current:` — the sign-
   in redirect to /terms: a child is never sent there, and an adult or parent keeps the rule
 - `src/hallpass/web/routes_terms.py:49` `if person.account_type == "child":` — a child's POST to /terms/accept is refused with 403 before anything is written
 
@@ -77,10 +79,10 @@ as the code they cite.
 
 ## Forward auth
 
-- `src/hallpass/forward_auth.py:118` `if found.kind == "feed":` — the feed-token branch: the token is read from the forwarded URI, and the answer is 200 or 403, never a redirect
-- `src/hallpass/forward_auth.py:131` `status_code=302` — the no-session branch, which sends the person to sign-in and is the only redirect the endpoint returns
-- `src/hallpass/forward_auth.py:126` `if person_id is not None and await deps` — a revoked session gets the same
-  redirect as a missing one, and it is cleared, so forward auth never trusts an ended
+- `src/hallpass/forward_auth.py:120` `if found.kind == "feed":` — the feed-token branch: the token is read from the forwarded URI, and the answer is 200 or 403, never a redirect
+- `src/hallpass/forward_auth.py:135` `status_code=302` — the no-session branch, which sends the person to sign-in and is the only redirect the endpoint returns
+- `src/hallpass/forward_auth.py:129` `if person_id is not None and await deps` — a revoked session, or one past its
+  absolute max age, gets the same redirect as a missing one, and it is cleared, so forward auth never trusts an ended
   sid
 
 ## Feed tokens
@@ -139,19 +141,25 @@ as the code they cite.
 
 - `src/hallpass/logout.py:28` `ALGORITHMS = ["RS256"]` — the only algorithm a logout token may use, named here rather
   than read from the token
-- `src/hallpass/web/routes_auth.py:172` `logout.check_header(token)` — a token that is not an RS256 JWS with a string kid
+- `src/hallpass/web/routes_auth.py:179` `logout.check_header(token)` — a token that is not an RS256 JWS with a string kid
   is refused before the provider's keys are asked for, so unauthenticated garbage costs no outbound request
 - `src/hallpass/logout.py:147` `return _check_claims(decoded.claims` — the claims are read only after the signature has
   verified against the provider's keys
 - `src/hallpass/logout.py:92` `if "nonce" in claims:` — a token with a nonce is an ID token, not a logout token, and is
   refused
-- `src/hallpass/web/routes_auth.py:176` `if error.reason != "unknown_kid":` — the keys are fetched again once, and only
+- `src/hallpass/web/routes_auth.py:183` `if error.reason != "unknown_kid":` — the keys are fetched again once, and only
   for an unknown kid
-- `src/hallpass/web/routes_auth.py:200` `async def backchannel_logout` — the public endpoint takes no session and no
+- `src/hallpass/web/routes_auth.py:207` `async def backchannel_logout` — the public endpoint takes no session and no
   CSRF token; every failure answers 400 and records nothing
-- `src/hallpass/web/routes_auth.py:144` `return logout.end_session_url(` — the sign-out address is built only from
+- `src/hallpass/web/routes_auth.py:145` `return logout.end_session_url(` — the sign-out address is built only from
   discovery, the stored ID token and the public URL, never from the request
-- `src/hallpass/revocation.py:63` `return started_at is None or row[0] > started_at` — a subject-wide revocation ends only sessions that started before it; a session with no start time is ended by session_ended, which every request uses first
+- `src/hallpass/web/routes_auth.py:157` `revocation.revoke_session(c, sid=sid` — sign-out records the session's sid
+  here as well as at the provider, so a copy of the cookie is refused at once, not only when the provider's logout
+  arrives
+- `src/hallpass/revocation.py:55` `if started_at < stamp(now - timedelta(seconds=max_age_seconds)):` — the absolute
+  lifetime: a session that started before now minus the max age is ended whatever the revocation rows say, so a row
+  pruned after its window cannot revive a cookie that a response re-signed with a fresh timestamp
+- `src/hallpass/revocation.py:70` `return started_at is None or row[0] > started_at` — a subject-wide revocation ends only sessions that started before it; a session with no start time is ended by session_ended, which every request uses first
 - `src/hallpass/auth.py:149` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make hallpass fetch the provider's keys more than once per window
   Accepted risk, agreed by the user on 2026-11-18: after a failed key fetch with no keys cached, every logout token
   is refused for up to FORCED_REFRESH_COOLDOWN_SECONDS (60 s). Observed on 2026-11-18: Authentik retried a delivery

@@ -205,3 +205,20 @@ async def test_sign_out_reaches_the_end_session_endpoint_even_when_the_keys_cann
     parts = urlsplit(response.headers["location"])
     assert f"{parts.scheme}://{parts.netloc}{parts.path}" == END_SESSION
     assert stub.jwks_calls == []
+
+
+async def test_a_copied_cookie_is_ended_by_sign_out_at_once(env: Env):
+    """A copy of the session cookie, taken before sign-out, is refused by the next request: sign-out records the sid
+    locally as well as at the provider."""
+    await bound_adult(env)
+    browser = await signed_in(env)
+    copied = browser.cookies.get(SESSION)
+    assert copied is not None
+
+    await sign_out(browser, env)
+
+    replay = new_client(env)
+    replay.cookies.set(SESSION, copied)
+    home = await replay.get("/")
+    assert home.status_code == 303
+    assert home.headers["location"].startswith("/login")

@@ -311,8 +311,10 @@ async def current_person_any_terms(request: Request) -> Person:
         end_session(request)
         raise HTTPException(403, text.LOCKED)
     sid, started_at = request.session.get("sid"), request.session.get("started_at")
+    now, max_age = deps.clock(), deps.config.session_max_age_seconds
     revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid, sub=person.authentik_uuid,
-                                                                    started_at=started_at))
+                                                                    started_at=started_at, now=now,
+                                                                    max_age_seconds=max_age))
     if revoked:
         end_session(request)
         raise RedirectToLogin(request.url.path)

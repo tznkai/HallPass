@@ -66,10 +66,11 @@ def safe_next(value: str | None, config: Config) -> str | None:
 @router.get("/login")
 async def login(request: Request, next_path: Annotated[str | None, Query(alias="next")] = None) -> Response:
     deps = request.app.state.deps
+    # Starting a sign-in ends any session the browser already holds. The cookie is then re-signed without the old
+    # person, sid and start time, so a request to /login never renews an existing session.
+    end_session(request)
     target = safe_next(next_path, deps.config)
-    if target is None:
-        request.session.pop("next", None)
-    else:
+    if target is not None:
         request.session["next"] = target
     try:
         return await deps.oidc.begin(request, f"{deps.config.public_url}/auth/callback")
@@ -148,6 +149,12 @@ async def _sign_out_target(deps, id_token: object) -> str:
 @router.post("/logout", dependencies=[Depends(require_csrf)])
 async def logout_route(request: Request) -> RedirectResponse:
     deps = request.app.state.deps
+    sid = request.session.get("sid")
+    if isinstance(sid, str) and sid:
+        # Recorded here as well as at the provider, so a copy of this session's cookie ends at once, not at the
+        # provider's pace.
+        now, max_age = deps.clock(), deps.config.session_max_age_seconds
+        await deps.db.run(lambda c: revocation.revoke_session(c, sid=sid, now=now, max_age_seconds=max_age))
     id_token = await _take_id_token(deps, request.session.get("id_token_handle"))
     end_session(request)
     return RedirectResponse(await _sign_out_target(deps, id_token), status_code=303)

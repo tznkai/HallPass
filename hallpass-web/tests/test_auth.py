@@ -314,7 +314,7 @@ async def test_oidc_failures_become_sign_in_errors_without_their_text(caplog, ca
 def make_test_app(config: Config, db: Database, authentik: AuthentikClient) -> FastAPI:
     app = FastAPI()
     add_session_middleware(app, config)
-    app.state.deps = SimpleNamespace(config=config, db=db, authentik=authentik)
+    app.state.deps = SimpleNamespace(config=config, db=db, authentik=authentik, clock=lambda: datetime.now(UTC))
 
     @app.get("/csrf")
     def get_csrf(request: Request) -> dict:

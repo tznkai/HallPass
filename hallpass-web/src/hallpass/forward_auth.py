@@ -18,6 +18,7 @@ import logging
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -77,14 +78,15 @@ def _feed_verdict(conn: sqlite3.Connection, service: Service, raw: str) -> Verdi
     return Verdict(person=person, access=access.evaluate(conn, person, service))
 
 
-def _session_revoked(conn: sqlite3.Connection, session: Mapping[str, object], person_id: int) -> bool:
-    """Whether back-channel logout or a sign-out at the provider has ended this session. An unknown person is left to
-    the verdict, which denies them."""
+def _session_revoked(conn: sqlite3.Connection, session: Mapping[str, object], person_id: int, *, now: datetime,
+                     max_age_seconds: int) -> bool:
+    """Whether back-channel logout, a sign-out at the provider, or the session's absolute lifetime has ended this
+    session. An unknown person is left to the verdict, which denies them."""
     person = registry.get_person(conn, person_id)
     if person is None:
         return False
     return revocation.session_ended(conn, sid=session.get("sid"), sub=person.authentik_uuid,
-                                    started_at=session.get("started_at"))
+                                    started_at=session.get("started_at"), now=now, max_age_seconds=max_age_seconds)
 
 
 def _session_verdict(conn: sqlite3.Connection, service: Service, person_id: int) -> Verdict:
@@ -123,7 +125,9 @@ async def forward_auth(request: Request, service: Annotated[str, Query()] = "") 
         return _answer(service, verdict)
 
     person_id = request.session.get("person_id")
-    if person_id is not None and await deps.db.run(lambda c: _session_revoked(c, request.session, person_id)):
+    now, max_age = deps.clock(), deps.config.session_max_age_seconds
+    if person_id is not None and await deps.db.run(
+            lambda c: _session_revoked(c, request.session, person_id, now=now, max_age_seconds=max_age)):
         request.session.clear()
         person_id = None
     if person_id is None:

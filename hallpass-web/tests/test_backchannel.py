@@ -15,7 +15,7 @@ from joserfc import jwt
 from joserfc.jwk import OctKey
 
 from hallpass import registry
-from hallpass.auth import FORCED_REFRESH_COOLDOWN_SECONDS
+from hallpass.auth import FORCED_REFRESH_COOLDOWN_SECONDS, SESSION_COOKIE
 from hallpass.logs import FIELDS_ATTR
 from hallpass.logout import CLOCK_SKEW_SECONDS, MAX_TOKEN_CHARS, ProviderError
 from tests.helpers import (
@@ -353,3 +353,26 @@ async def test_failed_key_fetches_are_spaced_by_the_cooldown_even_for_unauthenti
     ticks[0] = float(FORCED_REFRESH_COOLDOWN_SECONDS)
     assert (await deliver(env, token)).status_code == 400
     assert stub.jwks_calls == [True, True]
+
+
+async def test_a_revoked_cookie_stays_ended_after_its_revocation_row_is_pruned(env: Env):
+    """The replay: the holder keeps the cookie of a revoked session, the revocation row is pruned by a later delivery,
+    and the old cookie must still be sent to sign-in."""
+    await bound_adult(env)
+    browser = await browser_signed_in(env, sid=SID)
+    old_cookie = browser.cookies.get(SESSION_COOKIE)
+    assert old_cookie is not None
+    env.clock.set(NOW + timedelta(minutes=1))
+    assert (await deliver(env, logout_token(env.clock.now()))).status_code == 200
+    env.clock.set(env.clock.now() + timedelta(seconds=env.config.session_max_age_seconds + 1))
+    assert (await deliver(env, logout_token(env.clock.now(), sid=SECOND_SID))).status_code == 200
+    pruned = await env.db.run(lambda c: c.execute("SELECT count(*) FROM revoked_session WHERE sid = ?",
+                                                  (SID,)).fetchone()[0])
+    assert pruned == 0
+
+    replay = new_client(env)
+    replay.cookies.set(SESSION_COOKIE, old_cookie)
+    home = await replay.get("/")
+
+    assert home.status_code == 303
+    assert home.headers["location"].startswith("/login")

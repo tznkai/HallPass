@@ -43,11 +43,18 @@ def revoke_subject(conn: sqlite3.Connection, *, sub: str, issued_at: datetime, n
                  (sub, stamp(ended_at)))
 
 
-def session_ended(conn: sqlite3.Connection, *, sid: str | None, sub: str | None, started_at: str | None) -> bool:
+def session_ended(conn: sqlite3.Connection, *, sid: str | None, sub: str | None, started_at: str | None,
+                  now: datetime, max_age_seconds: int) -> bool:
     """Whether a request must end its session. A session with no start time was made before the start time was kept,
-    so it ends for every request: everyone signs in once after the upgrade. Any other session is ended as
-    session_revoked says."""
-    return started_at is None or session_revoked(conn, sid=sid, sub=sub, started_at=started_at)
+    so it ends for every request: everyone signs in once after the upgrade. A session that started before now minus
+    the max age has ended too, whatever the revocation rows say: the cookie's own timestamp can be renewed by a
+    response that modifies the session, and a revocation row is pruned once it is older than the max age. Any other
+    session is ended as session_revoked says."""
+    if started_at is None:
+        return True
+    if started_at < stamp(now - timedelta(seconds=max_age_seconds)):
+        return True
+    return session_revoked(conn, sid=sid, sub=sub, started_at=started_at)
 
 
 def session_revoked(conn: sqlite3.Connection, *, sid: str | None, sub: str | None, started_at: str | None) -> bool:

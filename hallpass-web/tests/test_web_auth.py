@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -24,6 +25,7 @@ from tests.helpers import (
     make_env,
     publish_terms,
     sign_in,
+    signed_in_person,
     store_person,
     use_oidc_client,
 )
@@ -214,3 +216,26 @@ async def test_a_child_locked_between_the_check_and_the_settle_is_refused_withou
     assert home.status_code == 303 and home.headers["location"].startswith("/login")
     stored = await env.db.run(lambda c: registry.get_person(c, person.id))
     assert stored.status == "locked"
+
+
+async def test_a_session_past_its_max_age_ends_on_the_next_page_with_nothing_revoked(env: Env):
+    person, browser = await signed_in_person(env, account_type="adult")
+    assert (await browser.get("/")).status_code == 200
+    env.clock.set(env.clock.now() + timedelta(seconds=env.config.session_max_age_seconds + 1))
+
+    response = await browser.get("/")
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+
+
+async def test_starting_a_sign_in_drops_an_existing_session(env: Env):
+    person, browser = await signed_in_person(env, account_type="adult")
+    assert (await browser.get("/")).status_code == 200
+
+    start = await browser.get("/login")
+
+    assert start.status_code == 302
+    response = await browser.get("/")
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")

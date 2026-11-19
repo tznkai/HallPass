@@ -446,3 +446,15 @@ async def test_a_subject_revocation_sends_older_sessions_to_sign_in_at_forward_a
 
     assert (await check(older, "calendar")).status_code == 302
     assert (await check(newer, "calendar")).status_code == 200
+
+
+async def test_a_session_past_its_max_age_is_sent_to_sign_in_at_forward_auth_with_nothing_revoked(env: Env):
+    await bound_adult_granted_calendar(env)
+    browser = await signed_in_with_sid(env, SECOND_SID)
+    assert (await check(browser, "calendar")).status_code == 200
+    env.clock.set(env.clock.now() + timedelta(seconds=env.config.session_max_age_seconds + 1))
+
+    response = await check(browser, "calendar")
+
+    assert response.status_code == 302
+    assert response.headers["location"].startswith(f"{BASE_URL}/login?")

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from hallpass.db import Database
-from hallpass.revocation import prune, revoke_session, revoke_subject, session_revoked, stamp
+from hallpass.revocation import prune, revoke_session, revoke_subject, session_ended, session_revoked, stamp
 
 NOW = datetime(2026, 11, 18, 12, 0, tzinfo=UTC)
 MAX_AGE = 43200
@@ -133,3 +133,53 @@ async def test_an_issue_time_ahead_of_now_is_stamped_with_now(database: Database
     stored = await database.run(lambda c: c.execute("SELECT revoked_at FROM revoked_subject").fetchall())
 
     assert stored == [(stamp(NOW),)]
+
+
+async def test_a_revoked_session_stays_ended_after_its_revocation_row_is_pruned(database: Database):
+    """The replay: a holder keeps a revoked cookie alive, the revocation row is pruned, and the old session must still
+    end because it started more than the max age before now."""
+    revoked_at = NOW + timedelta(minutes=1)
+    await database.run(lambda c: revoke_session(c, sid="s-1", now=revoked_at, max_age_seconds=MAX_AGE))
+    later = revoked_at + timedelta(seconds=MAX_AGE + 1)
+    await database.run(lambda c: revoke_session(c, sid="s-2", now=later, max_age_seconds=MAX_AGE))
+    assert await database.run(lambda c: c.execute("SELECT sid FROM revoked_session ORDER BY sid").fetchall()) == [
+        ("s-2",)]
+
+    ended = await database.run(lambda c: session_ended(c, sid="s-1", sub=SUB, started_at=stamp(NOW), now=later,
+                                                       max_age_seconds=MAX_AGE))
+
+    assert ended is True
+
+
+async def test_a_session_older_than_the_max_age_is_ended_with_nothing_revoked(database: Database):
+    now = NOW + timedelta(seconds=MAX_AGE + 1)
+
+    ended = await database.run(lambda c: session_ended(c, sid="s-1", sub=SUB, started_at=stamp(NOW), now=now,
+                                                       max_age_seconds=MAX_AGE))
+
+    assert ended is True
+
+
+async def test_a_session_exactly_at_the_max_age_is_not_ended_by_its_age(database: Database):
+    now = NOW + timedelta(seconds=MAX_AGE)
+
+    ended = await database.run(lambda c: session_ended(c, sid="s-1", sub=SUB, started_at=stamp(NOW), now=now,
+                                                       max_age_seconds=MAX_AGE))
+
+    assert ended is False
+
+
+async def test_a_session_within_the_max_age_with_nothing_revoked_is_not_ended(database: Database):
+    now = NOW + timedelta(seconds=MAX_AGE - 60)
+
+    ended = await database.run(lambda c: session_ended(c, sid="s-1", sub=SUB, started_at=stamp(NOW), now=now,
+                                                       max_age_seconds=MAX_AGE))
+
+    assert ended is False
+
+
+async def test_a_session_with_no_start_time_is_always_ended(database: Database):
+    ended = await database.run(lambda c: session_ended(c, sid="s-1", sub=SUB, started_at=None, now=NOW,
+                                                       max_age_seconds=MAX_AGE))
+
+    assert ended is True
