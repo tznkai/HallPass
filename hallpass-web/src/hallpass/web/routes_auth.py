@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import logging
 import secrets
+from contextlib import aclosing
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse, Response
+from starlette.datastructures import FormData
+from starlette.formparsers import FormParser, MultiPartException
 
 from hallpass import authentik_sync, grants, logout, oidc_session, registry, revocation, terms, text
 from hallpass.auth import SignInError, end_session, require_csrf, resolve_sign_in, start_session
@@ -22,6 +25,9 @@ from hallpass.web.pages import message_page, page
 logger = logging.getLogger(__name__)
 router = APIRouter()
 SIGNED_OUT = "/signed-out"
+# The largest body the back-channel endpoint parses, in bytes. A logout token is a few hundred bytes, so a larger body
+# is refused unread rather than parsed.
+BACKCHANNEL_BODY_LIMIT = 16384
 
 REFUSALS = {
     "not_registered": (text.NOT_REGISTERED, 403),
@@ -203,13 +209,41 @@ async def _accept_logout_token(deps, raw: object) -> str | None:
     return None
 
 
+async def _bounded_form(request: Request) -> FormData | None:
+    """The form in the request body, read at most BACKCHANNEL_BODY_LIMIT bytes. None when the body is over the limit, or
+    when it cannot be parsed as a form. A declared Content-Length over the limit is refused before anything is read. A
+    body with no declared length (chunked) is read a chunk at a time, and refused as soon as it passes the limit."""
+    declared = request.headers.get("content-length")
+    if declared is not None and (not declared.isdigit() or int(declared) > BACKCHANNEL_BODY_LIMIT):
+        return None
+    body = bytearray()
+    async with aclosing(request.stream()) as stream:
+        async for chunk in stream:
+            body.extend(chunk)
+            if len(body) > BACKCHANNEL_BODY_LIMIT:
+                return None
+
+    async def once():
+        yield bytes(body)
+        yield b""
+
+    try:
+        return await FormParser(request.headers, once()).parse()
+    except MultiPartException:
+        return None
+
+
 @router.post("/auth/backchannel-logout")
 async def backchannel_logout(request: Request) -> Response:
     """The provider's back-channel logout. It is public and takes no session and no CSRF token: the signed token is the
-    only authority. It answers 200 once the token is recorded, and 400 with nothing recorded otherwise. The answer
-    carries nothing the caller can use."""
+    only authority. It answers 200 once the token is recorded, and 400 with nothing recorded otherwise. A body over
+    BACKCHANNEL_BODY_LIMIT bytes is refused before it is parsed. The answer carries nothing the caller can use."""
     deps = request.app.state.deps
-    reason = await _accept_logout_token(deps, (await request.form()).get("logout_token"))
+    form = await _bounded_form(request)
+    if form is None:
+        log_event(logger, "backchannel_logout", outcome="refused", reason="body_refused")
+        return Response(status_code=400, headers={"Cache-Control": "no-store"})
+    reason = await _accept_logout_token(deps, form.get("logout_token"))
     if reason is None:
         log_event(logger, "backchannel_logout", outcome="ok")
         return Response(status_code=200, headers={"Cache-Control": "no-store"})

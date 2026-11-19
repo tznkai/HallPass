@@ -25,12 +25,12 @@ as the code they cite.
 - `src/hallpass/auth.py:177` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
 - `src/hallpass/auth.py:181` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
 - `src/hallpass/auth.py:203` `async def require_csrf` — every POST checks the form token and the Origin header
-- `src/hallpass/web/routes_auth.py:42` `def safe_next` — the only check on where a sign-in returns the person to, so it
+- `src/hallpass/web/routes_auth.py:48` `def safe_next` — the only check on where a sign-in returns the person to, so it
   must refuse off-site URLs
 - `src/hallpass/auth.py:315` `revoked = await deps.db.run(lambda c: revocation.session_ended(c, sid=sid` — the check
   every page makes: a session whose sid was revoked, whose person was revoked after it started, or that started
   more than the max age ago, is ended here and the person is sent to sign-in
-- `src/hallpass/web/routes_auth.py:71` `end_session(request)` — a sign-in that starts ends the session the browser
+- `src/hallpass/web/routes_auth.py:77` `end_session(request)` — a sign-in that starts ends the session the browser
   already holds, so a request to /login never renews an existing session's cookie
 - `src/hallpass/auth.py:223` `request.session["id_token_handle"] = handle` — the cookie holds only the handle of the ID token kept on the server, never the token, so it carries no name, username or groups
 
@@ -52,7 +52,7 @@ as the code they cite.
 - `src/hallpass/terms.py:107` `def pages_blocked(state: TermsState) -> bool:` — the page gate, which currently follows the same rule as services; the two names let each caller say what it gates
 - `src/hallpass/auth.py:332` `blocked = await _deps(request).db.run(lambda c: terms.pages_blocked_for(c, person))` — the current_person redirect to /terms; every page that depends on it is gated, and the terms routes are not. A child is never sent there
 - `src/hallpass/terms.py:117` `return not any(` — a child is covered only by a linked, unlocked parent who passes the parent rule; a child's own acceptance is never read for the gate
-- `src/hallpass/web/routes_auth.py:105` `if person.account_type != "child" and not state.accepted_current:` — the sign-
+- `src/hallpass/web/routes_auth.py:111` `if person.account_type != "child" and not state.accepted_current:` — the sign-
   in redirect to /terms: a child is never sent there, and an adult or parent keeps the rule
 - `src/hallpass/web/routes_terms.py:49` `if person.account_type == "child":` — a child's POST to /terms/accept is refused with 403 before anything is written
 
@@ -141,19 +141,22 @@ as the code they cite.
 
 - `src/hallpass/logout.py:28` `ALGORITHMS = ["RS256"]` — the only algorithm a logout token may use, named here rather
   than read from the token
-- `src/hallpass/web/routes_auth.py:179` `logout.check_header(token)` — a token that is not an RS256 JWS with a string kid
+- `src/hallpass/web/routes_auth.py:185` `logout.check_header(token)` — a token that is not an RS256 JWS with a string kid
   is refused before the provider's keys are asked for, so unauthenticated garbage costs no outbound request
 - `src/hallpass/logout.py:147` `return _check_claims(decoded.claims` — the claims are read only after the signature has
   verified against the provider's keys
 - `src/hallpass/logout.py:92` `if "nonce" in claims:` — a token with a nonce is an ID token, not a logout token, and is
   refused
-- `src/hallpass/web/routes_auth.py:183` `if error.reason != "unknown_kid":` — the keys are fetched again once, and only
+- `src/hallpass/web/routes_auth.py:189` `if error.reason != "unknown_kid":` — the keys are fetched again once, and only
   for an unknown kid
-- `src/hallpass/web/routes_auth.py:207` `async def backchannel_logout` — the public endpoint takes no session and no
+- `src/hallpass/web/routes_auth.py:237` `async def backchannel_logout` — the public endpoint takes no session and no
   CSRF token; every failure answers 400 and records nothing
-- `src/hallpass/web/routes_auth.py:145` `return logout.end_session_url(` — the sign-out address is built only from
+- `src/hallpass/web/routes_auth.py:217` `if declared is not None and (not declared.isdigit()` — the body cap: a
+  declared length over the limit is refused before anything is read, and a chunked body is read a chunk at a time
+  and refused once it passes the limit, so the endpoint never parses an oversized body
+- `src/hallpass/web/routes_auth.py:151` `return logout.end_session_url(` — the sign-out address is built only from
   discovery, the stored ID token and the public URL, never from the request
-- `src/hallpass/web/routes_auth.py:157` `revocation.revoke_session(c, sid=sid` — sign-out records the session's sid
+- `src/hallpass/web/routes_auth.py:163` `revocation.revoke_session(c, sid=sid` — sign-out records the session's sid
   here as well as at the provider, so a copy of the cookie is refused at once, not only when the provider's logout
   arrives
 - `src/hallpass/revocation.py:55` `if started_at < stamp(now - timedelta(seconds=max_age_seconds)):` — the absolute

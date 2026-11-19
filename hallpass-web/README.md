@@ -47,8 +47,10 @@ these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
   the post-logout redirect URI, of type Logout, under Redirect URIs.
 
 The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
-and 400 for anything else, with no body. If a fetch of the provider's keys fails and none are cached, logout tokens are
-refused until the provider answers again and for up to 60 seconds after the failed fetch. Observed: a delivery refused
+and 400 for anything else, with no body. A body over 16384 bytes is refused with 400 before it is parsed, whether it
+declares that length or is sent chunked; a chunked body is read only up to the chunk that takes it past the
+limit. If a fetch of the provider's keys fails and none are cached, logout tokens are refused until the provider
+answers again and for up to 60 seconds after the failed fetch. Observed: a delivery refused
 with 404 (a wrong Logout URI) was retried, and the retry after the URI was restored ended the session. Inferred, not
 observed: a 400 is retried the same way, so a later attempt usually gets through. How many retries there are, and for
 how long, is not known (see `docs/authentik-notes.md`). If every attempt is refused, the sessions they name end at max

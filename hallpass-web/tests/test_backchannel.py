@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import logging
 from datetime import timedelta
+from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -43,6 +44,9 @@ from tests.logout_tokens import (
 
 SECOND_SID = "sid-test-session-two"
 ENDPOINT = "/auth/backchannel-logout"
+FORM_TYPE = "application/x-www-form-urlencoded"
+BODY_LIMIT = 16384
+CHUNK = 1024
 
 
 async def bound_adult(env: Env) -> None:
@@ -376,3 +380,51 @@ async def test_a_revoked_cookie_stays_ended_after_its_revocation_row_is_pruned(e
 
     assert home.status_code == 303
     assert home.headers["location"].startswith("/login")
+
+
+async def test_a_declared_body_over_the_limit_is_refused_before_it_is_read(env: Env):
+    """A valid token inside a body larger than the limit is still refused: the cap is on the body, not the token."""
+    await bound_adult(env)
+    await browser_signed_in(env, sid=SID)
+    padded = urlencode({"logout_token": logout_token(env.clock.now()), "pad": "x" * BODY_LIMIT})
+    assert len(padded) > BODY_LIMIT
+
+    response = await env.client.post(ENDPOINT, content=padded, headers={"Content-Type": FORM_TYPE})
+
+    assert response.status_code == 400
+    assert await revocation_rows(env) == (0, 0)
+
+
+async def test_a_chunked_body_is_read_at_most_one_chunk_past_the_limit(env: Env):
+    await bound_adult(env)
+    await browser_signed_in(env, sid=SID)
+    padded = urlencode({"logout_token": logout_token(env.clock.now()), "pad": "x" * (BODY_LIMIT * 4)}).encode()
+    pulled = 0
+
+    async def chunks():
+        nonlocal pulled
+        for start in range(0, len(padded), CHUNK):
+            piece = padded[start:start + CHUNK]
+            pulled += len(piece)
+            yield piece
+
+    response = await env.client.post(ENDPOINT, content=chunks(), headers={"Content-Type": FORM_TYPE})
+
+    assert response.status_code == 400
+    assert pulled <= BODY_LIMIT + CHUNK
+    assert await revocation_rows(env) == (0, 0)
+
+
+async def test_a_chunked_body_within_the_limit_is_accepted(env: Env):
+    await bound_adult(env)
+    browser = await browser_signed_in(env, sid=SID)
+    body = urlencode({"logout_token": logout_token(env.clock.now())}).encode()
+
+    async def chunks():
+        for start in range(0, len(body), 8):
+            yield body[start:start + 8]
+
+    response = await env.client.post(ENDPOINT, content=chunks(), headers={"Content-Type": FORM_TYPE})
+
+    assert response.status_code == 200
+    assert not await is_signed_in(browser)
