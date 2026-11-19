@@ -141,16 +141,17 @@ research wrong on retries. Each item says what the live run showed.
   page. The run did not show whether the token carried a `sid` or the subject alone.
 - **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed hallpass's checks (`outcome=ok`), so the `iss`
   matched the discovery `issuer`, the `kid` was in the `jwks_uri` document, and the token was signed RS256.
-- **`sid` match.** Shown (H1, H2): a logout token ended the session it named and left another person's session in a
-  second browser signed in. Not shown directly: that the token carried a `sid`, or that the `sid` matched the one in
-  that session's ID token. The run cannot tell a sid token from a subject-only token, because the surviving session
-  belonged to another person. What would show it: a `revoked_session` row holding that session's `sid` after the
-  logout, or a second session of the same person surviving a logout token that named only one session.
-- **Cookie size.** Confirmed (every sign-in in Part H): the session cookie holds a handle to the ID token kept on the
-  server, not the token, and sign-in did not loop.
+- **`sid` match.** Shown (H2): a logout token ended the session it named. Shown (H1): another person's session in a
+  second browser stayed signed in after a sign-out at hallpass; whether a logout token arrived in H1 was not recorded.
+  Not shown directly: that the token carried a `sid`, or that the `sid` matched the one in that session's ID token. The
+  run cannot tell a sid token from a subject-only token, because the surviving session belonged to another person. What
+  would show it: a `revoked_session` row holding that session's `sid` after the logout, or a second session of the same
+  person surviving a logout token that named only one session.
+- **Cookie size.** Seen (every sign-in in Part H): sign-in did not loop. The cookie size was not measured. By design the
+  cookie holds a handle to the ID token kept on the server, not the token.
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
-  User Logout stage (from the research, not checked live). Not checked live: the run used `default-invalidation-flow`
-  (works, H1); the provider default was not tried.
+  User Logout stage (research only; the run used `default-invalidation-flow`, which works (H1), and did not try the
+  provider default).
 - **Retry after a failed delivery.** Wrong in the research (H6): Authentik retries a delivery that fails. With a wrong
   Logout URI answering 404, the worker log showed the send task failing and being queued again several times, about
   30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`) and
