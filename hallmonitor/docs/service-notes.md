@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Service notes
 
-Live-check results for each service hallmonitor touches. Hosts, ids and keys are placeholders such as
+Live-check results for each service HallMonitor touches. Hosts, ids and keys are placeholders such as
 `<fluxer-api>` and `<id>`. Source references are to the public Fluxer repository's main branch as read on
 2026-11-13; the instance under test may run a slightly different build.
 
@@ -21,7 +21,7 @@ Run 2026-11-13 with `tools/live/fluxer_check.py` against a dedicated test accoun
   - DISABLED is `1 << 38`. `1 << 39` is `HAS_SESSION_STARTED` and is normal on an account that has signed in.
   - `temp_banned_until` and `enforcement_decision_id` are null on an account with no suspension.
   - The user object also carries `email`, `date_of_birth`, `last_active_ip`, `last_active_location` and more.
-    Hallmonitor reads only `id` and `flags` from it and never logs or stores any other field.
+    HallMonitor reads only `id` and `flags` from it and never logs or stores any other field.
 - **Sessions.**
   - `GET /v1/admin/users/{id}/sessions` -> `{"sessions": [...]}`. The list also holds ended sessions: an entry with
     `deleted_at` set has been terminated, and only entries with `deleted_at` null are active.
@@ -76,18 +76,18 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 - **Fluxer holds do not ban.** A ban always carries a rule-violation decision and notifies the user, which is wrong
   for a parental or admin hold. A Fluxer hold instead:
-  1. removes the person from Authentik's Fluxer group (hallpass already syncs this in its Authentik sync);
+  1. removes the person from Authentik's Fluxer group (the Console already syncs this in its Authentik sync);
   2. relies on Fluxer "Require SSO", so the person cannot sign in again while outside the group;
-  3. ends the person's Fluxer sessions through `DELETE /v1/admin/users/{id}/sessions` (hallmonitor).
+  3. ends the person's Fluxer sessions through `DELETE /v1/admin/users/{id}/sessions` (HallMonitor).
 
-  Restoring needs no Fluxer call: hallpass puts the person back in the group and they sign in again. Hallmonitor
+  Restoring needs no Fluxer call: the Console puts the person back in the group and they sign in again. HallMonitor
   reports `suspended` once the sessions are ended and `allowed` when no hold applies; it never sets or reads the
   DISABLED bit as its own state. The key drops `user:temp_ban` and `enforcement:view`, and keeps
   `user:update_flags` only because session termination requires it.
 - **Per-account failures stay per account.** An `http` or `unexpected` failure on one Fluxer account reports only that
   subject as `error`; `auth` and `unreachable` still fail every Fluxer subject, since the key or the instance is the
   cause.
-- **Fluxer account lookup by SSO subject.** Hallmonitor finds a person's Fluxer account from their Authentik uuid
+- **Fluxer account lookup by SSO subject.** HallMonitor finds a person's Fluxer account from their Authentik uuid
   with `GET /v1/admin/sso-identities?provider_id=&subject=`. The provider id is configuration (read once from any
   bound account's identity list); a null result means the person has not signed in to Fluxer yet.
 
@@ -131,9 +131,9 @@ placeholders such as `<mc-host>`.
   failed as `unreachable` though the port was open. `PORT` is `rcon.port`, not the game port, and on Pterodactyl it
   must be one of the server's allocations. A hold does not keep an op (an account in `ops.json`) out: ops skip the
   whitelist, so a held op is kicked but can rejoin at once while the adapter reports `suspended`. Keep op status off
-  accounts that hallpass may hold, and test a hold with an account that is not an op. Changing op status is out of
+  accounts that the Console may hold, and test a hold with an account that is not an op. Changing op status is out of
   scope for the adapter.
-- **Holds end to end (2026-11-18).** Through hallpass, a hold removed a Java name and a Bedrock gamertag (entered
+- **Holds end to end (2026-11-18).** Through the Console, a hold removed a Java name and a Bedrock gamertag (entered
   without the Floodgate prefix) from the whitelist, and lifting it added each back. The sentinel, parsing and kick
   details above were not checked one by one.
 - **Versions (2026-11-18).** Paper 26.3 (build 254) for Minecraft 26.3 on Java 25, Geyser-Spigot 2.12.1-SNAPSHOT and
@@ -148,7 +148,7 @@ such as `<pal-host>` and `<steam-id>`.
 - **REST API.** Enabled with `RESTAPIEnabled=True` and `RESTAPIPort=<port>` inside `OptionSettings` in
   `PalWorldSettings.ini`. Under Pterodactyl the port needs its own allocation on the server. The egg in use rebuilt the
   ini at startup at first, so check the values after a restart. The REST port is plain HTTP with Basic auth, so keep it
-  on the LAN and reachable only from the hallmonitor host.
+  on the LAN and reachable only from the HallMonitor host.
 - **Ban list.** `Pal/Saved/SaveGames/banlist.txt`, one ban per line as `steam_<steam-id>,<PlayerUId>`, where the
   PlayerUId is 32 hexadecimal characters, followed by a newline. The adapter reads each line up to the first comma, so
   a bare `steam_<steam-id>` line is read the same way.
@@ -167,7 +167,7 @@ server's own id.
 - **Permissions.** Reading a file needs `file.read` and `file.read-content`. Writing a file's contents
   (`POST /api/client/servers/<id>/files/write`) needs `file.create`, not `file.update`: the panel checks
   `file.create` on that route, and a subuser with only `file.update` got 403. So Palworld, which only reads its ban
-  list, needs the two read permissions; a server whose list hallmonitor edits needs `file.create` as well. No
+  list, needs the two read permissions; a server whose list HallMonitor edits needs `file.create` as well. No
   `control.*` or `websocket.*` permission is needed.
 - **Resources.** `GET /api/client/servers/<id>/resources` returned the state and an uptime with the read-only
   permissions.
@@ -206,15 +206,15 @@ with crossplay off and one test account. Ids are placeholders such as `STEAM_0:<
   followed by `writeid` lifts the ban and removes its line.
 - **Startup.** The server loads the file at startup only if `server.cfg` has `exec banned_user.cfg`. Without that line,
   after a restart the file still held the ban, `listid` was empty and the ban was not enforced. The test server's
-  `server.cfg` has the line. Hallmonitor sends no `exec` of its own, so the operator must add it.
-- **Recorded.** On 2026-11-18, `POST /api/client/servers/<id>/command` answered 204 for the hallmonitor subuser, with
+  `server.cfg` has the line. HallMonitor sends no `exec` of its own, so the operator must add it.
+- **Recorded.** On 2026-11-18, `POST /api/client/servers/<id>/command` answered 204 for the HallMonitor subuser, with
   `control.console`, `file.read` and `file.read-content`, and without `file.create`. A non-204 answer would show as an
   `http` error, and no ban would be recorded as ours.
 
 ## Abiotic Factor
 
 Verdict: manual for now (adapter deferred). Researched on 2026-11-18. Holds are applied by hand in the in-game admin
-menu, and the hallpass service uses adapter `manual`, not automatically suspendable.
+menu, and the Console service uses adapter `manual`, not automatically suspendable.
 
 - **Admin file.** `AbioticFactor/Saved/SaveGames/Server/Admin.ini` under the server root, moved by `-AdminIniPath=`
   (relative to `Saved/`). The server under test has a `[BannedPlayers]` section in it.

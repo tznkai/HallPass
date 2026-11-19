@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The record of suspensions hallmonitor placed itself. Only `(slug, identity, own_ref, placed_at)` is stored.
+"""The record of suspensions HallMonitor placed itself. Only `(slug, identity, own_ref, placed_at)` is stored.
 
 The Fluxer adapter places no suspensions and never calls these helpers. They exist for adapters that do.
 

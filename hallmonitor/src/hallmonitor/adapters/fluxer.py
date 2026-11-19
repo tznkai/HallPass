@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Fluxer adapter. Hallmonitor never bans a Fluxer account, and never lifts a ban or changes a flag.
+"""The Fluxer adapter. HallMonitor never bans a Fluxer account, and never lifts a ban or changes a flag.
 
 A Fluxer hold is three things, and this adapter does only the last one:
-  1. hallpass removes the person from Authentik's Fluxer group;
+  1. the Console removes the person from Authentik's Fluxer group;
   2. Fluxer "Require SSO" stops any other way in;
   3. this adapter ends the person's Fluxer sessions, the only mutating call (DELETE .../sessions).
 
-Restoring needs no call: hallpass puts the person back in the group. The paths and shapes come from
+Restoring needs no call: the Console puts the person back in the group. The paths and shapes come from
 docs/service-notes.md (Fluxer Admin API and Design changes).
 """
 
@@ -177,7 +177,7 @@ class FluxerAdapter:
 
     async def apply(self, subject: Subject, desired: str) -> Observed:
         if desired == "allowed":
-            return Observed("allowed")          # restoring is hallpass putting the person back in the group
+            return Observed("allowed")          # restoring is the Console putting the person back in the group
         if desired != "suspended":
             raise ValueError("desired must be allowed or suspended")
         if not _has_identity(subject):

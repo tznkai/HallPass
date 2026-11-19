@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The manual adapter: a service hallmonitor cannot act on. Every subject reports `unsupported`."""
+"""The manual adapter: a service HallMonitor cannot act on. Every subject reports `unsupported`."""
 
 from __future__ import annotations
 

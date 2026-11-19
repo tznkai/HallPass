@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The monitor API wire types, as hallmonitor reads and writes them.
+"""The monitor API wire types, as HallMonitor reads and writes them.
 
-Hallpass keeps its own copy of these shapes. Both copies are checked against tests/contract/monitor_v1.json, which is
+The Console keeps its own copy of these shapes. Both copies are checked against tests/contract/monitor_v1.json, which is
 byte-identical in both projects. Error messages name the key that is wrong, never the value.
 """
 

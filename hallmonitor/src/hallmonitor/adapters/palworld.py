@@ -4,7 +4,7 @@
 
 The file shows bans placed by anyone, one per line as `steam_<id>,<PlayerUId>` (the live check showed a 32-hex PlayerUId
 after the comma), so a subject is banned when a line's first field is its `steam_<id>`. A ban is ours only when
-hallmonitor recorded it in `own_suspension`. A listed ban without that record is `banned_external`, and the adapter
+HallMonitor recorded it in `own_suspension`. A listed ban without that record is `banned_external`, and the adapter
 never sends an unban for it. An unban is sent only for a ban the adapter placed.
 
 Every REST failure leaves as AdapterError with the reason the client gave, and every Pterodactyl failure does the same.

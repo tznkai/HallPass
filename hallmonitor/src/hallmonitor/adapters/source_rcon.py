@@ -4,7 +4,7 @@
 
 A suspension is `banid 0 <id>`, `kickid <id>` and `writeid`. A lift is `removeid <id>` and `writeid`. The live check
 on 2026-11-18 showed `banid 0 <id> kick` does not kick a player given a Steam id, so that form is never sent. The
-console lists bans with `listid`. A ban is ours only when hallmonitor recorded it in `own_suspension`, so a listed ban
+console lists bans with `listid`. A ban is ours only when HallMonitor recorded it in `own_suspension`, so a listed ban
 without that record is `banned_external` and is never removed.
 
 The Source ID is built from the SteamID64 by `steam2`, and must match the Source ID pattern before any command is built.

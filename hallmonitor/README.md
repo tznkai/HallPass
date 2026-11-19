@@ -3,19 +3,17 @@ SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# Hallmonitor
+# HallMonitor
 
-## Human to Human
+HallMonitor reconciles service access with the HallPass Console, the other component of HallPass. It reads the
+Console's desired state and applies it to Fluxer and to the game servers, so that each service matches what the
+Console says. HallPass requires Authentik, which the Console uses for sign-in.
 
+HallMonitor's properties, by design:
 
-Hallmonitor reconciles service access with hallpass. It reads hallpass's desired state and applies it to
-Fluxer and to the game servers, so that each service matches what hallpass says.
-
-Hallmonitor's properties, by design:
-
-- It has no inbound ports. It only makes outbound calls to hallpass and to the services.
+- It has no inbound ports. It only makes outbound calls to the Console and to the services.
 - It holds the service credentials, the admin keys for each service.
-- It never receives names, contacts or parent links. Hallpass sends it only the identifiers and the access
+- It never receives names, contacts or parent links. HallPass Console sends it only the identifiers and the access
   decisions that a service needs.
 
 ## Setup
@@ -42,12 +40,12 @@ The same change also updates `REVIEW.md` (see the last rule below).
 
 ### The design is opinionated
 
-Hallmonitor prefers allowlists to ban lists. Where a game has an allowlist (a whitelist or permitted list), the adapter
-controls it: hallpass decides who is on it, and a hold takes the person off. Hallmonitor places bans only on a game that
-has no allowlist, and lifts only the bans it placed itself. Where it reads a game's ban list, a ban it did not place is
-left alone and reported as `banned_external`. The existing adapters, the rules below and the tests all assume this. A
-ban-first approach, such as banning on a game that has an allowlist, or lifting bans that hallmonitor did not place, is
-not supported as a setting and needs changes to the adapter, its tests and `REVIEW.md`.
+HallMonitor prefers allowlists to ban lists. Where a game has an allowlist (a whitelist or permitted list), the adapter
+controls it: the Console decides who is on it, and a hold takes the person off. HallMonitor places bans only on a game
+that has no allowlist, and lifts only the bans it placed itself. Where it reads a game's ban list, a ban it did not
+place is left alone and reported as `banned_external`. The existing adapters, the rules below and the tests all assume
+this. A ban-first approach, such as banning on a game that has an allowlist, or lifting bans that HallMonitor did not
+place, is not supported as a setting and needs changes to the adapter, its tests and `REVIEW.md`.
 
 ### The plugin
 
@@ -61,11 +59,11 @@ fails the whole cycle for every service. Register it by name:
 "mygame": AdapterPlugin(mygame.create),
 ```
 
-That name is what a hallpass service picks as its adapter. `adapters/manual.py` is the smallest complete example.
+That name is what a service in the Console picks as its adapter. `adapters/manual.py` is the smallest complete example.
 
 ### Settings
 
-Each service's settings come from `HM_SERVICE_<SLUG>__<KEY>` environment variables. The slug is the hallpass service
+Each service's settings come from `HM_SERVICE_<SLUG>__<KEY>` environment variables. The slug is the Console service
 slug, upper-cased, with `-` written as `_`. The key reaches the adapter lower-cased: `HM_SERVICE_MY_GAME__PTERO_URL`
 becomes `ctx.settings["ptero_url"]` for the service `my-game`. A key is lower-case letters and digits joined by single
 underscores; a malformed name or slug stops startup with a configuration error. An empty value is no setting at all.
@@ -79,7 +77,7 @@ such a name (for example `rcon_password` or `ptero_key`). Document every key in 
 - `observe(subjects)` returns an `Observed` for each subject, keyed by `subject.ref`. A subject with no entry is
   reported as `error`. Read the service once and answer for every subject from that.
 - `apply(subject, desired)` makes the service match `desired`, which is `allowed` or `suspended`, and returns what
-  is true afterwards. The loop calls it only when the observation differs from what hallpass wants.
+  is true afterwards. The loop calls it only when the observation differs from what the Console wants.
 - `unmanaged_count(subjects)` returns how many entries in the service's own list name no subject, or None when the
   service has no such list.
 
@@ -90,8 +88,8 @@ states are:
 |---|---|---|
 | `allowed` | The subject can use the service. | When `suspended` is wanted |
 | `suspended` | The subject is kept out. | When `allowed` is wanted |
-| `unsupported` | Hallmonitor cannot act here (manual services). | Never |
-| `banned_external` | Kept out by something hallmonitor did not place. | Never |
+| `unsupported` | HallMonitor cannot act here (manual services). | Never |
+| `banned_external` | Kept out by something HallMonitor did not place. | Never |
 | `error` | The state is unknown, or a change failed. | Never |
 
 When the service itself cannot be asked, raise `AdapterError(reason)`, with a short reason token. Where it is raised
@@ -118,7 +116,7 @@ true for what the adapter does.
   Bedrock name in Minecraft. A ban on one does not shield the others from a hold: the subject is `banned_external`
   only when every identity is banned, and otherwise the hold or allowance reaches the unbanned identities, reported with
   the detail `partly_banned`.
-- **Allowlist (permitted-list) mode.** An allowlist is hallpass's to control, so the adapter adds and removes its
+- **Allowlist (permitted-list) mode.** An allowlist is the Console's to control, so the adapter adds and removes its
   subjects' entries with no ownership record (`minecraft.py`, `valheim.py`). The game's own ban list stays read-only:
   an id on it is `banned_external`, and the adapter never writes it. Entries that name no subject are left alone and
   counted by `unmanaged_count`. Own records may still time a change: when the game reads the file only at start,

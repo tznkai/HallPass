@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 [project]
 name = "hallmonitor"
 version = "0.1.0"
-description = "Applies hallpass desired state to services"
+description = "Applies HallPass Console desired state to services"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"

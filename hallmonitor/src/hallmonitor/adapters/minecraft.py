@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The Minecraft adapter: a whitelist managed over RCON. Hallmonitor never pardons, and never changes the ban list.
+"""The Minecraft adapter: a whitelist managed over RCON. HallMonitor never pardons, and never changes the ban list.
 
 A Java player is managed with `whitelist add|remove <name>`. A Bedrock player is managed through Floodgate with
 `fwhitelist add|remove <gamertag>`, and appears in the vanilla list under the Floodgate prefix. A suspension removes the

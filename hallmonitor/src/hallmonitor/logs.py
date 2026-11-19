@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""JSON-lines logging: an event-name allowlist for hallmonitor code and a token-redaction backstop.
+"""JSON-lines logging: an event-name allowlist for HallMonitor code and a token-redaction backstop.
 
-Copied from hallpass's logs.py. The projects share no code, so the copy is kept by hand; only the allowlists and the
+Copied from the Console's logs.py. The projects share no code, so the copy is kept by hand; only the allowlists and the
 field attribute name differ.
 """
 
@@ -20,7 +20,7 @@ from typing import TextIO
 ID_KEYS = frozenset({"ref", "generation"})
 OTHER_KEYS = frozenset({"outcome", "reason", "status", "service", "adapter", "count", "observed", "desired", "detail",
                         "http_status", "attempt", "action", "code"})   # code: a SQLite error name, as db_unavailable logs it
-# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and hallmonitor never logs URLs.
+# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and HallMonitor never logs URLs.
 PINNED_LOGGERS = ("httpx", "httpcore")
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")   # str values of OTHER_KEYS must look like identifiers
 _ID = re.compile(r"[0-9]{1,25}")                      # row ids and other numeric ids, as text
@@ -50,7 +50,7 @@ def clean_fields(fields: Mapping[str, object]) -> dict[str, object]:
 
 
 def log_event(logger: logging.Logger, name: str, *, level: int = logging.INFO, **fields: object) -> None:
-    """The only way hallmonitor code logs: an event name plus allowlisted fields."""
+    """The only way HallMonitor code logs: an event name plus allowlisted fields."""
     logger.log(level, "%s", name, extra={FIELDS_ATTR: clean_fields(fields)})
 
 
