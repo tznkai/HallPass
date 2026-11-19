@@ -120,33 +120,37 @@ Hallpass ran against the test Authentik at `<hallpass>` behind the reverse proxy
   that a given pk scopes the delete to that user. What Authentik does with an empty parameter was deliberately
   not tried, so the guard stays.
 
-## Phase 8: sign-out and back-channel logout (pending live checks)
+## Phase 8: sign-out and back-channel logout
 
-Research on Authentik 2026.8.5, from its source and documentation. None of it has run live yet. The code relies on each
-item below, so each stays pending until a live run confirms it. Record the result under the item, with placeholders.
+Research on Authentik 2026.8.5, from its source and documentation, then checked live on 2026-11-19 with test plan
+Part H (H1 to H7 passed). Each item says what the live run showed.
 
 - **End-session redirect.** The discovery document's `end_session_endpoint` takes `id_token_hint` and
   `post_logout_redirect_uri`. `post_logout_redirect_uri` needs the hint, and it must match a redirect URI of type
-  Logout. Pending: a sign-out at hallpass returns the browser to `<public_url>/signed-out`.
+  Logout. Confirmed (H1): a sign-out at hallpass returns the browser to `<public_url>/signed-out`.
 - **Invalidation flow.** The end-session request runs the provider's invalidation flow, and that ends the Authentik
-  session only when the flow has a User Logout stage. Pending: after the sign-out, a visit to hallpass asks for
-  sign-in again, and the Authentik session cookie is gone.
-- **Back-channel on sign-out at Authentik.** Pending: a sign-out at Authentik sends one logout token to the Logout URI,
-  and hallpass ends that session only.
-- **Back-channel on admin session deletion.** Pending: deleting a user's session in Authentik sends a logout token with
-  that session's `sid`.
-- **Back-channel on user deactivation.** Pending: deactivating a user sends a logout token with the subject alone, and
-  hallpass ends that person's sessions started before it.
-- **Issuer and keys.** Pending: the `iss` of a live logout token equals the discovery `issuer`, and its `kid` is in the
-  document at `jwks_uri`. The token is signed RS256.
-- **`sid` match.** Pending: the `sid` in a logout token equals the `sid` in the ID token of the same session, which is
-  the SHA-256 hex of Authentik's session key.
-- **Cookie size.** Pending: the session cookie stays under the browser's 4096 byte limit with a real sign-in. It holds
-  a handle to the ID token kept on the server, not the token, so a cookie that is too large would be a bug. A cookie
-  that is too large is dropped, and sign-in would then loop.
+  session only when the flow has a User Logout stage. Confirmed (H1, on `default-invalidation-flow`): after the
+  sign-out, a visit to hallpass asks for sign-in again and Authentik asks for the password.
+- **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends one logout token to the
+  Logout URI, and hallpass ends that session on the next request.
+- **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory,
+  Users, the user's Sessions tab) sends a logout token per session, and both of that person's browsers had to sign in
+  again.
+- **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their hallpass session on the next
+  page. The run did not show whether the token carried a `sid` or the subject alone.
+- **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed hallpass's checks (`outcome=ok`), so the `iss`
+  matched the discovery `issuer`, the `kid` was in the `jwks_uri` document, and the token was signed RS256.
+- **`sid` match.** Confirmed (H1, H2): a logout token ended the session it named and left another person's session in
+  a second browser signed in, so the `sid` in the token matched the one in that session's ID token.
+- **Cookie size.** Confirmed (every sign-in in Part H): the session cookie holds a handle to the ID token kept on the
+  server, not the token, and sign-in did not loop.
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
-  User Logout stage. Pending: with the provider on `default-invalidation-flow` (or another flow with a User Logout
-  stage), a sign-out at hallpass ends the Authentik session, and the next visit asks for sign-in.
-- **Retry after a failed delivery.** Pending: a back-channel delivery that fails (test plan H6, a wrong Logout URI that
-  answers 404) is attempted once and not retried; the worker log shows one attempt. Research says Authentik does not
-  retry, and the README relies on that.
+  User Logout stage. Confirmed (H1) with the provider on `default-invalidation-flow`: a sign-out at hallpass ends the
+  Authentik session. The provider default was not tried.
+- **Retry after a failed delivery.** Wrong in the research (H6): Authentik retries a delivery that fails. With a wrong
+  Logout URI answering 404, the worker log showed the send task failing and being queued again several times, about
+  30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`) and
+  the session ended on the next request. A 400 from hallpass is a failure too, so it is retried in the same way.
+- **Logout URI typo.** Seen live: a Logout URI copied with a trailing full stop (`<public_url>/signed-out.`) made the
+  worker post to a path that answers 404, and nothing was revoked until it was corrected. Copy the URI exactly; the
+  hallpass access log shows the worker's `POST` and the path it used.
