@@ -76,7 +76,7 @@ Run 2026-11-13: Fluxer SSO against an Authentik OIDC provider over HTTPS, with "
 
 - **Fluxer holds do not ban.** A ban always carries a rule-violation decision and notifies the user, which is wrong
   for a parental or admin hold. A Fluxer hold instead:
-  1. removes the person from Authentik's Fluxer group (the Console already syncs this in its Authentik sync);
+  1. removes the person from Authentik's Fluxer group (the HallPass Console already syncs this in its Authentik sync);
   2. relies on Fluxer "Require SSO", so the person cannot sign in again while outside the group;
   3. ends the person's Fluxer sessions through `DELETE /v1/admin/users/{id}/sessions` (HallMonitor).
 
