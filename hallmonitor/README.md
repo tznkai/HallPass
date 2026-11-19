@@ -5,6 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallmonitor
 
+## Human to Human
+
+
 Hallmonitor reconciles service access with hallpass. It reads hallpass's desired state and applies it to
 Fluxer and to the game servers, so that each service matches what hallpass says.
 

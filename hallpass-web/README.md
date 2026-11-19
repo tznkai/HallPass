@@ -5,6 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Hallpass
 
+## Human to Human
+
+
 Hallpass is a registry and authorization web app for neighbourhood services. It sits in front of
 Authentik: residents sign in once, and hallpass decides which services each person may use. It
 holds the desired state of who has access to what, and it does not hold any service credentials.
