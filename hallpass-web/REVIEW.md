@@ -158,5 +158,6 @@ as the code they cite.
   refused with 404 (a wrong Logout URI), and a retry after the URI was restored ended the session. Inferred, not
   observed: a 400 from this endpoint is retried the same way, since Authentik's task raises on any non-2xx response,
   so a retry after the window usually gets through. A session ends at max age or at sign-out only if every attempt
-  is refused. The trade is a bounded number of outbound key fetches against a delayed revocation.
+  is refused. The trade is a bounded number of outbound key fetches against a revocation that is delayed, or missed
+  if every attempt is refused.
 - `src/hallpass/revocation.py:40` `ended_at = min(issued_at, now)` — a subject-wide revocation is stamped with the logout token's issue time, never later than now, so a late or replayed delivery cannot end sessions started after the logout event
