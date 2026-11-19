@@ -118,9 +118,10 @@ placeholders such as `<mc-host>`.
   `banned_external` only when both are banned. When one is banned, a hold removes and kicks only the other name, and
   an allowance adds only it, reported with the detail `partly_banned`. The adapter reads the ban list again before it
   changes anything. This is covered by fake-server tests only.
-- **Partly banned live check (test plan D5): pending.** Not run yet. Record here, with the date, Pass or Fail, the
-  observed row (`suspended`, detail `partly_banned`), that only the Java name left the whitelist and was kicked, and
-  that the Bedrock name stayed banned, after the hold, the hand pardon and the lift.
+- **Partly banned live check (test plan D5): pending.** Not run yet. Record here, with the date, Pass or Fail, after
+  the hold, the lift and the hand pardon: the three observed rows (`suspended` with `partly_banned`, then `allowed`
+  with `partly_banned`, then `allowed` with no detail), that only the Java name left the whitelist and was kicked, and
+  that the Bedrock name stayed banned and on the whitelist throughout.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
   `still_connected`, and the subject is not reported as suspended.
