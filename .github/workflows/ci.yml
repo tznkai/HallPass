@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2026 K. Chen
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Root CI of the published HallPass repo. This file exists only at that root (hallpass-repo/ in the monorepo).
+# Each project runs the three checks in its README: pytest, ruff and reuse. The root runs reuse over the whole repo.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  project:
+    name: ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [hallpass-web, hallmonitor]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv venv -p 3.12 .venv
+      - run: uv pip install --python .venv/bin/python -e '.[dev]'
+      - run: .venv/bin/python -m pytest -q -W error
+      - run: .venv/bin/ruff check src tests tools
+      - run: .venv/bin/reuse --root . lint
+
+  licensing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - run: uv tool run --from reuse==6.3.0 reuse --root . lint
