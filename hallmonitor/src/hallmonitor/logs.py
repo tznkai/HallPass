@@ -20,7 +20,7 @@ from typing import TextIO
 ID_KEYS = frozenset({"ref", "generation"})
 OTHER_KEYS = frozenset({"outcome", "reason", "status", "service", "adapter", "count", "observed", "desired", "detail",
                         "http_status", "attempt", "action", "code"})   # code: a SQLite error name, as db_unavailable logs it
-# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and HallMonitor never logs URLs.
+# Third-party loggers that log more than warnings. httpx logs every request URL at INFO, and HallMonitor logs no URLs.
 PINNED_LOGGERS = ("httpx", "httpcore")
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")   # str values of OTHER_KEYS must look like identifiers
 _ID = re.compile(r"[0-9]{1,25}")                      # row ids and other numeric ids, as text

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The client for the Console's monitor API: fetch the desired state, post the reports. It holds only the monitor token."""
+"""The client for the HallPass Console's monitor API: fetch the desired state, post the reports.
+It holds only the monitor token."""
 
 from __future__ import annotations
 

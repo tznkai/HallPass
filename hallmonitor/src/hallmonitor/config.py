@@ -19,7 +19,7 @@ SECRET_KEY_PARTS = ("password", "key", "token")
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _INTEGER = re.compile(r"[0-9]{1,9}")
 SERVICE_SLUG_MAX = 64
-# The same slug rule as the Console (its services.is_valid_slug), kept as a separate copy: the two projects share no code.
+# The same slug rule as the Console (its services.is_valid_slug), kept as a separate copy: the projects share no code.
 _SERVICE_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _SERVICE_KEY = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
 

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The HallMonitor database: one serialised SQLite connection, safe startup (quarantine, refusal, backup) and migrations.
+"""The HallMonitor database: one serialised SQLite connection, safe startup (quarantine, refusal, backup)
+and migrations.
 
 Copied from the Console's db.py. The copy resolves migrations from the hallmonitor package.
 """
