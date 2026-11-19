@@ -25,7 +25,7 @@ as the code they cite.
 ## Fluxer never bans
 
 - `src/hallmonitor/adapters/fluxer.py:146` `return Observed("banned_external")` — a disabled Fluxer account is reported and left alone whatever the desired value, because hallmonitor places no bans and lifts none
-- `src/hallmonitor/adapters/fluxer.py:168` `response = await self._send("DELETE"` — the adapter's only mutating call: it ends the person's sessions, and no ban, enforcement or flags route is ever reached
+- `src/hallmonitor/adapters/fluxer.py:170` `response = await self._send("DELETE"` — the adapter's only mutating call: it ends the person's sessions, and no ban, enforcement or flags route is ever reached
 
 ## Adapter registry
 

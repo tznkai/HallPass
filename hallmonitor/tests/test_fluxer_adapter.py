@@ -373,12 +373,43 @@ async def test_a_malformed_body_is_unexpected_for_that_subject(env: Env, route: 
     assert await env.adapter.observe([SSO_SUBJECT]) == {"r1": Observed("error", "unexpected")}
 
 
-@pytest.mark.parametrize("status", [500, 403])
-async def test_a_delete_that_fails_is_sessions_not_ended_whatever_the_status(env: Env, status: int) -> None:
-    # A 403 raises inside the DELETE and _end_sessions swallows it; a 500 is a non-2xx answer. Both end the same way.
+@pytest.mark.parametrize("status", [500, 404])
+async def test_a_delete_answered_with_a_failure_status_is_sessions_not_ended(env: Env, status: int) -> None:
+    # A non-2xx answer that is not an auth failure belongs to this subject alone, so it ends the same way.
     _linked_user_with_a_session(env)
     env.state.fail_next["sessions_delete"] = status
     assert await env.adapter.apply(SSO_SUBJECT, "suspended") == Observed("error", "sessions_not_ended")
+    assert active_sessions(env.state, "1001") == 1
+
+
+async def test_a_forbidden_session_delete_raises_auth_for_the_whole_service(env: Env) -> None:
+    # A 403 is a key the instance refuses, so it is service-wide: the loop stops the service's remaining applies.
+    _linked_user_with_a_session(env)
+    env.state.fail_next["sessions_delete"] = 403
+    with pytest.raises(AdapterError) as info:
+        await env.adapter.apply(SSO_SUBJECT, "suspended")
+    assert info.value.reason == "auth"
+    assert active_sessions(env.state, "1001") == 1
+
+
+async def test_a_session_delete_that_cannot_reach_the_instance_raises_unreachable(env: Env) -> None:
+    # The lookups are answered and only the DELETE is refused, so the failure is the session call's own.
+    _linked_user_with_a_session(env)
+    inner = make_fluxer_transport(env.state)
+
+    def refuse_deletes(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE":
+            raise httpx.ConnectError("connection refused", request=request)
+        return inner.handle_request(request)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(refuse_deletes))
+    adapter = FluxerAdapter(http=http, base_url=ADMIN_URL, key=FLUXER_KEY, sso_provider_id=PROVIDER)
+    try:
+        with pytest.raises(AdapterError) as info:
+            await adapter.apply(SSO_SUBJECT, "suspended")
+    finally:
+        await http.aclose()
+    assert info.value.reason == "unreachable"
     assert active_sessions(env.state, "1001") == 1
 
 

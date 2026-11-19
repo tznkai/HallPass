@@ -163,11 +163,15 @@ class FluxerAdapter:
         return observed
 
     async def _end_sessions(self, user_id: str) -> bool:
-        """The only mutating call. True when the server answered 2xx."""
+        """The only mutating call. True when the server answered 2xx. A service-wide failure (a refused key, or an
+        instance that cannot be reached) is raised, so the loop stops the service's remaining applies. Any other failure
+        is False and stays with this subject."""
         try:
             response = await self._send("DELETE", f"/users/{quote(user_id, safe='')}/sessions",
                                         headers={AUDIT_HEADER: AUDIT_REASON})
-        except AdapterError:
+        except AdapterError as error:
+            if error.reason in SERVICE_WIDE_REASONS:
+                raise
             return False
         return 200 <= response.status_code < 300
 
