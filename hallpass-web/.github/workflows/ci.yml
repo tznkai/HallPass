@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# GitHub reads workflows only from the repository root, so this file is inert in the monorepo and runs after subtree split.
+# GitHub reads workflows only from the repository root. In the monorepo, and in the published HallPass repo where
+# this project is hallpass-web/, this file is inert: the root workflow runs the same checks.
 name: ci
 
 on:
