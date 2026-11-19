@@ -143,6 +143,6 @@ that places no bans and keeps one subject's failure to that subject inside `obse
 
 ## Publication
 
-This project starts private inside the monorepo. It is later published by `git subtree split`, so the
-tracked files must hold no secrets, ids, hostnames or addresses. `tests/test_repo_hygiene.py` enforces
-that, with a private denylist that lives outside the repository.
+This project starts private inside the monorepo. It is published as part of the single HallPass repo, built with
+`git filter-repo`, where `hallmonitor/` keeps its name. The tracked files must hold no secrets, ids, hostnames or
+addresses. `tests/test_repo_hygiene.py` enforces that, with a private denylist that lives outside the repository.

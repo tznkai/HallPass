@@ -5,11 +5,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # HallMonitor
 
-Last verified: 2026-11-18
+Last verified: 2026-11-19
 
 ## Purpose
 
-HallMonitor reconciles service access with the Console. It reads the Console's desired state and applies it to Fluxer
+HallMonitor reconciles service access with the HallPass Console. It reads the Console's desired state and applies it to Fluxer
 and to the game servers, so that each service matches the decisions the Console holds. It has no inbound ports and
 makes outbound calls only. It holds the service credentials, the admin keys for each service. HallPass Console is the
 sibling project in this monorepo, and HallMonitor never imports it.
@@ -82,11 +82,11 @@ URLs, tokens or message content.
 ## Secrets and publication
 
 - Never read or print any `.env` file. `.env.example` is the only tracked env file.
-- This directory is published by `git subtree split`, so tracked files hold no secrets, ids, hostnames, IPs or
-  instance details. Test fixtures use fake values (`"1001"`, `"https://fluxer.invalid"`), and a SteamID64 is
-  built at runtime from parts.
+- This directory is published as part of the single HallPass repo, built with `git filter-repo`, where `hallmonitor/`
+  keeps its name. Tracked files hold no secrets, ids, hostnames, IPs or instance details. Test fixtures use fake
+  values (`"1001"`, `"https://fluxer.invalid"`), and a SteamID64 is built at runtime from parts.
 - The private denylist is `docs/private/hallmonitor/denylist.txt` in the main checkout. It is gitignored and absent
-  in the published split, so the check skips there. Denylist findings name the path and line only.
+  in the published repo, so the check skips there. Denylist findings name the path and line only.
 - Private material lives in the main checkout's `docs/private/`, in two places. HallMonitor's own material (its
   denylist, and its service-key environment notes) lives in `docs/private/hallmonitor/`. Shared deployment notes,
   including the Fluxer SSO setup, live in `docs/private/hallpass/`. Never copy either into this directory.
