@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""User-facing strings for hallpass pages and refusals. Plain wording; no names, addresses or ids in any of them."""
+"""User-facing strings for HallPass Console pages and refusals. Plain wording; no names, addresses or ids in any of them."""
 
-NOT_REGISTERED = "This account is not registered with hallpass. Ask the administrator for an invitation."
+NOT_REGISTERED = "This account is not registered with the HallPass Console. Ask the administrator for an invitation."
 LOCKED = "This account is locked. Ask the administrator to unlock it."
 FORBIDDEN = "You do not have permission to do that."
 INVITE_SHOWN_ONCE_HINT = ("This link works once. If it has already been used, or it is lost, "
@@ -33,9 +33,9 @@ SINGLE_IDENTITY_DUPLICATE_FLAG = "This person has more than one {kind} on {servi
 GROUP_TAKEN = "A group with that name already exists."
 ENTITLEMENT_DENY_NOT_PERSON = ("A deny applies only to one person. For an account type or a group, "
                                "remove the grant instead.")
-AUTHENTIK_NOT_UPDATED = "The change is saved in hallpass, but Authentik could not be updated yet."
+AUTHENTIK_NOT_UPDATED = "The change is saved in the HallPass Console, but Authentik could not be updated yet."
 INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."
-TERMS_NOT_PUBLISHED = "No terms have been published yet. Hallpass cannot be used until the administrator publishes them."
+TERMS_NOT_PUBLISHED = "No terms have been published yet. The HallPass Console cannot be used until the administrator publishes them."
 TERMS_CHANGED = "The terms changed while this page was open. Read the current version and accept it."
 TERMS_NOT_NOW = "Not now"
 # A child reads the terms but never accepts them. A linked parent accepts for the child.
@@ -89,15 +89,15 @@ FEED_NO_ADDRESS = "This feed has no address set, so no feed link can be made. As
 SERVICE_TAKEN = "A service with that slug already exists."
 SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters and digits, with single hyphens only between them. "
                         "It starts and ends with a letter or digit. Underscores are not allowed, and neither are "
-                        "doubled hyphens, because hallmonitor cannot configure a slug that has them.")
-SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that hallmonitor runs. "
+                        "doubled hyphens, because HallMonitor cannot configure a slug that has them.")
+SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that HallMonitor runs. "
                                  "Choose an adapter, or untick the box for a service that is suspended by hand.")
-# Shown beside the retire button and the identity section: hallmonitor stops managing the pair, and leaves its last
+# Shown beside the retire button and the identity section: HallMonitor stops managing the pair, and leaves its last
 # applied state in place.
-SERVICE_RETIRE_NOTE = ("Retiring a service stops hallmonitor from managing it, and it leaves the last state it applied in "
+SERVICE_RETIRE_NOTE = ("Retiring a service stops HallMonitor from managing it, and it leaves the last state it applied in "
                        "place. Before you retire a game service, lift its holds first, and clean up the game server by "
                        "hand if it needs it: a whitelisted player stays whitelisted, and an own ban stays placed.")
-IDENTITY_REMOVE_NOTE = ("Removing an identity stops hallmonitor from managing this person on that service, and it leaves "
+IDENTITY_REMOVE_NOTE = ("Removing an identity stops HallMonitor from managing this person on that service, and it leaves "
                         "the last state it applied in place. Before you remove a game identity, lift the holds on that "
                         "service first, and clean up the game server by hand if it needs it.")
 # A shared identity (several people hold the same id on one service). Members and parents are not told who the other
@@ -120,34 +120,34 @@ LOCKDOWN_ADMIN_ONLY = ("Only the administrator can lift an administrator hold or
                        "A lockdown is lifted by resolving its review.")
 MARK_NO_HOLD = "Only a held service can be marked manually suspended."
 MARK_NOT_MANUAL = "Only a service that cannot be automatically suspended can be marked manually suspended."
-RESTORE_PENDING_EMAIL_SUBJECT = "Hallpass: restore {service} for {child} by hand"
-RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in hallpass. "
+RESTORE_PENDING_EMAIL_SUBJECT = "HallPass: restore {service} for {child} by hand"
+RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in the HallPass Console. "
                               "{service} was suspended by hand, so it must be restored by hand too. "
                               "Then mark it restored by hand on the person's page.\n\n"
-                              "Sign in to hallpass for details.\n")
-RESTORE_CANCELLED_EMAIL_SUBJECT = "Hallpass: restore of {service} for {child} cancelled"
+                              "Sign in to the HallPass Console for details.\n")
+RESTORE_CANCELLED_EMAIL_SUBJECT = "HallPass: restore of {service} for {child} cancelled"
 RESTORE_CANCELLED_EMAIL_BODY = ("The restore of {service} for {child} is cancelled, because the service was suspended "
-                                "again in hallpass. If you have not restored it yet, leave the suspension in place. "
+                                "again in the HallPass Console. If you have not restored it yet, leave the suspension in place. "
                                 "If you already restored it by hand, suspend it by hand again.\n\n"
-                                "Sign in to hallpass for details.\n")
+                                "Sign in to the HallPass Console for details.\n")
 # Notification emails are plain text. The child's display name and the actor label are the only names in them.
-CHANGE_EMAIL_SUBJECT = "Hallpass: access changed for {child}"
-CHANGE_EMAIL_BODY = ("{actor} changed the access of {child} in hallpass.\n\n"
-                     "Sign in to hallpass for details.\n")
-LOCKDOWN_EMAIL_SUBJECT = "Hallpass: access locked down for {child}"
+CHANGE_EMAIL_SUBJECT = "HallPass: access changed for {child}"
+CHANGE_EMAIL_BODY = ("{actor} changed the access of {child} in the HallPass Console.\n\n"
+                     "Sign in to the HallPass Console for details.\n")
+LOCKDOWN_EMAIL_SUBJECT = "HallPass: access locked down for {child}"
 LOCKDOWN_EMAIL_BODY_DEFAULT = ("Access for {child} is suspended on every service, because two changes by different "
                                "parents were made within the review window. The administrator will review it.\n\n"
-                               "Sign in to hallpass for details.\n")
+                               "Sign in to the HallPass Console for details.\n")
 LOCKDOWN_EMAIL_BODY_MONITORED = ("Access for {child} is suspended on every service, because two changes by different "
                                  "parents were made within the review window. The agreement note reads:\n\n"
                                  "{agreement_note}\n\nThe administrator will review it. "
-                                 "Sign in to hallpass for details.\n")
+                                 "Sign in to the HallPass Console for details.\n")
 LOCKDOWN_REVIEW_REASON_DEFAULT = "Two changes by different parents within the review window."
 LOCKDOWN_REVIEW_REASON_MONITORED = ("Two changes by different parents within the review window. "
                                     "The agreement note reads: {agreement_note}")
-# Monitor reports, shown next to the access status: what hallmonitor last reported for a service row.
+# Monitor reports, shown next to the access status: what HallMonitor last reported for a service row.
 NOT_YET_CONFIRMED = "requested, not yet confirmed"
 BANNED_IN_GAME = "banned in game"
 SERVICE_ERROR = "the service could not be reached"
-NOT_CONFIGURED = "not configured in hallmonitor"
+NOT_CONFIGURED = "not configured in HallMonitor"
 PENDING_RESTART = "applied, waiting for the service to restart"

@@ -3,12 +3,12 @@ SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 {% extends "base.html" %}
-{% block title %}Hallpass: monitor{% endblock %}
+{% block title %}HallPass: monitor{% endblock %}
 {% block content %}
 <h1>Monitor</h1>
 
 <section class="stack">
-  <p>Last contact from hallmonitor: {{ last_contact_at or "never" }}</p>
+  <p>Last contact from HallMonitor: {{ last_contact_at or "never" }}</p>
 </section>
 
 <section class="stack">
@@ -26,7 +26,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <section class="stack">
   <h2>Unmanaged entries</h2>
   <table>
-    <thead><tr><th>Service</th><th>Entries hallpass does not list</th></tr></thead>
+    <thead><tr><th>Service</th><th>Entries the Console does not list</th></tr></thead>
     <tbody>
       {% for item in unmanaged %}<tr><td>{{ item.name }}</td><td>{{ item.count }}</td></tr>
       {% else %}<tr><td colspan="2">No unmanaged entries reported.</td></tr>

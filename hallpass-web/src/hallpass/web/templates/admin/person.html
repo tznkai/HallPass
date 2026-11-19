@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 {% extends "base.html" %}
-{% block title %}Hallpass: {{ person.display_name }}{% endblock %}
+{% block title %}HallPass: {{ person.display_name }}{% endblock %}
 {% block content %}
 <p><a href="/admin/people">All people</a></p>
 <h1>{{ person.display_name }}</h1>
@@ -173,8 +173,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 <section class="stack">
   <h2>Services</h2>
-  <p>Every service this person is entitled to or has an identity on, with the access hallpass computes and what
-    hallmonitor last confirmed.</p>
+  <p>Every service this person is entitled to or has an identity on, with the access the Console computes and what
+    HallMonitor last confirmed.</p>
   {% with rows = service_rows %}{% include "_service_rows.html" %}{% endwith %}
 </section>
 
