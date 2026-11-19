@@ -9,10 +9,10 @@ Last verified: 2026-11-19
 
 ## Purpose
 
-HallMonitor reconciles service access with the HallPass Console. It reads the Console's desired state and applies it to Fluxer
-and to the game servers, so that each service matches the decisions the Console holds. It has no inbound ports and
-makes outbound calls only. It holds the service credentials, the admin keys for each service. HallPass Console is the
-sibling project in this monorepo, and HallMonitor never imports it.
+HallMonitor reconciles service access with the HallPass Console. It reads the Console's desired state and applies it
+to Fluxer and to the game servers, so that each service matches the decisions the Console holds. It has no inbound
+ports and makes outbound calls only. It holds the service credentials, the admin keys for each service. HallPass
+Console is the sibling project in this monorepo, and HallMonitor never imports it.
 
 ## Checks
 
