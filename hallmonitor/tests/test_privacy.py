@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Hallmonitor holds no names, contacts or parent links, and its logs carry no identity value and no credential.
+"""HallMonitor holds no names, contacts or parent links, and its logs carry no identity value and no credential.
 
 Structural guards read the migration SQL, the config fields and the subject type. The behavioural guard runs a full
 cycle with a logging handler that has no redaction filter, so nothing is hidden by a backstop: the log text must be
