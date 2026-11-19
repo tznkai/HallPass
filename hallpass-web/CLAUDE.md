@@ -94,6 +94,8 @@ URLs, tokens or message content.
 
 - An identity that two or more people hold on one service is paused while any holder is suspended. An allowed holder
   is not sent it, and a suspended holder is sent it so hallmonitor removes it there. The SSO subject is never shared.
+- A person holds at most one Steam id and one Fluxer id per service. The registry refuses a second, and stored
+  duplicates are flagged on the admin pages. Java names and Bedrock gamertags may repeat.
 
 ## Secrets and publication
 
