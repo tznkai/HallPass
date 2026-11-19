@@ -134,11 +134,11 @@ research wrong on retries. Each item says what the live run showed.
   sign-out, a visit to the Console asks for sign-in again and Authentik asks for the password.
 - **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends a logout token to the Logout
   URI, and the Console ends that session on the next request. For that sign-out the worker log showed one send task and
-  the the Console access log one `POST /auth/backchannel-logout` (200).
+  the Console access log one `POST /auth/backchannel-logout` (200).
 - **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory, Users,
   the user's Sessions tab) sends logout tokens, and both of that person's browsers had to sign in again. Not shown: one
   token per session. The log count of `outcome=ok` lines was not taken.
-- **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their the Console session on the next
+- **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their Console session on the next
   page. The run did not show whether the token carried a `sid` or the subject alone.
 - **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed the Console's checks (`outcome=ok`), so the `iss`
   matched the discovery `issuer`, the `kid` was in the `jwks_uri` document, and the token was signed RS256.

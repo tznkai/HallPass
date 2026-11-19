@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # HallPass Console
 
-Last verified: 2026-11-18
+Last verified: 2026-11-19
 
 ## Purpose
 
@@ -100,11 +100,11 @@ URLs, tokens or message content.
 ## Secrets and publication
 
 - Never read or print any `.env` file. `.env.example` is the only tracked env file.
-- This directory is published by `git subtree split`, so tracked files hold no secrets, ids, hostnames, IPs or
-  instance details. Test fixtures use fake values (`"1001"`, `"https://hallpass.invalid"`), and a SteamID64 is
-  built at runtime from parts.
+- This directory is published as part of the single HallPass repo, built with `git filter-repo`, where `hallpass/`
+  appears as `hallpass-web/`. Tracked files hold no secrets, ids, hostnames, IPs or instance details. Test fixtures
+  use fake values (`"1001"`, `"https://hallpass.invalid"`), and a SteamID64 is built at runtime from parts.
 - The private denylist is `docs/private/hallpass/denylist.txt` in the main checkout. It is gitignored and absent
-  in the published split, so the check skips there. Denylist findings name the path and line only.
+  in the published repo, so the check skips there. Denylist findings name the path and line only.
 - Private material (real network layout, deployment notes) lives in the main checkout's `docs/private/hallpass/`.
   Never copy it into this directory.
 
