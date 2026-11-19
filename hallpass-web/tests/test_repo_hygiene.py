@@ -498,7 +498,7 @@ def denylist_path(root: Path) -> Path | None:
     """Where the private denylist lives: the main checkout's `docs/private/`, even from a worktree.
 
     Only the path is computed; the file is not opened here. None when git cannot answer.
-    In the published split repo there is no `docs/private/`, so the file is absent there.
+    In the published HallPass repo there is no `docs/private/`, so the file is absent there.
     """
     try:
         common = subprocess.run(

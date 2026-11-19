@@ -50,7 +50,7 @@ async def admin_hold(env: Env, person: Person) -> None:
 
 async def post_report(env: Env, *, slug: str, ref: str, observed: str, generation: int,
                       detail: str | None = None) -> httpx.Response:
-    # Hallmonitor reads the desired state before it reports, and a report is stored only for a pair that read sent.
+    # HallMonitor reads the desired state before it reports, and a report is stored only for a pair that read sent.
     await env.monitor_client.get(DESIRED_PATH, headers=authorized())
     body = {"reports": [{"slug": slug, "ref": ref, "observed": observed, "detail": detail,
                          "generation": generation, "at": NOW.isoformat()}], "unmanaged": []}

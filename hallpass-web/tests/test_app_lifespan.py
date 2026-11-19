@@ -19,7 +19,7 @@ async def test_the_lifespan_delivers_queued_mail_and_stops_its_tasks_on_shutdown
     env = await make_env(tmp_path)
     try:
         env.application.state.deps = dataclasses.replace(env.application.state.deps, background=True)
-        await env.db.run(lambda c: mail.enqueue(c, to_addr="parent@example.com", subject="Hallpass: test",
+        await env.db.run(lambda c: mail.enqueue(c, to_addr="parent@example.com", subject="HallPass: test",
                                                 body="A change was made.", now=NOW))
 
         async with env.application.router.lifespan_context(env.application):
@@ -36,7 +36,7 @@ async def test_the_lifespan_delivers_queued_mail_and_stops_its_tasks_on_shutdown
 async def test_without_background_the_lifespan_starts_no_loop(tmp_path: Path):
     env = await make_env(tmp_path)
     try:
-        await env.db.run(lambda c: mail.enqueue(c, to_addr="parent@example.com", subject="Hallpass: test",
+        await env.db.run(lambda c: mail.enqueue(c, to_addr="parent@example.com", subject="HallPass: test",
                                                 body="A change was made.", now=NOW))
 
         async with env.application.router.lifespan_context(env.application):
