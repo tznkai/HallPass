@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""User-facing strings for HallPass Console pages and refusals. Plain wording; no names, addresses or ids in any of them."""
+"""User-facing strings for HallPass Console pages and refusals.
+
+Plain wording; no names, addresses or ids in any of them.
+"""
 
 NOT_REGISTERED = "This account is not registered with the HallPass Console. Ask the administrator for an invitation."
 LOCKED = "This account is locked. Ask the administrator to unlock it."
@@ -35,7 +38,8 @@ ENTITLEMENT_DENY_NOT_PERSON = ("A deny applies only to one person. For an accoun
                                "remove the grant instead.")
 AUTHENTIK_NOT_UPDATED = "The change is saved in the HallPass Console, but Authentik could not be updated yet."
 INVITATION_NOT_CREATED = "The invitation was not created because Authentik did not respond. Create it again below."
-TERMS_NOT_PUBLISHED = "No terms have been published yet. The HallPass Console cannot be used until the administrator publishes them."
+TERMS_NOT_PUBLISHED = ("No terms have been published yet. The HallPass Console cannot be used until the administrator "
+                       "publishes them.")
 TERMS_CHANGED = "The terms changed while this page was open. Read the current version and accept it."
 TERMS_NOT_NOW = "Not now"
 # A child reads the terms but never accepts them. A linked parent accepts for the child.
@@ -90,16 +94,16 @@ SERVICE_TAKEN = "A service with that slug already exists."
 SERVICE_SLUG_INVALID = ("A slug is 1 to 64 lower-case letters and digits, with single hyphens only between them. "
                         "It starts and ends with a letter or digit. Underscores are not allowed, and neither are "
                         "doubled hyphens, because HallMonitor cannot configure a slug that has them.")
-SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that HallMonitor runs. "
-                                 "Choose an adapter, or untick the box for a service that is suspended by hand.")
+SERVICE_SUSPEND_NEEDS_ADAPTER = ("A service that can be suspended automatically needs an adapter that HallMonitor "
+                                 "runs. Choose an adapter, or untick the box for a service that is suspended by hand.")
 # Shown beside the retire button and the identity section: HallMonitor stops managing the pair, and leaves its last
 # applied state in place.
-SERVICE_RETIRE_NOTE = ("Retiring a service stops HallMonitor from managing it, and it leaves the last state it applied in "
-                       "place. Before you retire a game service, lift its holds first, and clean up the game server by "
-                       "hand if it needs it: a whitelisted player stays whitelisted, and an own ban stays placed.")
-IDENTITY_REMOVE_NOTE = ("Removing an identity stops HallMonitor from managing this person on that service, and it leaves "
-                        "the last state it applied in place. Before you remove a game identity, lift the holds on that "
-                        "service first, and clean up the game server by hand if it needs it.")
+SERVICE_RETIRE_NOTE = ("Retiring a service stops HallMonitor from managing it, and it leaves the last state it applied "
+                       "in place. Before you retire a game service, lift its holds first, and clean up the game server "
+                       "by hand if it needs it: a whitelisted player stays whitelisted, and an own ban stays placed.")
+IDENTITY_REMOVE_NOTE = ("Removing an identity stops HallMonitor from managing this person on that service, and it "
+                        "leaves the last state it applied in place. Before you remove a game identity, lift the holds "
+                        "on that service first, and clean up the game server by hand if it needs it.")
 # A shared identity (several people hold the same id on one service). Members and parents are not told who the other
 # holder is; the administrator's page names the holders who caused the pause.
 SHARED_IDENTITY_PAUSED = ("Someone who shares one of your ids on this service can't use it right now, so that id is "
@@ -127,8 +131,8 @@ RESTORE_PENDING_EMAIL_BODY = ("A parent has restored {child} on {service} in the
                               "Sign in to the HallPass Console for details.\n")
 RESTORE_CANCELLED_EMAIL_SUBJECT = "HallPass: restore of {service} for {child} cancelled"
 RESTORE_CANCELLED_EMAIL_BODY = ("The restore of {service} for {child} is cancelled, because the service was suspended "
-                                "again in the HallPass Console. If you have not restored it yet, leave the suspension in place. "
-                                "If you already restored it by hand, suspend it by hand again.\n\n"
+                                "again in the HallPass Console. If you have not restored it yet, leave the suspension "
+                                "in place. If you already restored it by hand, suspend it by hand again.\n\n"
                                 "Sign in to the HallPass Console for details.\n")
 # Notification emails are plain text. The child's display name and the actor label are the only names in them.
 CHANGE_EMAIL_SUBJECT = "HallPass: access changed for {child}"

@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Annotated, Any, Protocol
 from urllib.parse import urlsplit
 
-# Authlib 1.9.5 warns at import that its httpx integration is deprecated. That is upstream, not HallPass Console code, so
+# Authlib 1.9.5 warns at import that its httpx integration is deprecated. That is upstream, not the Console's code, so
 # only that message is muted, and only for this import. authlib.deprecate must load first: it installs its own
 # "always" filter for that warning class, which would otherwise sit in front of the one below.
 import authlib.deprecate  # noqa: F401

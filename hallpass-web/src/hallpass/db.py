@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The HallPass Console database: one serialised SQLite connection, safe startup (quarantine, refusal, backup) and migrations."""
+"""The HallPass Console database: one serialised SQLite connection, safe startup (quarantine, refusal, backup)
+and migrations."""
 
 from __future__ import annotations
 
