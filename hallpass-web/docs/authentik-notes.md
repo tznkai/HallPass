@@ -132,11 +132,12 @@ research wrong on retries. Each item says what the live run showed.
 - **Invalidation flow.** The end-session request runs the provider's invalidation flow, and that ends the Authentik
   session only when the flow has a User Logout stage. Confirmed (H1, on `default-invalidation-flow`): after the
   sign-out, a visit to hallpass asks for sign-in again and Authentik asks for the password.
-- **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends one logout token to the
-  Logout URI, and hallpass ends that session on the next request.
-- **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory,
-  Users, the user's Sessions tab) sends logout tokens, and both of that person's browsers had to sign in again. Not
-  shown: one token per session. The log count of `outcome=ok` lines was not taken.
+- **Back-channel on sign-out at Authentik.** Confirmed (H2): a sign-out at Authentik sends a logout token to the Logout
+  URI, and hallpass ends that session on the next request. For that sign-out the worker log showed one send task and the
+  hallpass access log one `POST /auth/backchannel-logout` (200).
+- **Back-channel on admin session deletion.** Confirmed (H3): deleting a user's sessions in Authentik (Directory, Users,
+  the user's Sessions tab) sends logout tokens, and both of that person's browsers had to sign in again. Not shown: one
+  token per session. The log count of `outcome=ok` lines was not taken.
 - **Back-channel on user deactivation.** Confirmed (H4): deactivating a user ends their hallpass session on the next
   page. The run did not show whether the token carried a `sid` or the subject alone.
 - **Issuer and keys.** Confirmed (H2, H3): live logout tokens passed hallpass's checks (`outcome=ok`), so the `iss`
@@ -152,16 +153,16 @@ research wrong on retries. Each item says what the live run showed.
 - **Default invalidation flow.** The provider's default invalidation flow, `default-provider-invalidation-flow`, has no
   User Logout stage (research only; the run used `default-invalidation-flow`, which works (H1), and did not try the
   provider default).
-- **Retry after a failed delivery.** Wrong in the research (H6): Authentik retries a delivery that fails. With a wrong
-  Logout URI answering 404, the worker log showed the send task failing and being queued again several times, about
-  30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`) and
-  the session ended on the next request. Observed: a 404 was retried, more than once. Inferred, not observed: a 400 from
-  hallpass is retried the same way, since Authentik's task raises on any non-2xx response. Not observed: how many
+- **Retry after a failed delivery.** Wrong in the research (H6): Authentik retried a delivery that failed with 404. With
+  a wrong Logout URI answering 404, the worker log showed the send task failing and being queued again several times,
+  about 30 seconds to 2 minutes apart. Once the Logout URI was put back, the next retry reached hallpass (`outcome=ok`)
+  and the session ended on the next request. Observed: a 404 was retried, more than once. Inferred, not observed: a 400
+  from hallpass is retried the same way, since Authentik's task raises on any non-2xx response. Not observed: how many
   retries there are, how long they continue, and whether a retry resends the same token or a rebuilt one. That last
   point matters. A resent token can lapse at `exp`, after which the `exp` + 60 s check in `logout.py` refuses it. A
   rebuilt token carries a later `iat`, which weakens the guarantee at `revocation.py:40` only if the person signs in
   again within the retry period.
 - **Logout URI typo.** Seen live (H3, first attempt): the post-logout redirect URI `/signed-out` was entered as the
-  Logout URI, with a trailing full stop (`<public_url>/signed-out.`). The worker's `POST /signed-out.` was answered
-  404, and nothing was revoked until the Logout URI was corrected to `/auth/backchannel-logout`. Copy the URI exactly;
-  the hallpass access log shows the worker's `POST` and the path it used.
+  Logout URI, with a trailing full stop (`<public_url>/signed-out.`). The worker's `POST /signed-out.` was answered 404,
+  and nothing was revoked until the Logout URI was corrected to `/auth/backchannel-logout`. Copy the URI exactly; the
+  hallpass access log shows the worker's `POST` and the path it used.
