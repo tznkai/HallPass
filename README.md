@@ -6,6 +6,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # HallPass
 
 ## Human to Human
+Hi, human author here. I wrote this section of the README myself so you don't have get through Claudese to understand what's happening. This project tries to address the problem "what if my kids want to play online games with their neighbors and school friends but I don't want them simultaneously exposed every stranger on the internet?" My solution to that problem is self-hosting games with a whitelist-first approach and giving other parents the ability to give and revoke permission. The particulars are me-shaped, optimized for the software stack sitting on my homelab, but it might be useful to you and your particulars with some light modification.
+
+Outside of this section of the README, including the rest of this file, this project, was directed by K.Chen through iterative instruction and testing, orchestrated by Claude Code using Opus 5.5, and audited and coded by various Claude models of that generation. This presents certain risks to you. Your best way to alleviate those risks is what it always is with free and open source software: audit the code yourself, and fork as required.
 
 ## Overview
 
