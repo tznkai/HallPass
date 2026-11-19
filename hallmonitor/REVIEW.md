@@ -41,12 +41,15 @@ as the code they cite.
 
 ## Minecraft never pardons
 
-- `src/hallmonitor/adapters/minecraft.py:117` `pattern = _before_name(prefix, entry.bedrock)` — the ban-entry matcher: an entry is found anywhere in the reply, but a name with a name character before it never counts, so `Xbob was banned by` is not a ban on Bob
-- `src/hallmonitor/adapters/minecraft.py:102` `if prefix in SEPARATOR_PREFIXES and not bedrock:` — the Java rule under a `.` or `*` prefix: a Java name counts only after a separator, or after the prefix that follows a name character, so a Bedrock twin's ban (`operator..Tim`, `ban(s):.Tim`) never bans the Java name `Tim`
-- `src/hallmonitor/adapters/minecraft.py:105` `if prefix in SEPARATOR_PREFIXES:` — the Bedrock rule under a `.` or `*` prefix: a Bedrock name counts only after a line break, after the `ban(s):` header (with or without a space), or after a letter, digit or `_` and then `.` or the prefix, so a reason's colon (`griefing:.Tim`), a reason's space (`griefing .Tim`) and a reason ending in `).` (`...(2nd).Tim`) never ban the Bedrock name `.Tim`
-- `src/hallmonitor/adapters/minecraft.py:155` `if any(_is_banned(entry, self._prefix, ban_text) for entry in entries):` — the ban branch of observe: a player on the ban list is checked before any whitelist state is read, so a ban placed by someone else is never lifted
-- `src/hallmonitor/adapters/minecraft.py:156` `return Observed("banned_external")` — the observation that keeps the reconcile loop from applying anything to a banned player
-- `src/hallmonitor/adapters/minecraft.py:189` `if actual != desired:` — the apply re-check: the whitelist is read again after the change, and any disagreement is `not_applied`, so a partial change is never reported as success
+- `src/hallmonitor/adapters/minecraft.py:120` `pattern = _before_name(prefix, entry.bedrock)` — the ban-entry matcher: an entry is found anywhere in the reply, but a name with a name character before it never counts, so `Xbob was banned by` is not a ban on Bob
+- `src/hallmonitor/adapters/minecraft.py:105` `if prefix in SEPARATOR_PREFIXES and not bedrock:` — the Java rule under a `.` or `*` prefix: a Java name counts only after a separator, or after the prefix that follows a name character, so a Bedrock twin's ban (`operator..Tim`, `ban(s):.Tim`) never bans the Java name `Tim`
+- `src/hallmonitor/adapters/minecraft.py:108` `if prefix in SEPARATOR_PREFIXES:` — the Bedrock rule under a `.` or `*` prefix: a Bedrock name counts only after a line break, after the `ban(s):` header (with or without a space), or after a letter, digit or `_` and then `.` or the prefix, so a reason's colon (`griefing:.Tim`), a reason's space (`griefing .Tim`) and a reason ending in `).` (`...(2nd).Tim`) never ban the Bedrock name `.Tim`
+- `src/hallmonitor/adapters/minecraft.py:127` `if not _is_banned(entry, prefix, ban_text)` — the unbanned names: a subject is banned only when every one of its names is banned, and a hold or an allowance reaches only the names the ban list does not cover, so a ban on one name never shields the others
+- `src/hallmonitor/adapters/minecraft.py:169` `if not free:` — the ban branch of observe: a subject whose every name is banned is `banned_external` before any whitelist state is read, so a ban placed by someone else is never lifted
+- `src/hallmonitor/adapters/minecraft.py:170` `return Observed("banned_external")` — the observation that keeps the reconcile loop from applying anything to a subject whose every name is banned
+- `src/hallmonitor/adapters/minecraft.py:196` `await client.command("banlist players")` — apply reads the ban list itself, in the same session and before any command, so a ban placed after observe is never touched by a hold
+- `src/hallmonitor/adapters/minecraft.py:212` `if any(entry.listed.lower() in online for entry in free):` — the kick check reads only the unbanned names, so a banned name still online never makes a hold `still_connected`
+- `src/hallmonitor/adapters/minecraft.py:209` `if actual != desired:` — the apply re-check: the whitelist is read again after the change, and any disagreement is `not_applied`, so a partial change is never reported as success
 
 The ban-entry matcher finds an entry anywhere in the reply, because Paper 26.3 sends the whole `banlist players`
 reply on one line with its entries run together. Two costs are accepted. A custom reason with no closing punctuation
@@ -84,12 +87,12 @@ bans both. This is pre-existing, and the whitelist state is shared the same way.
 
 ## Console command arguments
 
-- `src/hallmonitor/adapters/minecraft.py:44` `JAVA_NAME = re.compile(` — the Java name pattern: 1 to 16 letters, digits or underscores, so an entity selector such as `@a` never reaches `whitelist` or `kick`
-- `src/hallmonitor/adapters/minecraft.py:45` `BEDROCK_NAME = re.compile(` — the Bedrock gamertag pattern, the same class for now; spaces stay refused until the live check settles how Floodgate passes them
-- `src/hallmonitor/adapters/minecraft.py:47` `FLOODGATE_PREFIXES = frozenset(` — the prefix allowlist: one character from `.`, `*` or `_`, or empty, since the prefix is prepended to every Bedrock name
-- `src/hallmonitor/adapters/minecraft.py:69` `safe = BEDROCK_NAME.fullmatch(identity.value)` — a Bedrock name is safe only when it matches the pattern and the configured prefix is allowlisted
-- `src/hallmonitor/adapters/minecraft.py:177` `if not all(entry.safe for entry in entries):` — the gate in apply: an unsafe name is `bad_identity` before any add, remove or kick is sent
-- `src/hallmonitor/adapters/minecraft.py:217` `prefix in FLOODGATE_PREFIXES):` — the adapter is not configured when the prefix is outside the allowlist, so no Bedrock command is ever built with a bad prefix
+- `src/hallmonitor/adapters/minecraft.py:47` `JAVA_NAME = re.compile(` — the Java name pattern: 1 to 16 letters, digits or underscores, so an entity selector such as `@a` never reaches `whitelist` or `kick`
+- `src/hallmonitor/adapters/minecraft.py:48` `BEDROCK_NAME = re.compile(` — the Bedrock gamertag pattern, the same class for now; spaces stay refused until the live check settles how Floodgate passes them
+- `src/hallmonitor/adapters/minecraft.py:50` `FLOODGATE_PREFIXES = frozenset(` — the prefix allowlist: one character from `.`, `*` or `_`, or empty, since the prefix is prepended to every Bedrock name
+- `src/hallmonitor/adapters/minecraft.py:72` `safe = BEDROCK_NAME.fullmatch(identity.value)` — a Bedrock name is safe only when it matches the pattern and the configured prefix is allowlisted
+- `src/hallmonitor/adapters/minecraft.py:192` `if not all(entry.safe for entry in entries):` — the gate in apply: an unsafe name is `bad_identity` before any add, remove or kick is sent
+- `src/hallmonitor/adapters/minecraft.py:237` `prefix in FLOODGATE_PREFIXES):` — the adapter is not configured when the prefix is outside the allowlist, so no Bedrock command is ever built with a bad prefix
 
 ## Ban ownership
 

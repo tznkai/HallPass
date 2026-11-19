@@ -114,6 +114,10 @@ placeholders such as `<mc-host>`.
   ban after a reason ending in a non-name character then `_` reads as a ban on Bedrock `Tim` (`bye!_Tim`), a Java
   name starting with `_` is the same listed name as Bedrock `Tim`, and under an empty prefix a Java name and its Bedrock
   twin share one listed name; a ban on either bans both.
+- **Partly banned player (not yet checked live).** A player with a Java name and a Bedrock name is
+  `banned_external` only when both are banned. When one is banned, a hold removes and kicks only the other name, and
+  an allowance adds only it, reported with the detail `partly_banned`. The adapter reads the ban list again before it
+  changes anything. This is covered by fake-server tests only.
 - **Kick check.** After a suspension the adapter runs `list` on the same connection, and parses
   `There are N of a max of M players online: a, b`. If a subject's name is still online, the result is
   `still_connected`, and the subject is not reported as suspended.

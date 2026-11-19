@@ -476,15 +476,17 @@ async def test_a_subject_with_a_java_name_and_another_bedrock_name_is_not_banned
     assert outcomes(hallpass) == [("r1", "allowed", None)]
 
 
-async def test_a_subject_whose_bedrock_twin_is_banned_is_banned_external_from_that_entry() -> None:
+async def test_a_subject_whose_bedrock_twin_is_banned_is_partly_banned_and_its_java_name_is_still_managed() -> None:
+    # The `.Tim` entry bans the Bedrock name only, so the Java name is not banned and is still added.
     text = ("There are 2 ban(s):Zed was banned by Server: Banned by an operator."
             ".Tim was banned by Server: Banned by an operator.")
     state = server_state(handler=ban_list_reply(text))
     hallpass = mc_service(subject("r1", "allowed", java_identity("Tim"), bedrock_identity("Tim"), generation=2))
     async with rcon_server(state) as port:
         await run(hallpass, port)
-    assert state.commands == LIST_COMMANDS
-    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+    assert state.whitelist == ["Tim"]
+    assert not any(cmd.startswith("fwhitelist") for cmd in state.commands)
+    assert outcomes(hallpass) == [("r1", "allowed", "partly_banned")]
 
 
 # The same rule for a Bedrock name: with a `.` or `*` prefix, a Bedrock entry counts only after a line break, after the
@@ -796,6 +798,68 @@ async def test_no_player_name_password_or_command_text_reaches_a_log(caplog: pyt
     assert PASSWORD not in logged
     assert "whitelist remove" not in logged
     assert "kick " not in logged
+
+
+# A subject with several identities: a ban on one name does not shield the others from a hold ------------
+
+async def test_a_hold_removes_and_kicks_the_unbanned_java_name_when_the_bedrock_name_is_banned() -> None:
+    state = server_state(whitelist=["Steve"], online={"Steve"}, bans=[ban(".Tim")])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), bedrock_identity("Tim"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert "whitelist remove Steve" in state.commands
+    assert f"kick Steve {KICK}" in state.commands
+    assert "Steve" not in state.online
+    assert not any("Tim" in cmd for cmd in state.commands if cmd not in LIST_COMMANDS)
+    assert outcomes(hallpass) == [("r1", "suspended", "partly_banned")]
+
+
+async def test_a_hold_on_a_partly_banned_subject_never_touches_the_banned_name_and_is_not_still_connected() -> None:
+    # The banned Bedrock name stays online, since a ban is not ours to end. The kick check reads only the unbanned name.
+    state = server_state(whitelist=["Steve"], online={"Steve", ".Tim"}, bans=[ban(".Tim")])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), bedrock_identity("Tim"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == []
+    assert ".Tim" in state.online
+    assert outcomes(hallpass) == [("r1", "suspended", "partly_banned")]
+
+
+async def test_an_allowed_hold_adds_only_the_unbanned_java_name_and_reports_allowed() -> None:
+    state = server_state(bans=[ban(".Tim")])
+    hallpass = mc_service(subject("r1", "allowed", java_identity("Steve"), bedrock_identity("Tim"), generation=2))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.whitelist == ["Steve"]
+    assert "whitelist add Steve" in state.commands
+    assert not any(cmd.startswith("fwhitelist") for cmd in state.commands)
+    assert outcomes(hallpass) == [("r1", "allowed", "partly_banned")]
+
+
+async def test_a_subject_whose_names_are_all_banned_is_banned_external_and_nothing_is_applied() -> None:
+    state = server_state(whitelist=["Steve"], online={"Steve"}, bans=[ban("Steve"), ban(".Tim")])
+    hallpass = mc_service(subject("r1", "suspended", java_identity("Steve"), bedrock_identity("Tim"), generation=5))
+    async with rcon_server(state) as port:
+        await run(hallpass, port)
+    assert state.commands == LIST_COMMANDS
+    assert state.whitelist == ["Steve"]
+    assert outcomes(hallpass) == [("r1", "banned_external", None)]
+
+
+async def test_apply_reads_the_ban_list_itself_and_leaves_a_banned_name_alone() -> None:
+    state = server_state(whitelist=["Steve", ".Tim"], online={"Steve", ".Tim"}, bans=[ban(".Tim")])
+    async with rcon_server(state) as port:
+        adapter = make_adapter(port)
+        result = await adapter.apply(
+            Subject(ref="r1", identities=(Identity(kind=JAVA_KIND, value="Steve"),
+                                          Identity(kind=BEDROCK_KIND, value="Tim")),
+                    desired="suspended", generation=5),
+            "suspended",
+        )
+    assert result == Observed("suspended", "partly_banned")
+    assert state.whitelist == [".Tim"]
+    assert not any("fwhitelist" in cmd or "kick .Tim" in cmd for cmd in state.commands)
 
 
 # Registry and capabilities ------------------------------------------------------------------------------

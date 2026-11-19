@@ -5,7 +5,9 @@
 A Java player is managed with `whitelist add|remove <name>`. A Bedrock player is managed through Floodgate with
 `fwhitelist add|remove <gamertag>`, and appears in the vanilla list under the Floodgate prefix. A suspension removes the
 name from the whitelist and then kicks the player, because removal alone may not disconnect them. A ban is only read
-(`banlist players`), so a ban that someone else placed is reported as `banned_external` and is never lifted.
+(`banlist players`), so a ban that someone else placed is reported as `banned_external` and is never lifted. A subject
+with several names is `banned_external` only when every name is banned. Otherwise a hold or an allowance reaches only
+the names the ban list does not cover, and the result carries the detail `partly_banned`.
 
 Every RCON failure is raised by the client as RconError and leaves this module as AdapterError with the same reason,
 so the reconcile loop reports that reason rather than a generic apply failure.
@@ -36,6 +38,7 @@ NO_WHITELISTED = "There are no whitelisted players"
 WHITELIST_LINE = re.compile(r"whitelisted player(?:s|\(s\))?:\s*(.*)$")  # the plan's player(s), or plural or singular
 ONLINE_LINE = re.compile(r"players online:\s*(.*)$")  # the plan's default `list` reply, unconfirmed until the live check
 PORT_DIGITS = re.compile(r"[0-9]{1,5}")
+PARTLY_BANNED = "partly_banned"  # the detail when some of a subject's names are banned and the rest are managed
 
 # Console command arguments. A target selector (@a, @e[...], @p, @r) would make `whitelist remove` and `kick` act on
 # every matching player, and any other character could split or extend a command, so a name is refused unless it
@@ -118,6 +121,16 @@ def _is_banned(entry: _Entry, prefix: str, ban_text: str) -> bool:
     return re.search(pattern, ban_text, re.IGNORECASE | re.ASCII) is not None
 
 
+def _unbanned(entries: Sequence[_Entry], prefix: str, ban_text: str) -> list[_Entry]:
+    """The names that the ban list does not cover. A subject is banned only when none of these remain, and a hold or an
+    allowance then reaches only these names, so a ban on one name never shields the others."""
+    return [entry for entry in entries if not _is_banned(entry, prefix, ban_text)]
+
+
+def _ban_detail(entries: Sequence[_Entry], free: Sequence[_Entry]) -> str | None:
+    return PARTLY_BANNED if len(free) < len(entries) else None
+
+
 def _listed_state(entries: Sequence[_Entry], listed_lower: set[str]) -> ListState:
     flags = [entry.listed.lower() in listed_lower for entry in entries]
     if all(flags):
@@ -152,14 +165,16 @@ class MinecraftAdapter:
             return Observed("error", "no_identity")
         if not all(entry.safe for entry in entries):
             return Observed("error", "bad_identity")
-        if any(_is_banned(entry, self._prefix, ban_text) for entry in entries):
+        free = _unbanned(entries, self._prefix, ban_text)
+        if not free:
             return Observed("banned_external")
-        state = _listed_state(entries, listed_lower)
+        detail = _ban_detail(entries, free)
+        state = _listed_state(free, listed_lower)
         if state == "partial":
-            # Only some names are listed. Report the opposite of the desired state, so the reconcile loop applies the
-            # desired state to every name, and the apply re-checks the whole set.
-            return Observed("suspended" if subject.desired == "allowed" else "allowed", "partial")
-        return Observed(state)
+            # Only some unbanned names are listed. Report the opposite of the desired state, so the reconcile loop
+            # applies the desired state to every unbanned name, and the apply re-checks that set.
+            return Observed("suspended" if subject.desired == "allowed" else "allowed", detail or "partial")
+        return Observed(state, detail)
 
     async def observe(self, subjects: Sequence[Subject]) -> Mapping[str, Observed]:
         async with self._session() as client:
@@ -177,7 +192,11 @@ class MinecraftAdapter:
         if not all(entry.safe for entry in entries):
             return Observed("error", "bad_identity")
         async with self._session() as client:
-            for entry in entries:
+            # The ban list is read here too, so a ban placed after observe is never touched by this apply.
+            free = _unbanned(entries, self._prefix, await client.command("banlist players"))
+            if not free:
+                return Observed("banned_external")
+            for entry in free:
                 if desired == "allowed":
                     await client.command(f"{entry.command} add {entry.arg}")
                 else:
@@ -185,15 +204,16 @@ class MinecraftAdapter:
                     await client.command(f"kick {entry.listed} {self._kick_message}")
             listed = _parse_whitelist(await client.command("whitelist list"))
             online = _online_names(await client.command("list")) if desired == "suspended" else set()
-        actual = _listed_state(entries, {name.lower() for name in listed})
+        detail = _ban_detail(entries, free)
+        actual = _listed_state(free, {name.lower() for name in listed})
         if actual != desired:
             log_event(log, "not_applied", service="minecraft", outcome="listing_disagrees", level=logging.WARNING)
             return Observed("error", "not_applied")
-        if any(entry.listed.lower() in online for entry in entries):
+        if any(entry.listed.lower() in online for entry in free):
             # The kick did not disconnect the player, so the hold is not in force: report it, never as suspended.
             log_event(log, "still_connected", service="minecraft", outcome="kick_ignored", level=logging.WARNING)
             return Observed("error", "still_connected")
-        return Observed(desired)
+        return Observed(desired, detail)
 
     async def unmanaged_count(self, subjects: Sequence[Subject]) -> int | None:
         known = {entry.listed.lower() for subject in subjects for entry in _entries(subject, self._prefix)}

@@ -111,6 +111,10 @@ true for what the adapter does.
   ban is the fallback, for games with no allowlist.
 - **Ban ownership.** An adapter lifts only bans it placed. Record every ban you place with `own.py`
   (`record_own`, and `forget_own` once it is lifted). A ban with no record is `banned_external`, and nothing lifts it.
+- **A subject with several identities.** A subject may hold more than one identity on a service, such as a Java and a
+  Bedrock name in Minecraft. A ban on one does not shield the others from a hold: the subject is `banned_external`
+  only when every identity is banned, and otherwise the hold or allowance reaches the unbanned identities, reported with
+  the detail `partly_banned`.
 - **Allowlist (permitted-list) mode.** An allowlist is hallpass's to control, so the adapter adds and removes its
   subjects' entries with no ownership record (`minecraft.py`, `valheim.py`). The game's own ban list stays read-only:
   an id on it is `banned_external`, and the adapter never writes it. Entries that name no subject are left alone and
