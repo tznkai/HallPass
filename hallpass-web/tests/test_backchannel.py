@@ -428,3 +428,38 @@ async def test_a_chunked_body_within_the_limit_is_accepted(env: Env):
 
     assert response.status_code == 200
     assert not await is_signed_in(browser)
+
+
+async def test_a_declared_length_over_the_limit_is_refused_before_the_body_is_read(env: Env):
+    """The body here is small and carries a valid token, so only the declared length can refuse it. The stream records
+    whether anything pulled it: the declared length is checked first, so nothing is read."""
+    await bound_adult(env)
+    browser = await browser_signed_in(env, sid=SID)
+    body = urlencode({"logout_token": logout_token(env.clock.now())}).encode()
+    pulled: list[bytes] = []
+
+    async def chunks():
+        pulled.append(body)
+        yield body
+
+    response = await env.client.post(ENDPOINT, content=chunks(),
+                                     headers={"Content-Type": FORM_TYPE, "Content-Length": str(BODY_LIMIT + 1)})
+
+    assert response.status_code == 400
+    assert pulled == []
+    assert await revocation_rows(env) == (0, 0)
+    assert await is_signed_in(browser)
+
+
+async def test_a_body_with_more_fields_than_the_parser_allows_is_a_400_and_records_nothing(env: Env):
+    """Under the body limit, but over FormParser's field limit: the parser's refusal is answered as a 400, not raised."""
+    await bound_adult(env)
+    browser = await browser_signed_in(env, sid=SID)
+    body = ("a&" * 1001).encode()
+    assert len(body) < BODY_LIMIT
+
+    response = await env.client.post(ENDPOINT, content=body, headers={"Content-Type": FORM_TYPE})
+
+    assert response.status_code == 400
+    assert await revocation_rows(env) == (0, 0)
+    assert await is_signed_in(browser)
