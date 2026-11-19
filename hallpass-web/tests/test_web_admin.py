@@ -614,9 +614,14 @@ async def test_the_admin_page_names_the_suspended_holder_of_a_paused_shared_iden
     assert text.SHARED_PAUSE_CAUSES not in holder_page
 
 
-async def test_admin_pages_title_as_hallpass_and_name_the_console_in_the_header(env: Env):
+@pytest.mark.parametrize(("path", "title"), [
+    ("/admin/people", "people"),
+    ("/admin/services", "services"),
+    ("/admin/terms", "terms"),
+])
+async def test_admin_pages_title_as_hallpass_and_name_the_console_in_the_header(env: Env, path: str, title: str):
     """Each page's title reads "HallPass: <page>", and the header names the HallPass Console."""
     await admin_client(env)
-    page = (await env.client.get("/admin/people")).text
-    assert "<title>HallPass: people</title>" in page
+    page = (await env.client.get(path)).text
+    assert f"<title>HallPass: {title}</title>" in page
     assert '<a href="/">HallPass Console</a>' in page
