@@ -887,3 +887,19 @@ async def test_the_registry_needs_a_host_and_an_rcon_password(tmp_path: Path) ->
 def test_the_minecraft_capabilities_claim_suspend_restore_read_and_connected_removal() -> None:
     caps = MinecraftAdapter.capabilities
     assert caps.suspend and caps.restore and caps.read_state and caps.removes_connected
+
+
+# Observe of a partly banned subject: the unbanned names are split between listed and unlisted ----------
+
+async def test_observe_of_a_subject_with_some_names_banned_and_its_unbanned_names_split_carries_partly_banned() -> None:
+    # Steve is listed, Alex is not, and the Bedrock name Tim is banned. The unbanned names are split, so the observation
+    # is the opposite of the desired state, and its detail says that some names are banned.
+    state = server_state(whitelist=["Steve"], bans=[ban(".Tim")])
+    partly = Subject(ref="r1", identities=(Identity(kind=JAVA_KIND, value="Steve"),
+                                           Identity(kind=JAVA_KIND, value="Alex"),
+                                           Identity(kind=BEDROCK_KIND, value="Tim")),
+                     desired="allowed", generation=2)
+    async with rcon_server(state) as port:
+        result = await make_adapter(port).observe([partly])
+    assert result == {"r1": Observed("suspended", "partly_banned")}
+    assert state.whitelist == ["Steve"]
