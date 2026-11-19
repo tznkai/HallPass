@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A small async client for the Authentik API paths hallpass uses.
+"""A small async client for the Authentik API paths the Console uses.
 
 Errors carry a reason and an HTTP status, never a response body or a URL, so they are safe to log and to show.
 """

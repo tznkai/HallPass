@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The monitor API: hallpass's desired state for hallmonitor, and the reports hallmonitor sends back.
+"""The monitor API: the Console's desired state for HallMonitor, and the reports HallMonitor sends back.
 
 It is a separate FastAPI app on its own listener and is never mounted on the public app. Every request is refused with
 403 when it carries a proxy header, and with 401 unless it presents the monitor bearer token. The response models below
@@ -100,7 +100,7 @@ def _touch_contact(conn: sqlite3.Connection, now: datetime) -> None:
 
 
 def _desired_response(services_list: list[services.Service], rows: list[desired.DesiredRow]) -> DesiredResponse:
-    """One entry per monitored service, including those with no subjects, so hallmonitor can count their unmanaged
+    """One entry per monitored service, including those with no subjects, so HallMonitor can count their unmanaged
     entries. Subjects keep the row order: person id within each service."""
     grouped = {service.slug: ServiceDesired(slug=service.slug, adapter=service.adapter, subjects=[])
                for service in services_list}

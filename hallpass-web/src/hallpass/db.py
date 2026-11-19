@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The hallpass database: one serialised SQLite connection, safe startup (quarantine, refusal, backup) and migrations."""
+"""The HallPass Console database: one serialised SQLite connection, safe startup (quarantine, refusal, backup) and migrations."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from hallpass.logs import log_event
 log = logging.getLogger(__name__)
 _MIGRATION = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 SIDE_FILES = ("-wal", "-shm", "-journal")
-# How long a connection waits for another connection's write lock before hallpass refuses (db_unavailable).
+# How long a connection waits for another connection's write lock before the Console refuses (db_unavailable).
 BUSY_TIMEOUT_SECONDS = 5.0
 
 

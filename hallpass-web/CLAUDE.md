@@ -3,15 +3,15 @@ SPDX-FileCopyrightText: 2026 K. Chen
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# Hallpass
+# HallPass Console
 
 Last verified: 2026-11-18
 
 ## Purpose
 
-Hallpass is the registry and authorization web app (FastAPI) in front of Authentik. It records who may use
-which neighbourhood service, and it publishes that desired state for hallmonitor to apply. It holds no
-service credentials. Hallmonitor is the sibling project in this monorepo and reads hallpass's state over
+HallPass Console is the registry and authorization web app (FastAPI) in front of Authentik. It records who may use
+which neighbourhood service, and it publishes that desired state for HallMonitor to apply. It holds no
+service credentials. HallMonitor is the sibling project in this monorepo and reads the Console's state over
 HTTP only.
 
 ## Checks
@@ -29,8 +29,8 @@ CI runs exactly these three checks.
 
 - No imports from sibling projects. `tests/test_repo_hygiene.py` enforces this for `fluxer_panel`,
   `fluxer_client`, the source bot and `hallmonitor`.
-- Hallpass holds no service credentials. Service admin keys live only in hallmonitor.
-- Hallmonitor holds no names, contacts or parent links. Hallpass never sends them to it.
+- HallPass Console holds no service credentials. Service admin keys live only in HallMonitor.
+- HallMonitor holds no names, contacts or parent links. HallPass Console never sends them to it.
 - Monitor API types are duplicated, never shared. Each project keeps its own copy of any type that crosses the
   boundary.
 
@@ -54,10 +54,10 @@ Routes: `GET /api/monitor/v1/desired` and `POST /api/monitor/v1/reports` (204), 
 A desired value's generation goes up when the recomputed value changes, and when a pair is sent again after it was
 dropped. A generation never goes down, so a report carrying an old generation is never confirmed.
 
-`tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example
-of the monitor API bodies. It is byte-identical in hallpass and hallmonitor. A change to it must land in both projects
+`tests/contract/monitor_v1.json`, with its `tests/contract/monitor_v1.json.license` sidecar, is the recorded example of
+the monitor API bodies. It is byte-identical in the Console and HallMonitor. A change to it must land in both projects
 in the same commit, together with the matching change to each project's wire types, so the two copies never drift.
-`tests/test_monitor_api.py` reads it here, and hallmonitor's `tests/test_contract.py` reads its copy.
+`tests/test_monitor_api.py` reads it here, and HallMonitor's `tests/test_contract.py` reads its copy.
 
 ## Logging
 
@@ -93,7 +93,7 @@ URLs, tokens or message content.
 ## Shared identities
 
 - An identity that two or more people hold on one service is paused while any holder is suspended. An allowed holder
-  is not sent it, and a suspended holder is sent it so hallmonitor removes it there. The SSO subject is never shared.
+  is not sent it, and a suspended holder is sent it so HallMonitor removes it there. The SSO subject is never shared.
 - A person holds at most one Steam id and one Fluxer id per service. The registry refuses a second, and stored
   duplicates are flagged on the admin pages. Java names and Bedrock gamertags may repeat.
 

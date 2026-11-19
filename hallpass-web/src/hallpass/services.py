@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The service catalogue and its entitlement rows: which services hallpass gates, and who may use each.
+"""The service catalogue and its entitlement rows: which services the Console gates, and who may use each.
 
 Plain functions over a sqlite3 connection. Callers run them inside `Database.run`. Each mutation writes its own
 `decision_log` row, so it takes the acting admin's person id as `actor_id`. Nothing here calls log_event.
-A service's slug is fixed at creation: forward-auth config, external identities and hallmonitor settings all key on it.
+A service's slug is fixed at creation: forward-auth config, external identities and HallMonitor settings all key on it.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def _service(row: tuple) -> Service:
 
 def is_valid_slug(slug: str) -> bool:
     """A slug is hyphen-separated runs of lower-case letters and digits, up to SLUG_MAX_LENGTH characters. Single
-    hyphens only: hallmonitor reads `HM_SERVICE_<SLUG>__<KEY>` at its first `__`, so a doubled or trailing hyphen
+    hyphens only: HallMonitor reads `HM_SERVICE_<SLUG>__<KEY>` at its first `__`, so a doubled or trailing hyphen
     would give a variable that splits to a different slug."""
     return len(slug) <= SLUG_MAX_LENGTH and _SLUG.fullmatch(slug) is not None
 
@@ -84,7 +84,7 @@ def _checked_slug(slug: str) -> str:
 
 
 def _checked_adapter(adapter: str, auto_suspendable: bool) -> str:
-    """The stored adapter. A service that hallpass can suspend automatically needs an adapter that hallmonitor runs,
+    """The stored adapter. A service that the Console can suspend automatically needs an adapter that HallMonitor runs,
     and the `manual` adapter is the one that never does, so that pair is refused."""
     clean = _clean_adapter(adapter)
     if auto_suspendable and clean == "manual":

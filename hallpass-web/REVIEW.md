@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Review guide
 
-This is the review guide for hallpass. Each `##` topic lists the spots a reviewer should read first, as
+This is the review guide for the Console. Each `##` topic lists the spots a reviewer should read first, as
 references to code. Each reference is written as ``- `path:line` `anchor` — reason``: the path and line
 point at the code, the anchor is text that must appear on that line, and the reason says why the spot
 matters. `tests/test_review_refs.py` checks every reference, so anchors must be updated in the same change
@@ -13,7 +13,7 @@ as the code they cite.
 
 ## Project layout
 
-- `src/hallpass/__init__.py:3` `"""Hallpass:` — the package docstring names the project's role
+- `src/hallpass/__init__.py:3` `"""HallPass Console:` — the package docstring names the project's role
 
 ## Enrollment binding
 
@@ -23,7 +23,7 @@ as the code they cite.
 ## Sessions and CSRF
 
 - `src/hallpass/auth.py:177` `def add_session_middleware` — the session cookie's Secure, SameSite=Lax and cookie domain settings
-- `src/hallpass/auth.py:181` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against hallpass, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
+- `src/hallpass/auth.py:181` `domain=config.cookie_domain)` — known risk: the session cookie is parent-domain scoped, so a service behind Caddy's `reverse_proxy` receives it and could replay it against the Console, admins included, unless the site strips `hallpass_session` from its upstream request as the README Caddy example does
 - `src/hallpass/auth.py:203` `async def require_csrf` — every POST checks the form token and the Origin header
 - `src/hallpass/web/routes_auth.py:48` `def safe_next` — the only check on where a sign-in returns the person to, so it
   must refuse off-site URLs
@@ -131,11 +131,11 @@ as the code they cite.
 
 ## Shared identities
 
-- `src/hallpass/desired.py:151` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities hallmonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
+- `src/hallpass/desired.py:151` `if kind == SSO_SUBJECT_KIND or subject.desired == "suspended"` — decides which identities HallMonitor is sent: an allowed holder never gets a paused shared identity, so a suspension of any holder cannot leave it whitelisted for another
 
 ## Generations
 
-- `src/hallpass/desired.py:214` `generation = _store_generation(conn` — the only route by which `refresh_with_pauses` (and so `refresh`) stores a generation: every subject that is sent to hallmonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
+- `src/hallpass/desired.py:214` `generation = _store_generation(conn` — the only route by which `refresh_with_pauses` (and so `refresh`) stores a generation: every subject that is sent to HallMonitor passes through it on each refresh, and a subject with only paused identities is not sent and is not stored
 - `src/hallpass/desired.py:78` `UPDATE desired_state SET desired` — the bump: a generation goes up by one when the recomputed value differs from the stored one, or when a pair that was not sent is sent again, so a returning pair starts above every generation it had; a sent pair with the same value keeps its generation
 - `src/hallpass/desired.py:97` `UPDATE desired_state SET sent = 0` — a pair that stops being a subject keeps its row, unsent, so its generation stays on record for a return; deleting the row here would let a return start again at a low generation and confirm a late report
 - `src/hallpass/desired.py:233` `AND sent = 1` — `desired_for` reads only sent pairs, so a report for a pair that is not sent is refused, and no page shows the pair as monitored
@@ -166,7 +166,7 @@ as the code they cite.
   lifetime: a session that started before now minus the max age is ended whatever the revocation rows say, so a row
   pruned after its window cannot revive a cookie that a response re-signed with a fresh timestamp
 - `src/hallpass/revocation.py:70` `return started_at is None or row[0] > started_at` — a subject-wide revocation ends only sessions that started before it; a session with no start time is ended by session_ended, which every request uses first
-- `src/hallpass/auth.py:149` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make hallpass fetch the provider's keys more than once per window
+- `src/hallpass/auth.py:149` `cooled = self._last_fetch is None` — every key fetch attempt, forced or not, is at least FORCED_REFRESH_COOLDOWN_SECONDS after the last one, failed ones included, and serialised by a lock, so unauthenticated traffic cannot make the Console fetch the provider's keys more than once per window
   Accepted risk, agreed by the user on 2026-11-18: after a failed key fetch with no keys cached, every logout token
   is refused for up to FORCED_REFRESH_COOLDOWN_SECONDS (60 s). Observed on 2026-11-18: Authentik retried a delivery
   refused with 404 (a wrong Logout URI), and a retry after the URI was restored ended the session. Inferred, not

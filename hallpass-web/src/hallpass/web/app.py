@@ -56,7 +56,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(deps: AppDeps) -> FastAPI:
-    # The API docs are not served: hallpass has no JSON API for browsers to explore.
+    # The API docs are not served: the Console has no JSON API for browsers to explore.
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan)
     app.state.deps = deps
     templates = make_templates()

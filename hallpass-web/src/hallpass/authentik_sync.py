@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2026 K. Chen
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Keeps Authentik in step with hallpass's decisions: each bound person's Fluxer group membership, their fluxer_email
+"""Keeps Authentik in step with the Console's decisions: each bound person's Fluxer group membership, their fluxer_email
 attribute and their active flag. The web routes call it after every change, and resync_loop calls it for everyone.
 
 A failed Authentik call is logged with its reason and left for the next resync. It never raises into the request that
-made the change, because the decision in hallpass is already committed."""
+made the change, because the decision in the Console is already committed."""
 
 from __future__ import annotations
 

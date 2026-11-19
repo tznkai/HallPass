@@ -296,7 +296,7 @@ async def _set_locked(request: Request, admin: Person, person_id: int, *, locked
         return person
 
     person = await deps.db.run(change)
-    # The sync sets the active flag. The lock is kept in hallpass either way; the warning tells the admin when
+    # The sync sets the active flag. The lock is kept in the Console either way; the warning tells the admin when
     # Authentik still needs the change, and the resync loop retries it. Sessions end on a lock even when the sync
     # failed: a session must not outlive the lock because one of the sync's calls was refused.
     synced = await _sync_affected(deps, person_id)
