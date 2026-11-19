@@ -41,10 +41,10 @@ these settings. `<public_url>` is `HALLPASS_PUBLIC_URL`.
   `<public_url>/signed-out`, which the end-session request returns the browser to.
 - Logout method: Back-channel, with the Logout URI `<public_url>/auth/backchannel-logout`.
 - Authentik's worker must reach `<public_url>/auth/backchannel-logout`. The worker posts the logout token to it, not the
-  browser. Delivery is queued, and a delivery that fails is retried several times over a few minutes (seen live,
-  `docs/authentik-notes.md`). Copy the Logout URI exactly: a stray character sends every token to a missing path.
-  The Logout URI is `<public_url>/auth/backchannel-logout`. Do not enter `<public_url>/signed-out` there: that is the
-  post-logout redirect URI, of type Logout, under Redirect URIs.
+  browser. Delivery is queued, and a delivery that fails is retried several times about 30 seconds to 2 minutes apart
+  (seen live, `docs/authentik-notes.md`). Copy the Logout URI exactly: a stray character sends every token to a missing
+  path. The Logout URI is `<public_url>/auth/backchannel-logout`. Do not enter `<public_url>/signed-out` there: that is
+  the post-logout redirect URI, of type Logout, under Redirect URIs.
 
 The endpoint takes only a signed logout token from the provider. It answers 200 once the token is valid and recorded,
 and 400 for anything else, with no body. If a fetch of the provider's keys fails and none are cached, logout tokens are
